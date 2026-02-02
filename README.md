@@ -32,3 +32,6 @@ make run
 ``` csh
 make all
 ```
+### Demo
+<img src=".vscode/Screen Recording 2026-02-01 at 10.01.06 PM.gif" width="1200" >
+
