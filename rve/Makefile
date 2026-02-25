@@ -110,6 +110,13 @@ $(BUILD_DIR)/$(EXE): $(OBJS)
 all: $(BUILD_DIR)/$(EXE)
 	@echo Build complete for $(ECHO_MESSAGE)
 
+web: clean_web
+	@echo Building for Web on $(ECHO_MESSAGE)
+	make -f Makefile.emscripten serve
+
+clean_web:
+	rm -rf web
+
 run: all
 	./$(BUILD_DIR)/$(EXE)
 

@@ -89,7 +89,9 @@ int App::initializeWindow()
     // Setup window context
     window_context = SDL_GL_CreateContext(window);
     SDL_GL_MakeCurrent(window, window_context);
+#ifndef __EMSCRIPTEN__
     SDL_GL_SetSwapInterval(0); // Enable vsync
+#endif
     return 0;
 }
 
@@ -103,7 +105,9 @@ int App::initializeUI()
 
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+#ifndef __EMSCRIPTEN__
     io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable; // Enable Multi-Viewport / Platform Windows
+#endif
 
     // Setup fonts
     io.Fonts->AddFontFromFileTTF(settings.font.c_str(), settings.font_size);
@@ -236,6 +240,7 @@ void App::endRender()
     ////////////// RENDER END //////////////
 
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+#ifndef __EMSCRIPTEN__
     if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
     {
         SDL_Window *backup_current_window = SDL_GL_GetCurrentWindow();
@@ -244,6 +249,7 @@ void App::endRender()
         ImGui::RenderPlatformWindowsDefault();
         SDL_GL_MakeCurrent(backup_current_window, backup_current_context);
     }
+#endif
     SDL_GL_SwapWindow(window);
 }
 
@@ -541,28 +547,40 @@ void App::createDisasm()
     static u32 pc[buffer_size];
 
 
-    ImGui::Begin("Disassembler");
+    ImGui::Begin("Tools");
 
-
-    if (prev_pc != emu.cpu.pc)
+    ImGui::BeginTabBar("Tool Tabs");
+    if (ImGui::BeginTabItem("Disassembler"))
     {
-        // Remove the oldest element by shifting elements down
-        for (size_t i = 0; i < buffer_size - 1; ++i)
+        if (prev_pc != emu.cpu.pc)
         {
-            pc[i] = pc[i + 1];
-            std::memcpy(buf[i], buf[i + 1], sizeof(buf[i]));
+            // Remove the oldest element by shifting elements down
+            for (size_t i = 0; i < buffer_size - 1; ++i)
+            {
+                pc[i] = pc[i + 1];
+                std::memcpy(buf[i], buf[i + 1], sizeof(buf[i]));
+            }
+
+            // Append the new data at the end
+            disasm_inst(buf[buffer_size - 1], sizeof(buf[buffer_size - 1]), rv32, emu.cpu.pc, emu.cpu.memGetWord(emu.cpu.pc));
+            prev_pc = emu.cpu.pc;
+            pc[buffer_size - 1] = prev_pc;
         }
 
-        // Append the new data at the end
-        disasm_inst(buf[buffer_size - 1], sizeof(buf[buffer_size - 1]), rv32, emu.cpu.pc, emu.cpu.memGetWord(emu.cpu.pc));
-        prev_pc = emu.cpu.pc;
-        pc[buffer_size - 1] = prev_pc;
-    }
+        for (int i = 0; i < buffer_size; i++)
+        {
+            ImGui::Text("%08" PRIx32 ":  %s\n", pc[i], buf[i]);
+        }
 
-    for (int i = 0; i < buffer_size; i++)
-    {
-        ImGui::Text("%016" PRIx64 ":  %s\n", pc[i], buf[i]);
+        ImGui::EndTabItem();
     }
+    if (ImGui::BeginTabItem("Source Code"))
+    {
+        ImGui::Button("Compile Code");
+
+        ImGui::EndTabItem();
+    }
+    ImGui::EndTabBar();
 
     ImGui::End();
 }

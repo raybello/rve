@@ -283,7 +283,12 @@ imp(add, FormatR, { // rv32i
         // EXIT CALL
         u32 status = cpu.xreg[10] >> 1;
         printf("ecall EXIT = %d (0x%x)\n", status, status);
+
+        #ifndef __EMSCRIPTEN__
         exit(status);
+        #else
+        printf("Exit called in WebAssembly environment. Ignoring exit and halting execution.\n");
+        #endif
     }
 
     ret->trap.en = true;
@@ -642,10 +647,9 @@ u8 Emulator::getFileSize(const char *path)
 
 u8 Emulator::getMmapPtr(const char *path)
 {
-    size_t filesize = getMmapPtr(path);
-    int fd = open(path, O_RDONLY, 0);
-    // u8 *mmapped_data = mmap(NULL, filesize, PROT_READ, MAP_PRIVATE, fd, 0);
-    // return mmapped_data;
+    // TODO: implement mmap-based file loading
+    (void)path;
+    return 0;
 }
 
 void Emulator::initialize()

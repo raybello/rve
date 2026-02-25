@@ -26,7 +26,7 @@ bool RV32::init(u8 *memory, u8 *dtb, bool debug_mode = false)
 
     debug_single_step = debug_mode;
 
-    dtb = dtb;
+    this->dtb = dtb;
 
     clint.msip = false;
     clint.mtimecmp_lo = 0;

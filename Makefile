@@ -13,5 +13,8 @@ isa:
 isas: 
 	make -C rve isas
 
+web:
+	make -C rve web
+
 clean:
 	make -C rve clean
