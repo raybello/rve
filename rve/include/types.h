@@ -66,6 +66,19 @@ typedef struct {
     u32 mtime_hi;      // Upper 32 bits of machine timer current count.
 } clint_state;
 
+// Structure representing the MMU state (Sv32 page table mode).
+typedef struct {
+    u32 mode;  // 0 = off, 1 = Sv32
+    u32 ppn;   // Root page-table physical page number
+} mmu_state;
+
+// Structure representing the network device state.
+typedef struct {
+    u32 rx_ready;   // Set by guest to signal it is ready to receive
+    u8 *nettx;      // TX DMA buffer (4 KiB)
+    u8 *netrx;      // RX DMA buffer (4 KiB)
+} net_state;
+
 const char rv_regs[32][5] = {
     "zero",
     "ra",

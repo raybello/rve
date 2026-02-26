@@ -112,7 +112,8 @@ public:
     bool ready_to_run = false;
 
     // Clock frequency
-    int clk_freq_sel = 10; // Hertz
+    int clk_freq_sel = -1; // Hertz
+    // int clk_freq_sel = 10; // Hertz
 
     float time_sum = 0;
     float sec_per_cycle = 1.0 / clk_freq_sel;

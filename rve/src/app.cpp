@@ -405,6 +405,13 @@ void App::createTerminal()
 
 void App::createCpuState()
 {
+    ImVec2 window_size = ImGui::GetMainViewport()->Size;
+
+    // Set window size to 50% of main viewport
+    ImGui::SetNextWindowSize(ImVec2(window_size.x * 0.5f, window_size.y - 24), ImGuiCond_FirstUseEver);
+    // Set window position to the right half of the main viewport
+    ImGui::SetNextWindowPos(ImVec2(0, 24), ImGuiCond_FirstUseEver);
+
     ImGui::Begin("CPU State", NULL, ImGuiWindowFlags_MenuBar);
 
     elfFileDialog.Display();
@@ -546,6 +553,12 @@ void App::createDisasm()
     static char buf[buffer_size][80];
     static u32 pc[buffer_size];
 
+    ImVec2 window_size = ImGui::GetMainViewport()->Size; 
+
+    // Set window size to 50% of main viewport
+    ImGui::SetNextWindowSize(ImVec2(window_size.x * 0.5f, window_size.y-24), ImGuiCond_FirstUseEver);
+    // Set window position to the right half of the main viewport
+    ImGui::SetNextWindowPos(ImVec2(window_size.x * 0.5f, 24), ImGuiCond_FirstUseEver);
 
     ImGui::Begin("Tools");
 

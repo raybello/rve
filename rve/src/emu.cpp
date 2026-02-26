@@ -1,4 +1,6 @@
 #include "emu.h"
+#include "net.h"
+#include <sys/time.h>
 
 
 ////////////////////////////////////////////////////////////////
@@ -139,44 +141,62 @@ imp(add, FormatR, { // rv32i
 }) imp(addi, FormatI, { // rv32i
     WR_RD(AS_SIGNED(cpu.xreg[ins.rs1]) + AS_SIGNED(ins.imm));
 }) imp(amoswap_w, FormatR, { // rv32a
-    u32 tmp = cpu.memGetWord(cpu.xreg[ins.rs1]);
-    cpu.memSetWord(cpu.xreg[ins.rs1], cpu.xreg[ins.rs2]);
+    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1], MMU_ACCESS_WRITE);
+    if (ret->trap.en) return;
+    u32 tmp = cpu.memGetWord(addr);
+    cpu.memSetWord(addr, cpu.xreg[ins.rs2]);
     WR_RD(tmp)
 }) imp(amoadd_w, FormatR, { // rv32a
-    u32 tmp = cpu.memGetWord(cpu.xreg[ins.rs1]);
-    cpu.memSetWord(cpu.xreg[ins.rs1], cpu.xreg[ins.rs2] + tmp);
+    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1], MMU_ACCESS_WRITE);
+    if (ret->trap.en) return;
+    u32 tmp = cpu.memGetWord(addr);
+    cpu.memSetWord(addr, cpu.xreg[ins.rs2] + tmp);
     WR_RD(tmp)
 }) imp(amoxor_w, FormatR, { // rv32a
-    u32 tmp = cpu.memGetWord(cpu.xreg[ins.rs1]);
-    cpu.memSetWord(cpu.xreg[ins.rs1], cpu.xreg[ins.rs2] ^ tmp);
+    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1], MMU_ACCESS_WRITE);
+    if (ret->trap.en) return;
+    u32 tmp = cpu.memGetWord(addr);
+    cpu.memSetWord(addr, cpu.xreg[ins.rs2] ^ tmp);
     WR_RD(tmp)
 }) imp(amoand_w, FormatR, { // rv32a
-    u32 tmp = cpu.memGetWord(cpu.xreg[ins.rs1]);
-    cpu.memSetWord(cpu.xreg[ins.rs1], cpu.xreg[ins.rs2] & tmp);
+    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1], MMU_ACCESS_WRITE);
+    if (ret->trap.en) return;
+    u32 tmp = cpu.memGetWord(addr);
+    cpu.memSetWord(addr, cpu.xreg[ins.rs2] & tmp);
     WR_RD(tmp)
 }) imp(amoor_w, FormatR, { // rv32a
-    u32 tmp = cpu.memGetWord(cpu.xreg[ins.rs1]);
-    cpu.memSetWord(cpu.xreg[ins.rs1], cpu.xreg[ins.rs2] | tmp);
+    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1], MMU_ACCESS_WRITE);
+    if (ret->trap.en) return;
+    u32 tmp = cpu.memGetWord(addr);
+    cpu.memSetWord(addr, cpu.xreg[ins.rs2] | tmp);
     WR_RD(tmp)
 }) imp(amomin_w, FormatR, { // rv32a
-    u32 tmp = cpu.memGetWord(cpu.xreg[ins.rs1]);
+    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1], MMU_ACCESS_WRITE);
+    if (ret->trap.en) return;
+    u32 tmp = cpu.memGetWord(addr);
     u32 sec = cpu.xreg[ins.rs2];
-    cpu.memSetWord(cpu.xreg[ins.rs1], AS_SIGNED(sec) < AS_SIGNED(tmp) ? sec : tmp);
+    cpu.memSetWord(addr, AS_SIGNED(sec) < AS_SIGNED(tmp) ? sec : tmp);
     WR_RD(tmp)
 }) imp(amomax_w, FormatR, { // rv32a
-    u32 tmp = cpu.memGetWord(cpu.xreg[ins.rs1]);
+    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1], MMU_ACCESS_WRITE);
+    if (ret->trap.en) return;
+    u32 tmp = cpu.memGetWord(addr);
     u32 sec = cpu.xreg[ins.rs2];
-    cpu.memSetWord(cpu.xreg[ins.rs1], AS_SIGNED(sec) > AS_SIGNED(tmp) ? sec : tmp);
+    cpu.memSetWord(addr, AS_SIGNED(sec) > AS_SIGNED(tmp) ? sec : tmp);
     WR_RD(tmp)
 }) imp(amominu_w, FormatR, { // rv32a
-    u32 tmp = cpu.memGetWord(cpu.xreg[ins.rs1]);
+    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1], MMU_ACCESS_WRITE);
+    if (ret->trap.en) return;
+    u32 tmp = cpu.memGetWord(addr);
     u32 sec = cpu.xreg[ins.rs2];
-    cpu.memSetWord(cpu.xreg[ins.rs1], sec < tmp ? sec : tmp);
+    cpu.memSetWord(addr, sec < tmp ? sec : tmp);
     WR_RD(tmp)
 }) imp(amomaxu_w, FormatR, { // rv32a
-    u32 tmp = cpu.memGetWord(cpu.xreg[ins.rs1]);
+    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1], MMU_ACCESS_WRITE);
+    if (ret->trap.en) return;
+    u32 tmp = cpu.memGetWord(addr);
     u32 sec = cpu.xreg[ins.rs2];
-    cpu.memSetWord(cpu.xreg[ins.rs1], sec > tmp ? sec : tmp);
+    cpu.memSetWord(addr, sec > tmp ? sec : tmp);
     WR_RD(tmp)
 }) imp(and, FormatR, {                                                                                                                                                                           // rv32i
                       WR_RD(cpu.xreg[ins.rs1] & cpu.xreg[ins.rs2])}) imp(andi, FormatI, {                                                                                                        // rv32i
@@ -318,27 +338,37 @@ imp(add, FormatR, { // rv32i
     WR_RD(cpu.pc + 4);
     WR_PC(cpu.xreg[ins.rs1] + ins.imm);
 }) imp(lb, FormatI, { // rv32i
-    u32 tmp = signExtend(cpu.memGetByte(cpu.xreg[ins.rs1] + ins.imm), 8);
+    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_READ);
+    if (ret->trap.en) return;
+    u32 tmp = signExtend(cpu.memGetByte(addr), 8);
     WR_RD(tmp)
 }) imp(lbu, FormatI, { // rv32i
-    u32 tmp = cpu.memGetByte(cpu.xreg[ins.rs1] + ins.imm);
+    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_READ);
+    if (ret->trap.en) return;
+    u32 tmp = cpu.memGetByte(addr);
     WR_RD(tmp)
 }) imp(lh, FormatI, { // rv32i
-    u32 tmp = signExtend(cpu.memGetHalfWord(cpu.xreg[ins.rs1] + ins.imm), 16);
+    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_READ);
+    if (ret->trap.en) return;
+    u32 tmp = signExtend(cpu.memGetHalfWord(addr), 16);
     WR_RD(tmp)
 }) imp(lhu, FormatI, { // rv32i
-    u32 tmp = cpu.memGetHalfWord(cpu.xreg[ins.rs1] + ins.imm);
+    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_READ);
+    if (ret->trap.en) return;
+    u32 tmp = cpu.memGetHalfWord(addr);
     WR_RD(tmp)
 }) imp(lr_w, FormatR, { // rv32a
-    u32 addr = cpu.xreg[ins.rs1];
+    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1], MMU_ACCESS_READ);
+    if (ret->trap.en) return;
     u32 tmp = cpu.memGetWord(addr);
     cpu.reservation_en = true;
     cpu.reservation_addr = addr;
     WR_RD(tmp)
 }) imp(lui, FormatU, {                                    // rv32i
                       WR_RD(ins.imm)}) imp(lw, FormatI, { // rv32i
-    // would need sign extend for xlen > 32
-    u32 tmp = cpu.memGetWord(cpu.xreg[ins.rs1] + ins.imm);
+    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_READ);
+    if (ret->trap.en) return;
+    u32 tmp = cpu.memGetWord(addr);
     WR_RD(tmp)
 }) imp(mret, FormatEmpty, { // system
     u32 newpc = cpu.getCsr(CSR_MEPC, ret);
@@ -399,10 +429,12 @@ imp(add, FormatR, { // rv32i
     }
     WR_RD(result)
 }) imp(sb, FormatS, { // rv32i
-    cpu.memSetByte(cpu.xreg[ins.rs1] + ins.imm, cpu.xreg[ins.rs2]);
+    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_WRITE);
+    if (ret->trap.en) return;
+    cpu.memSetByte(addr, cpu.xreg[ins.rs2]);
 }) imp(sc_w, FormatR, { // rv32a
-    // I'm pretty sure this is not it chief, but it does the trick for now
-    u32 addr = cpu.xreg[ins.rs1];
+    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1], MMU_ACCESS_WRITE);
+    if (ret->trap.en) return;
     if (cpu.reservation_en && cpu.reservation_addr == addr)
     {
         cpu.memSetWord(addr, cpu.xreg[ins.rs2]);
@@ -417,7 +449,9 @@ imp(add, FormatR, { // rv32i
                                     // system
                                     // skip
                                 }) imp(sh, FormatS, { // rv32i
-    cpu.memSetHalfWord(cpu.xreg[ins.rs1] + ins.imm, cpu.xreg[ins.rs2]);
+    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_WRITE);
+    if (ret->trap.en) return;
+    cpu.memSetHalfWord(addr, cpu.xreg[ins.rs2]);
 }) imp(sll, FormatR, {                                                                     // rv32i
                       WR_RD(cpu.xreg[ins.rs1] << cpu.xreg[ins.rs2])}) imp(slli, FormatR, { // rv32i
     u32 shamt = (ins_word >> 20) & 0x1F;
@@ -485,7 +519,9 @@ imp(add, FormatR, { // rv32i
 }) imp(sub, FormatR, { // rv32i
     WR_RD(AS_SIGNED(cpu.xreg[ins.rs1]) - AS_SIGNED(cpu.xreg[ins.rs2]));
 }) imp(sw, FormatS, { // rv32i
-    cpu.memSetWord(cpu.xreg[ins.rs1] + ins.imm, cpu.xreg[ins.rs2]);
+    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_WRITE);
+    if (ret->trap.en) return;
+    cpu.memSetWord(addr, cpu.xreg[ins.rs2]);
 }) imp(uret, FormatEmpty, {
                               // system
                               // unnecessary?
@@ -702,67 +738,88 @@ void Emulator::emulate()
 {
     cpu.tick();
 
-    uint32_t ins_word = 0;
-    ins_ret ret;
+    u32 ins_word = 0;
+    ins_ret ret = cpu.insReturnNoop();
 
     if ((cpu.pc & 0x3) == 0)
     {
-        ins_word = cpu.memGetWord(cpu.pc);
-
-        ret = insSelect(ins_word);
-
-        if (ret.csr_write && !ret.trap.en)
+        // Fetch through MMU
+        u32 phys_pc = cpu.mmuTranslate(&ret, cpu.pc, MMU_ACCESS_FETCH);
+        if (!ret.trap.en)
         {
-            cpu.setCsr(ret.csr_write, ret.csr_val, &ret);
-        }
+            ins_word = cpu.memGetWord(phys_pc);
+            ret = insSelect(ins_word);
 
-        if (!ret.trap.en && ret.write_reg < 32 && ret.write_reg > 0)
-        {
-            cpu.xreg[ret.write_reg] = ret.write_val;
+            if (ret.csr_write && !ret.trap.en)
+                cpu.setCsr(ret.csr_write, ret.csr_val, &ret);
+
+            if (!ret.trap.en && ret.write_reg < 32 && ret.write_reg > 0)
+                cpu.xreg[ret.write_reg] = ret.write_val;
         }
     }
     else
     {
-        ret = cpu.insReturnNoop();
-        ret.trap.en = true;
-        ret.trap.type = trap_InstructionAddressMisaligned;
+        ret.trap.en    = true;
+        ret.trap.type  = trap_InstructionAddressMisaligned;
         ret.trap.value = cpu.pc;
     }
 
     if (debugMode)
         print_inst(cpu.pc, ins_word);
 
-    // if (ret.trap.en)
-    // {
-    //     cpu.handleTrap(&ret, false);
-    // }
-
-    // handle CLINT IRQs
+    // Handle CLINT MSIP
     if (cpu.clint.msip)
-    {
         cpu.csr.data[CSR_MIP] |= MIP_MSIP;
+
+    // Update CLINT mtime from wall-clock (same approach as src_new)
+    {
+        struct timeval now;
+        gettimeofday(&now, NULL);
+        float elapsed = (float)(now.tv_sec - (time_t)cpu.start_time_ref)
+                        + (float)now.tv_usec / 1000000.0f;
+        double mtime = (double)elapsed * 1000000.0 / 20.0 * 0.1;
+        cpu.clint.mtime_lo = (u32)fmod(mtime, 4294967296.0);
+        cpu.clint.mtime_hi = (u32)(mtime / 4294967296.0);
     }
 
-    cpu.clint.mtime_lo++;
-    cpu.clint.mtime_hi += cpu.clint.mtime_lo == 0 ? 1 : 0;
-
-    if (cpu.clint.mtimecmp_lo != 0 && cpu.clint.mtimecmp_hi != 0 && (cpu.clint.mtime_hi > cpu.clint.mtimecmp_hi || (cpu.clint.mtime_hi == cpu.clint.mtimecmp_hi && cpu.clint.mtime_lo >= cpu.clint.mtimecmp_lo)))
+    // Set MTIP when mtime >= mtimecmp (guard: don't fire when mtimecmp == 0)
+    if ((cpu.clint.mtimecmp_lo != 0 || cpu.clint.mtimecmp_hi != 0) &&
+        (cpu.clint.mtime_hi > cpu.clint.mtimecmp_hi ||
+         (cpu.clint.mtime_hi == cpu.clint.mtimecmp_hi &&
+          cpu.clint.mtime_lo >= cpu.clint.mtimecmp_lo)))
     {
         cpu.csr.data[CSR_MIP] |= MIP_MTIP;
     }
 
+    // UART tick + external interrupt
     cpu.uartTick();
-    if (cpu.uart.interrupting)
+    u32 cur_mip = cpu.readCsrRaw(CSR_MIP);
+    if (!(cur_mip & MIP_SEIP))
     {
-        u32 cur_mip = cpu.readCsrRaw(CSR_MIP);
-        cpu.writeCsrRaw(CSR_MIP, cur_mip | MIP_SEIP);
+        if (cpu.uart.interrupting)
+        {
+            cpu.writeCsrRaw(CSR_MIP, cur_mip | MIP_SEIP);
+        }
+        else if (cpu.net.rx_ready)
+        {
+            // Network RX interrupt (no-op when net not connected)
+            uint8_t *net_data = nullptr;
+            uint32_t net_data_len = 0;
+            if (net_recv(&net_data, &net_data_len))
+            {
+                cpu.writeCsrRaw(CSR_MIP, cur_mip | MIP_SEIP);
+                if (net_data_len > 4096u - sizeof(u32))
+                    net_data_len = 4096u - sizeof(u32);
+                *((u32 *)cpu.net.netrx) = net_data_len;
+                memcpy(cpu.net.netrx + sizeof(u32), net_data, net_data_len);
+                cpu.net.rx_ready = 0;
+                free(net_data);
+            }
+        }
     }
 
     cpu.handleIrqAndTrap(&ret);
 
-    // ret.pc_val should be set to pc+4 by default
+    // Advance PC (ret.pc_val defaults to pc+4)
     cpu.pc = ret.pc_val;
-
-    // cpu.dump();
-
 }

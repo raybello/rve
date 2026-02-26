@@ -1,0 +1,2096 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RISC-V Deep Dive — RVE Emulator Internals</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,700;1,400&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+
+/* ===========================================
+   CSS VARIABLES — TERMINAL GREEN THEME
+   =========================================== */
+:root {
+  --bg:          #060C10;
+  --bg2:         #0C1620;
+  --bg3:         #0F1E2E;
+  --green:       #00FF88;
+  --green-dim:   #00CC66;
+  --cyan:        #00BFFF;
+  --amber:       #FFB700;
+  --red:         #FF4560;
+  --text:        #C8D8E4;
+  --text-dim:    #5A7A8A;
+  --border:      rgba(0,255,136,0.15);
+  --glow:        0 0 20px rgba(0,255,136,0.25);
+  --glow-sm:     0 0 8px rgba(0,255,136,0.4);
+
+  --mono:        'JetBrains Mono', monospace;
+  --sans:        'Space Grotesk', sans-serif;
+
+  --title-size:  clamp(2rem, 5.5vw, 5rem);
+  --h2-size:     clamp(1.2rem, 3vw, 2.4rem);
+  --h3-size:     clamp(0.9rem, 2vw, 1.5rem);
+  --body-size:   clamp(0.75rem, 1.4vw, 1.05rem);
+  --code-size:   clamp(0.62rem, 1.15vw, 0.88rem);
+  --small-size:  clamp(0.6rem, 0.9vw, 0.72rem);
+
+  --pad:         clamp(1.5rem, 4vw, 4rem);
+  --gap:         clamp(0.6rem, 1.5vw, 1.5rem);
+  --gap-sm:      clamp(0.3rem, 0.8vw, 0.75rem);
+}
+
+/* ===========================================
+   RESET & BASE
+   =========================================== */
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+html {
+  height:100%;
+  scroll-snap-type: y mandatory;
+  scroll-behavior: smooth;
+  overflow-x: hidden;
+}
+
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+  height: 100%;
+  overflow-x: hidden;
+}
+
+/* Scanline overlay on every slide */
+body::before {
+  content:'';
+  position:fixed; inset:0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.07) 2px,
+    rgba(0,0,0,0.07) 4px
+  );
+  pointer-events:none;
+  z-index:1000;
+}
+
+/* ===========================================
+   SLIDE — VIEWPORT FITTING (MANDATORY)
+   =========================================== */
+.slide {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  scroll-snap-align: start;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  padding: var(--pad);
+}
+
+/* Grid background pattern */
+.slide::after {
+  content:'';
+  position:absolute; inset:0;
+  background-image:
+    linear-gradient(rgba(0,255,136,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,255,136,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events:none;
+}
+
+.slide-inner {
+  position: relative;
+  z-index: 1;
+  flex:1;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  max-height:100%;
+  overflow:hidden;
+  gap: var(--gap);
+}
+
+/* ===========================================
+   TYPOGRAPHY
+   =========================================== */
+h1 {
+  font-size: var(--title-size);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+
+h2 {
+  font-size: var(--h2-size);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+h3 {
+  font-size: var(--h3-size);
+  font-weight: 500;
+  color: var(--green);
+  font-family: var(--mono);
+  letter-spacing: 0.02em;
+}
+
+p, li {
+  font-size: var(--body-size);
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.accent   { color: var(--green); }
+.cyan     { color: var(--cyan); }
+.amber    { color: var(--amber); }
+.red      { color: var(--red); }
+.dim      { color: var(--text-dim); }
+.mono     { font-family: var(--mono); }
+
+.label {
+  font-family: var(--mono);
+  font-size: var(--small-size);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--green);
+  opacity: 0.7;
+  margin-bottom: 0.4em;
+}
+
+/* ===========================================
+   CODE BLOCKS
+   =========================================== */
+.code-block {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--green);
+  border-radius: 6px;
+  padding: clamp(0.5rem,1.2vw,1rem) clamp(0.75rem,1.5vw,1.25rem);
+  font-family: var(--mono);
+  font-size: var(--code-size);
+  line-height: 1.65;
+  overflow: hidden;
+  position: relative;
+}
+
+.code-block .ln { color: var(--text-dim); user-select:none; margin-right:1.2em; }
+.kw  { color: #7B9FFF; }   /* keywords: if, return, switch, case */
+.fn  { color: var(--green); } /* function names */
+.ty  { color: var(--cyan); }  /* types: u32, bool */
+.str { color: var(--amber); } /* strings & hex literals */
+.cm  { color: #3D5A6A; font-style:italic; } /* comments */
+.op  { color: #FF7B5A; }   /* operators */
+.num { color: #B388FF; }   /* numbers */
+
+/* ===========================================
+   BIT DIAGRAMS
+   =========================================== */
+.bit-row {
+  display: flex;
+  gap: 2px;
+  align-items: stretch;
+  font-family: var(--mono);
+  font-size: clamp(0.5rem, 0.9vw, 0.7rem);
+}
+.bit-cell {
+  flex: 1;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  padding: 0.3em 0.1em;
+  text-align: center;
+  line-height: 1.2;
+  min-width: 0;
+}
+.bit-cell.field-r  { background: rgba(0,191,255,0.1); border-color: var(--cyan); color: var(--cyan); }
+.bit-cell.field-g  { background: rgba(0,255,136,0.08); border-color: var(--green); color: var(--green); }
+.bit-cell.field-a  { background: rgba(255,183,0,0.1); border-color: var(--amber); color: var(--amber); }
+.bit-cell.field-p  { background: rgba(255,69,96,0.1); border-color: var(--red); color: var(--red); }
+.bit-label-row { display:flex; gap:2px; }
+.bit-label { flex:1; text-align:center; font-size: clamp(0.45rem,0.7vw,0.58rem); color: var(--text-dim); padding-top:2px; min-width:0; }
+
+/* ===========================================
+   LAYOUT HELPERS
+   =========================================== */
+.cols-2 { display:grid; grid-template-columns:1fr 1fr; gap: var(--gap); align-items:start; }
+.cols-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap: var(--gap); align-items:start; }
+.cols-12 { display:grid; grid-template-columns:1fr 2fr; gap: var(--gap); align-items:start; }
+.cols-21 { display:grid; grid-template-columns:2fr 1fr; gap: var(--gap); align-items:start; }
+
+.card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: clamp(0.6rem,1.2vw,1rem);
+}
+
+.card h3 { margin-bottom: 0.4em; }
+
+ul { list-style: none; }
+ul li { padding: 0.2em 0; }
+ul li::before { content: '▸ '; color: var(--green); font-size: 0.8em; }
+
+/* Horizontal rule */
+.rule {
+  width: 100%;
+  height: 1px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+/* Pill badge */
+.badge {
+  display:inline-block;
+  font-family: var(--mono);
+  font-size: var(--small-size);
+  padding: 0.2em 0.7em;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  letter-spacing: 0.05em;
+}
+.badge.green { color: var(--green); background: rgba(0,255,136,0.08); }
+.badge.cyan  { color: var(--cyan);  background: rgba(0,191,255,0.08); }
+.badge.amber { color: var(--amber); background: rgba(255,183,0,0.08); }
+
+/* ===========================================
+   SLIDE 1 — TITLE
+   =========================================== */
+.title-slide { justify-content: center; }
+
+.title-slide .eyebrow {
+  font-family: var(--mono);
+  font-size: clamp(0.65rem, 1.2vw, 0.9rem);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--green);
+  margin-bottom: clamp(0.5rem,1.5vw,1.5rem);
+}
+
+.title-slide h1 {
+  background: linear-gradient(135deg, #fff 30%, var(--green) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: clamp(0.5rem,1vw,1rem);
+}
+
+.title-slide .subtitle {
+  font-size: clamp(0.9rem, 2vw, 1.5rem);
+  color: var(--text-dim);
+  font-weight: 300;
+  margin-bottom: clamp(1rem,2.5vw,2.5rem);
+}
+
+.title-tags { display:flex; gap:0.6em; flex-wrap:wrap; }
+
+.corner-decor {
+  position:absolute;
+  bottom: var(--pad);
+  right: var(--pad);
+  opacity:0.15;
+  font-family: var(--mono);
+  font-size: clamp(5rem,12vw,14rem);
+  font-weight:700;
+  color: var(--green);
+  line-height:1;
+  pointer-events:none;
+  z-index:0;
+}
+
+/* ===========================================
+   SLIDE NAV & PROGRESS
+   =========================================== */
+.progress-bar {
+  position:fixed;
+  top:0; left:0;
+  width:0%;
+  height:3px;
+  background: linear-gradient(90deg, var(--green), var(--cyan));
+  z-index:2000;
+  transition: width 0.3s ease;
+  box-shadow: var(--glow-sm);
+}
+
+.nav-dots {
+  position:fixed;
+  right: clamp(0.75rem,1.5vw,1.25rem);
+  top:50%;
+  transform:translateY(-50%);
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  z-index:2000;
+}
+
+.nav-dot {
+  width:5px; height:5px;
+  border-radius:50%;
+  background: var(--text-dim);
+  cursor:pointer;
+  transition: all 0.2s;
+}
+.nav-dot.active {
+  background: var(--green);
+  box-shadow: var(--glow-sm);
+  transform: scale(1.4);
+}
+
+/* Slide counter */
+.slide-num {
+  position:absolute;
+  bottom: clamp(1rem,2vw,1.5rem);
+  right: var(--pad);
+  font-family: var(--mono);
+  font-size: var(--small-size);
+  color: var(--text-dim);
+  z-index:1;
+}
+
+/* ===========================================
+   ANIMATIONS
+   =========================================== */
+.reveal {
+  opacity:0;
+  transform: translateY(18px);
+  transition: opacity 0.55s cubic-bezier(0.16,1,0.3,1),
+              transform 0.55s cubic-bezier(0.16,1,0.3,1);
+}
+.slide.visible .reveal { opacity:1; transform:translateY(0); }
+.slide.visible .reveal:nth-child(1) { transition-delay:0.05s; }
+.slide.visible .reveal:nth-child(2) { transition-delay:0.12s; }
+.slide.visible .reveal:nth-child(3) { transition-delay:0.19s; }
+.slide.visible .reveal:nth-child(4) { transition-delay:0.26s; }
+.slide.visible .reveal:nth-child(5) { transition-delay:0.33s; }
+.slide.visible .reveal:nth-child(6) { transition-delay:0.40s; }
+
+/* ===========================================
+   RESPONSIVE BREAKPOINTS
+   =========================================== */
+@media (max-height:700px) {
+  :root { --pad:clamp(1rem,3vw,2rem); --gap:clamp(0.4rem,1vw,1rem); }
+}
+@media (max-height:600px) {
+  :root { --title-size:clamp(1.5rem,5vw,3rem); --pad:clamp(0.75rem,2.5vw,1.5rem); }
+  .nav-dots { display:none; }
+}
+@media (max-height:500px) {
+  :root { --code-size:clamp(0.55rem,1vw,0.7rem); }
+}
+@media (max-width:768px) {
+  .cols-2, .cols-12, .cols-21 { grid-template-columns:1fr; }
+  .cols-3 { grid-template-columns:1fr 1fr; }
+}
+
+@media (prefers-reduced-motion:reduce) {
+  .reveal { transition:opacity 0.3s ease; transform:none; }
+  html { scroll-behavior:auto; }
+}
+
+/* ===========================================
+   FORMAT ANIMATION — Bit-field decode highlight
+   Each .fmt-bf cell starts dimmed; JS adds
+   .fmt-seen (visited) and .fmt-active (current)
+   =========================================== */
+.fmt-bf {
+  opacity: 0.2;
+  transition: opacity 0.45s ease, box-shadow 0.45s ease;
+}
+.fmt-bf.fmt-seen   { opacity: 0.45; }
+.fmt-bf.fmt-active { opacity: 1; }
+.fmt-bf.field-a.fmt-active { box-shadow: 0 0 18px rgba(255,183,0,0.75); }
+.fmt-bf.field-r.fmt-active { box-shadow: 0 0 18px rgba(0,191,255,0.75); }
+.fmt-bf.field-g.fmt-active { box-shadow: 0 0 18px rgba(0,255,136,0.75); }
+.fmt-bf.field-p.fmt-active { box-shadow: 0 0 18px rgba(255,69,96,0.75); }
+
+/* Animated info panel on the right side of each format slide */
+.fmt-panel {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--green);
+  border-radius: 8px;
+  padding: var(--gap);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  transition: border-left-color 0.45s ease;
+}
+.fmt-panel .fp-name {
+  font-family: var(--mono);
+  font-size: var(--h3-size);
+  font-weight: 600;
+  margin-bottom: 0.3em;
+}
+.fmt-panel .fp-desc {
+  font-size: var(--body-size);
+  line-height: 1.5;
+  color: var(--text);
+}
+.fmt-panel .fp-val {
+  font-family: var(--mono);
+  color: var(--amber);
+  font-size: var(--code-size);
+  margin-top: 0.5em;
+  display: block;
+  padding: 0.25em 0.6em;
+  background: var(--bg3);
+  border-radius: 4px;
+}
+.fmt-panel .fp-init {
+  color: var(--text-dim);
+  font-style: italic;
+  font-size: var(--body-size);
+}
+
+</style>
+</head>
+<body>
+
+<div class="progress-bar" id="progress"></div>
+<nav class="nav-dots" id="navDots"></nav>
+
+<!-- =====================================================
+     SLIDE 1 — TITLE
+     ===================================================== -->
+<section class="slide title-slide" id="s1">
+  <div class="slide-inner">
+    <p class="eyebrow reveal">RVE · Source Code Walkthrough</p>
+    <h1 class="reveal">RISC-V<br>Emulator<br>Internals</h1>
+    <p class="subtitle reveal">Instruction decoding, CSRs, traps &amp; IRQs, ELF loading</p>
+    <div class="title-tags reveal">
+      <span class="badge green">RV32I</span>
+      <span class="badge green">RV32M</span>
+      <span class="badge green">RV32A</span>
+      <span class="badge cyan">Supervisor</span>
+      <span class="badge amber">Machine</span>
+    </div>
+  </div>
+  <div class="corner-decor">RV</div>
+  <div class="slide-num">01 / 25</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 2 — AGENDA
+     ===================================================== -->
+<section class="slide" id="s2">
+  <div class="slide-inner">
+    <p class="label reveal">Roadmap</p>
+    <h2 class="reveal">What we're covering</h2>
+    <div class="rule reveal"></div>
+    <div class="cols-2 reveal">
+      <div>
+        <ul>
+          <li><span class="accent mono">RV32 CPU State</span> — registers, memory, peripherals</li>
+          <li><span class="accent mono">Instruction Formats</span> — R / I / S / B / U / J</li>
+          <li><span class="accent mono">Format Parsers</span> — bit-field extraction</li>
+          <li><span class="accent mono">insSelect()</span> — masked-switch dispatch</li>
+          <li><span class="accent mono">imp / run Macros</span> — instruction DSL</li>
+        </ul>
+      </div>
+      <div>
+        <ul>
+          <li><span class="cyan mono">CSR Architecture</span> — 4096-entry flat array</li>
+          <li><span class="cyan mono">Shadow Registers</span> — SSTATUS ⊂ MSTATUS</li>
+          <li><span class="cyan mono">Privilege Levels</span> — U / S / M modes</li>
+          <li><span class="amber mono">Traps &amp; IRQs</span> — delegation, TVEC, EPC</li>
+          <li><span class="amber mono">ELF Loading</span> — section mapping to RAM</li>
+        </ul>
+      </div>
+    </div>
+    <div class="card reveal" style="margin-top:auto">
+      <p style="font-size:var(--small-size); color:var(--text-dim)">
+        Extension set: <span class="accent mono">0b01000000000101000001000100000001</span> (MISA) →
+        <span class="accent">I</span>nteger · <span class="accent">M</span>ultiply ·
+        <span class="accent">A</span>tomic · <span class="cyan">S</span>upervisor ·
+        <span class="amber">U</span>ser · <span class="amber">M</span>achine
+      </p>
+    </div>
+  </div>
+  <div class="slide-num">02 / 25</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 3 — CPU STATE
+     ===================================================== -->
+<section class="slide" id="s3">
+  <div class="slide-inner">
+    <p class="label reveal">rv32.h · types.h</p>
+    <h2 class="reveal">RV32 CPU State</h2>
+    <div class="rule reveal"></div>
+    <div class="cols-2 reveal">
+      <div class="code-block">
+        <span class="ty">class</span> <span class="fn">RV32</span> {<br>
+        &nbsp;<span class="ty">u32</span> clock;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="cm">// cycle counter</span><br>
+        &nbsp;<span class="ty">u32</span> xreg[<span class="num">32</span>];&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="cm">// x0 – x31</span><br>
+        &nbsp;<span class="ty">u32</span> pc;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="cm">// program counter</span><br>
+        &nbsp;<span class="ty">u8</span>  *mem;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="cm">// 128 MiB flat RAM</span><br>
+        &nbsp;<span class="ty">csr_state</span> csr;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="cm">// 4096 × u32</span><br>
+        &nbsp;<span class="ty">clint_state</span> clint;&nbsp;&nbsp;&nbsp;&nbsp;<span class="cm">// timer</span><br>
+        &nbsp;<span class="ty">uart_state</span> uart;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="cm">// serial</span><br>
+        &nbsp;<span class="ty">bool</span> reservation_en;&nbsp;<span class="cm">// LR/SC</span><br>
+        };
+      </div>
+      <div style="display:flex; flex-direction:column; gap:var(--gap-sm)">
+        <div class="card">
+          <h3>Reset state</h3>
+          <p style="font-size:var(--small-size)">
+            pc = <span class="amber mono">0x80000000</span> · all xreg = 0<br>
+            x11 = <span class="amber mono">0x1020</span> (DTB ptr for Linux)<br>
+            privilege = <span class="accent mono">PRIV_MACHINE (3)</span>
+          </p>
+        </div>
+        <div class="card">
+          <h3>Memory model</h3>
+          <p style="font-size:var(--small-size)">
+            Single flat 128 MiB <span class="mono">uint8_t</span> heap.<br>
+            Address bit 31 distinguishes RAM from MMIO.<br>
+            <span class="mono">addr &amp; 0x7FFFFFFF</span> = physical offset.
+          </p>
+        </div>
+        <div class="card">
+          <h3>ins_ret — result bus</h3>
+          <p style="font-size:var(--small-size)">
+            <span class="mono">write_reg / write_val</span> — rd writeback<br>
+            <span class="mono">pc_val</span> — next PC<br>
+            <span class="mono">csr_write / csr_val</span> — CSR update<br>
+            <span class="mono">trap</span> — exception/IRQ signal
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">03 / 25</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 4 — INSTRUCTION FORMATS OVERVIEW
+     ===================================================== -->
+<section class="slide" id="s4">
+  <div class="slide-inner">
+    <p class="label reveal">ISA · 6 formats — slides 05–10 decode each one</p>
+    <h2 class="reveal">The 6 RISC-V Instruction Formats</h2>
+    <div class="rule reveal"></div>
+    <div style="display:flex; flex-direction:column; gap:clamp(0.28rem,0.65vw,0.58rem)" class="reveal">
+
+      <!-- R-type -->
+      <div>
+        <p class="dim" style="font-size:var(--small-size); margin-bottom:2px">R-type &nbsp;<span class="badge cyan">add sub mul div and or xor sll sra …</span></p>
+        <div class="bit-row">
+          <div class="bit-cell field-a" style="flex:7">funct7<br><span class="dim">[31:25]</span></div>
+          <div class="bit-cell field-r" style="flex:5">rs2<br><span class="dim">[24:20]</span></div>
+          <div class="bit-cell field-r" style="flex:5">rs1<br><span class="dim">[19:15]</span></div>
+          <div class="bit-cell field-g" style="flex:3">fn3<br><span class="dim">[14:12]</span></div>
+          <div class="bit-cell field-r" style="flex:5">rd<br><span class="dim">[11:7]</span></div>
+          <div class="bit-cell field-p" style="flex:7">opcode<br><span class="dim">[6:0]</span></div>
+        </div>
+      </div>
+      <!-- I-type -->
+      <div>
+        <p class="dim" style="font-size:var(--small-size); margin-bottom:2px">I-type &nbsp;<span class="badge green">addi lw jalr ecall csrrw …</span></p>
+        <div class="bit-row">
+          <div class="bit-cell field-a" style="flex:12">imm[11:0]<br><span class="dim">[31:20]</span></div>
+          <div class="bit-cell field-r" style="flex:5">rs1<br><span class="dim">[19:15]</span></div>
+          <div class="bit-cell field-g" style="flex:3">fn3<br><span class="dim">[14:12]</span></div>
+          <div class="bit-cell field-r" style="flex:5">rd<br><span class="dim">[11:7]</span></div>
+          <div class="bit-cell field-p" style="flex:7">opcode<br><span class="dim">[6:0]</span></div>
+        </div>
+      </div>
+      <!-- S-type -->
+      <div>
+        <p class="dim" style="font-size:var(--small-size); margin-bottom:2px">S-type &nbsp;<span class="badge amber">sw sh sb</span></p>
+        <div class="bit-row">
+          <div class="bit-cell field-a" style="flex:7">imm[11:5]<br><span class="dim">[31:25]</span></div>
+          <div class="bit-cell field-r" style="flex:5">rs2<br><span class="dim">[24:20]</span></div>
+          <div class="bit-cell field-r" style="flex:5">rs1<br><span class="dim">[19:15]</span></div>
+          <div class="bit-cell field-g" style="flex:3">fn3<br><span class="dim">[14:12]</span></div>
+          <div class="bit-cell field-a" style="flex:5">imm[4:0]<br><span class="dim">[11:7]</span></div>
+          <div class="bit-cell field-p" style="flex:7">opcode<br><span class="dim">[6:0]</span></div>
+        </div>
+      </div>
+      <!-- B-type -->
+      <div>
+        <p class="dim" style="font-size:var(--small-size); margin-bottom:2px">B-type &nbsp;<span class="badge green">beq bne blt bge bltu bgeu</span></p>
+        <div class="bit-row">
+          <div class="bit-cell field-a" style="flex:1">12<br><span class="dim">[31]</span></div>
+          <div class="bit-cell field-a" style="flex:6">10:5<br><span class="dim">[30:25]</span></div>
+          <div class="bit-cell field-r" style="flex:5">rs2<br><span class="dim">[24:20]</span></div>
+          <div class="bit-cell field-r" style="flex:5">rs1<br><span class="dim">[19:15]</span></div>
+          <div class="bit-cell field-g" style="flex:3">fn3<br><span class="dim">[14:12]</span></div>
+          <div class="bit-cell field-a" style="flex:4">4:1<br><span class="dim">[11:8]</span></div>
+          <div class="bit-cell field-a" style="flex:1">11<br><span class="dim">[7]</span></div>
+          <div class="bit-cell field-p" style="flex:7">opcode<br><span class="dim">[6:0]</span></div>
+        </div>
+      </div>
+      <!-- U-type -->
+      <div>
+        <p class="dim" style="font-size:var(--small-size); margin-bottom:2px">U-type &nbsp;<span class="badge cyan">lui auipc</span></p>
+        <div class="bit-row">
+          <div class="bit-cell field-a" style="flex:20">imm[31:12]<br><span class="dim">[31:12]</span></div>
+          <div class="bit-cell field-r" style="flex:5">rd<br><span class="dim">[11:7]</span></div>
+          <div class="bit-cell field-p" style="flex:7">opcode<br><span class="dim">[6:0]</span></div>
+        </div>
+      </div>
+      <!-- J-type -->
+      <div>
+        <p class="dim" style="font-size:var(--small-size); margin-bottom:2px">J-type &nbsp;<span class="badge amber">jal</span></p>
+        <div class="bit-row">
+          <div class="bit-cell field-a" style="flex:1">20<br><span class="dim">[31]</span></div>
+          <div class="bit-cell field-a" style="flex:10">10:1<br><span class="dim">[30:21]</span></div>
+          <div class="bit-cell field-a" style="flex:1">11<br><span class="dim">[20]</span></div>
+          <div class="bit-cell field-a" style="flex:8">19:12<br><span class="dim">[19:12]</span></div>
+          <div class="bit-cell field-r" style="flex:5">rd<br><span class="dim">[11:7]</span></div>
+          <div class="bit-cell field-p" style="flex:7">opcode<br><span class="dim">[6:0]</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="card reveal" style="margin-top:auto">
+      <p style="font-size:var(--small-size); color:var(--text-dim)">
+        <span class="accent mono">rs1</span> is always [19:15] · <span class="accent mono">rs2</span> always [24:20] · <span class="accent mono">opcode</span> always [6:0] — consistent field positions let the decoder read registers before knowing the instruction type. Next: dedicated animated slides for each format.
+      </p>
+    </div>
+  </div>
+  <div class="slide-num">04 / 25</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 05 — R-TYPE FORMAT (ANIMATED)
+     ===================================================== -->
+<section class="slide fmt-slide" id="s5r" data-format="r-type">
+  <div class="slide-inner">
+    <div class="cols-2 reveal">
+      <!-- LEFT: bit diagram + example -->
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <div>
+          <p class="label">R-type &nbsp;<span class="badge cyan">add sub and or xor sll srl sra mul div rem …</span></p>
+          <h2 style="font-size:var(--h3-size)">Register–Register Operations</h2>
+        </div>
+        <div class="code-block" style="font-size:var(--small-size)">
+          <span class="dim">ADD x2, x1, x3</span> &nbsp;→&nbsp; <span class="amber">0x00308133</span><br>
+          <span class="dim">funct7&nbsp; rs2&nbsp;&nbsp; rs1&nbsp; fn3 rd&nbsp;&nbsp; opcode</span><br>
+          <span class="amber">0000000</span> <span class="cyan">00011</span> <span class="cyan">00001</span> <span class="green">000</span> <span class="cyan">00010</span> <span class="red">0110011</span>
+        </div>
+        <div>
+          <div class="bit-row">
+            <div class="bit-cell field-a fmt-bf" data-group="0" style="flex:7">funct7<br><span class="dim">[31:25]</span></div>
+            <div class="bit-cell field-r fmt-bf" data-group="1" style="flex:5">rs2<br><span class="dim">[24:20]</span></div>
+            <div class="bit-cell field-r fmt-bf" data-group="2" style="flex:5">rs1<br><span class="dim">[19:15]</span></div>
+            <div class="bit-cell field-g fmt-bf" data-group="3" style="flex:3">fn3<br><span class="dim">[14:12]</span></div>
+            <div class="bit-cell field-r fmt-bf" data-group="4" style="flex:5">rd<br><span class="dim">[11:7]</span></div>
+            <div class="bit-cell field-p fmt-bf" data-group="5" style="flex:7">opcode<br><span class="dim">[6:0]</span></div>
+          </div>
+          <div class="bit-label-row" style="margin-top:3px">
+            <div class="bit-label" style="flex:7">31 ‥ 25</div>
+            <div class="bit-label" style="flex:5">24 ‥ 20</div>
+            <div class="bit-label" style="flex:5">19 ‥ 15</div>
+            <div class="bit-label" style="flex:3">14‥12</div>
+            <div class="bit-label" style="flex:5">11 ‥ 7</div>
+            <div class="bit-label" style="flex:7">6 ‥ 0</div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Decode order</h3>
+          <p style="font-size:var(--small-size)">opcode → funct3 → funct7 → rd → rs1 → rs2<br>
+          <span class="dim">funct7 bit[30]: 0=ADD, 1=SUB (also SRL vs SRA)</span></p>
+        </div>
+      </div>
+      <!-- RIGHT: animated decode panel -->
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <p class="label">Current field</p>
+        <div class="fmt-panel">
+          <p class="fp-init">Fields highlight left → right as each is decoded…</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">05 / 25</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 06 — I-TYPE FORMAT (ANIMATED)
+     ===================================================== -->
+<section class="slide fmt-slide" id="s5i" data-format="i-type">
+  <div class="slide-inner">
+    <div class="cols-2 reveal">
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <div>
+          <p class="label">I-type &nbsp;<span class="badge green">addi lw jalr ecall slli csrrw …</span></p>
+          <h2 style="font-size:var(--h3-size)">Immediate Operations</h2>
+        </div>
+        <div class="code-block" style="font-size:var(--small-size)">
+          <span class="dim">ADDI x1, x2, 42</span> &nbsp;→&nbsp; <span class="amber">0x02A10093</span><br>
+          <span class="dim">imm[11:0]&nbsp;&nbsp;&nbsp;&nbsp; rs1&nbsp; fn3 rd&nbsp;&nbsp; opcode</span><br>
+          <span class="amber">000000101010</span> <span class="cyan">00010</span> <span class="green">000</span> <span class="cyan">00001</span> <span class="red">0010011</span>
+        </div>
+        <div>
+          <div class="bit-row">
+            <div class="bit-cell field-a fmt-bf" data-group="0" style="flex:12">imm[11:0]<br><span class="dim">[31:20]</span></div>
+            <div class="bit-cell field-r fmt-bf" data-group="1" style="flex:5">rs1<br><span class="dim">[19:15]</span></div>
+            <div class="bit-cell field-g fmt-bf" data-group="2" style="flex:3">fn3<br><span class="dim">[14:12]</span></div>
+            <div class="bit-cell field-r fmt-bf" data-group="3" style="flex:5">rd<br><span class="dim">[11:7]</span></div>
+            <div class="bit-cell field-p fmt-bf" data-group="4" style="flex:7">opcode<br><span class="dim">[6:0]</span></div>
+          </div>
+          <div class="bit-label-row" style="margin-top:3px">
+            <div class="bit-label" style="flex:12">31 ‥‥‥‥‥‥‥‥‥ 20</div>
+            <div class="bit-label" style="flex:5">19 ‥ 15</div>
+            <div class="bit-label" style="flex:3">14‥12</div>
+            <div class="bit-label" style="flex:5">11 ‥ 7</div>
+            <div class="bit-label" style="flex:7">6 ‥ 0</div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>4 opcode families use I-type</h3>
+          <p style="font-size:var(--small-size)">
+            <span class="mono amber">0010011</span>=OP-IMM &nbsp;
+            <span class="mono amber">0000011</span>=LOAD &nbsp;
+            <span class="mono amber">1100111</span>=JALR &nbsp;
+            <span class="mono amber">1110011</span>=SYSTEM
+          </p>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <p class="label">Current field</p>
+        <div class="fmt-panel">
+          <p class="fp-init">Fields highlight left → right as each is decoded…</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">06 / 25</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 07 — S-TYPE FORMAT (ANIMATED)
+     ===================================================== -->
+<section class="slide fmt-slide" id="s5s" data-format="s-type">
+  <div class="slide-inner">
+    <div class="cols-2 reveal">
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <div>
+          <p class="label">S-type &nbsp;<span class="badge amber">sw sh sb</span></p>
+          <h2 style="font-size:var(--h3-size)">Store Operations — Split Immediate</h2>
+        </div>
+        <div class="code-block" style="font-size:var(--small-size)">
+          <span class="dim">SW x3, 8(x1)</span> &nbsp;→&nbsp; <span class="amber">0x0030A423</span><br>
+          <span class="dim">imm[11:5] rs2&nbsp;&nbsp; rs1&nbsp; fn3 imm[4:0] opcode</span><br>
+          <span class="amber">0000000</span> <span class="cyan">00011</span> <span class="cyan">00001</span> <span class="green">010</span> <span class="amber">01000</span> <span class="red">0100011</span>
+        </div>
+        <div>
+          <div class="bit-row">
+            <div class="bit-cell field-a fmt-bf" data-group="0" style="flex:7">imm[11:5]<br><span class="dim">[31:25]</span></div>
+            <div class="bit-cell field-r fmt-bf" data-group="1" style="flex:5">rs2<br><span class="dim">[24:20]</span></div>
+            <div class="bit-cell field-r fmt-bf" data-group="2" style="flex:5">rs1<br><span class="dim">[19:15]</span></div>
+            <div class="bit-cell field-g fmt-bf" data-group="3" style="flex:3">fn3<br><span class="dim">[14:12]</span></div>
+            <div class="bit-cell field-a fmt-bf" data-group="0" style="flex:5">imm[4:0]<br><span class="dim">[11:7]</span></div>
+            <div class="bit-cell field-p fmt-bf" data-group="4" style="flex:7">opcode<br><span class="dim">[6:0]</span></div>
+          </div>
+          <div class="bit-label-row" style="margin-top:3px">
+            <div class="bit-label" style="flex:7">31 ‥ 25</div>
+            <div class="bit-label" style="flex:5">24 ‥ 20</div>
+            <div class="bit-label" style="flex:5">19 ‥ 15</div>
+            <div class="bit-label" style="flex:3">14‥12</div>
+            <div class="bit-label" style="flex:5">11 ‥ 7</div>
+            <div class="bit-label" style="flex:7">6 ‥ 0</div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Why split the immediate?</h3>
+          <p style="font-size:var(--small-size)">
+            Keeping rs1/rs2 at fixed positions [19:15] and [24:20] means the register file can be read before the opcode is fully decoded.
+            The immediate is split to accommodate this — <span class="dim">no rd field exists</span>.
+          </p>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <p class="label">Current field</p>
+        <div class="fmt-panel">
+          <p class="fp-init">Both amber imm fields highlight together — they form one immediate…</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">07 / 25</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 08 — B-TYPE FORMAT (ANIMATED)
+     ===================================================== -->
+<section class="slide fmt-slide" id="s5b" data-format="b-type">
+  <div class="slide-inner">
+    <div class="cols-2 reveal">
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <div>
+          <p class="label">B-type &nbsp;<span class="badge green">beq bne blt bge bltu bgeu</span></p>
+          <h2 style="font-size:var(--h3-size)">Branch — Scrambled Immediate</h2>
+        </div>
+        <div class="code-block" style="font-size:var(--small-size)">
+          <span class="dim">BEQ x1, x2, 8</span> &nbsp;→&nbsp; <span class="amber">0x00208463</span><br>
+          <span class="dim">12 10:5&nbsp; rs2&nbsp;&nbsp; rs1&nbsp; fn3 4:1&nbsp; 11 opcode</span><br>
+          <span class="amber">0</span> <span class="amber">000000</span> <span class="cyan">00010</span> <span class="cyan">00001</span> <span class="green">000</span> <span class="amber">0100</span> <span class="amber">0</span> <span class="red">1100011</span>
+        </div>
+        <div>
+          <div class="bit-row">
+            <div class="bit-cell field-a fmt-bf" data-group="0" style="flex:1">12<br><span class="dim">[31]</span></div>
+            <div class="bit-cell field-a fmt-bf" data-group="0" style="flex:6">10:5<br><span class="dim">[30:25]</span></div>
+            <div class="bit-cell field-r fmt-bf" data-group="1" style="flex:5">rs2<br><span class="dim">[24:20]</span></div>
+            <div class="bit-cell field-r fmt-bf" data-group="2" style="flex:5">rs1<br><span class="dim">[19:15]</span></div>
+            <div class="bit-cell field-g fmt-bf" data-group="3" style="flex:3">fn3<br><span class="dim">[14:12]</span></div>
+            <div class="bit-cell field-a fmt-bf" data-group="0" style="flex:4">4:1<br><span class="dim">[11:8]</span></div>
+            <div class="bit-cell field-a fmt-bf" data-group="0" style="flex:1">11<br><span class="dim">[7]</span></div>
+            <div class="bit-cell field-p fmt-bf" data-group="4" style="flex:7">opcode<br><span class="dim">[6:0]</span></div>
+          </div>
+          <div class="bit-label-row" style="margin-top:3px">
+            <div class="bit-label" style="flex:1">31</div>
+            <div class="bit-label" style="flex:6">30 ‥ 25</div>
+            <div class="bit-label" style="flex:5">24 ‥ 20</div>
+            <div class="bit-label" style="flex:5">19 ‥ 15</div>
+            <div class="bit-label" style="flex:3">14‥12</div>
+            <div class="bit-label" style="flex:4">11‥8</div>
+            <div class="bit-label" style="flex:1">7</div>
+            <div class="bit-label" style="flex:7">6 ‥ 0</div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Reassembly</h3>
+          <p style="font-size:var(--small-size)">
+            <span class="mono accent">{imm[12], imm[11], imm[10:5], imm[4:1], 0}</span><br>
+            offset = 8 = <span class="mono amber">0b00001000</span> · range: ±4 KiB
+          </p>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <p class="label">Current field</p>
+        <div class="fmt-panel">
+          <p class="fp-init">All 4 amber imm fragments highlight together…</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">08 / 25</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 09 — U-TYPE FORMAT (ANIMATED)
+     ===================================================== -->
+<section class="slide fmt-slide" id="s5u" data-format="u-type">
+  <div class="slide-inner">
+    <div class="cols-2 reveal">
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <div>
+          <p class="label">U-type &nbsp;<span class="badge cyan">lui auipc</span></p>
+          <h2 style="font-size:var(--h3-size)">Upper Immediate — Simplest Format</h2>
+        </div>
+        <div class="code-block" style="font-size:var(--small-size)">
+          <span class="dim">LUI x5, 0xABCDE</span> &nbsp;→&nbsp; <span class="amber">0xABCDE2B7</span><br>
+          <span class="dim">imm[31:12]&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; rd&nbsp;&nbsp; opcode</span><br>
+          <span class="amber">10101011110011011110</span> <span class="cyan">00101</span> <span class="red">0110111</span>
+        </div>
+        <div>
+          <div class="bit-row">
+            <div class="bit-cell field-a fmt-bf" data-group="0" style="flex:20">imm[31:12]<br><span class="dim">[31:12]</span></div>
+            <div class="bit-cell field-r fmt-bf" data-group="1" style="flex:5">rd<br><span class="dim">[11:7]</span></div>
+            <div class="bit-cell field-p fmt-bf" data-group="2" style="flex:7">opcode<br><span class="dim">[6:0]</span></div>
+          </div>
+          <div class="bit-label-row" style="margin-top:3px">
+            <div class="bit-label" style="flex:20">31 ‥‥‥‥‥‥‥‥‥‥‥‥‥‥‥‥ 12</div>
+            <div class="bit-label" style="flex:5">11 ‥ 7</div>
+            <div class="bit-label" style="flex:7">6 ‥ 0</div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>32-bit constant synthesis</h3>
+          <p style="font-size:var(--small-size)">
+            <span class="mono accent">LUI x1, hi20</span> &nbsp;+&nbsp; <span class="mono accent">ADDI x1, x1, lo12</span><br>
+            If lo12 bit[11] = 1 (negative), hi20 must be incremented by 1 to compensate sign-extension.<br>
+            <span class="mono accent">AUIPC</span> adds the upper immediate to PC instead — useful for PIC code.
+          </p>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <p class="label">Current field</p>
+        <div class="fmt-panel">
+          <p class="fp-init">Fields highlight left → right as each is decoded…</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">09 / 25</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 10 — J-TYPE FORMAT (ANIMATED)
+     ===================================================== -->
+<section class="slide fmt-slide" id="s5j" data-format="j-type">
+  <div class="slide-inner">
+    <div class="cols-2 reveal">
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <div>
+          <p class="label">J-type &nbsp;<span class="badge amber">jal</span></p>
+          <h2 style="font-size:var(--h3-size)">Jump and Link — Most Scrambled</h2>
+        </div>
+        <div class="code-block" style="font-size:var(--small-size)">
+          <span class="dim">JAL x1, 8</span> &nbsp;→&nbsp; <span class="amber">0x004000EF</span><br>
+          <span class="dim">20 imm[10:1]&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 11 imm[19:12] rd&nbsp;&nbsp; opcode</span><br>
+          <span class="amber">0</span> <span class="amber">0000000100</span> <span class="amber">0</span> <span class="amber">00000000</span> <span class="cyan">00001</span> <span class="red">1101111</span>
+        </div>
+        <div>
+          <div class="bit-row">
+            <div class="bit-cell field-a fmt-bf" data-group="0" style="flex:1">20<br><span class="dim">[31]</span></div>
+            <div class="bit-cell field-a fmt-bf" data-group="0" style="flex:10">10:1<br><span class="dim">[30:21]</span></div>
+            <div class="bit-cell field-a fmt-bf" data-group="0" style="flex:1">11<br><span class="dim">[20]</span></div>
+            <div class="bit-cell field-a fmt-bf" data-group="0" style="flex:8">19:12<br><span class="dim">[19:12]</span></div>
+            <div class="bit-cell field-r fmt-bf" data-group="1" style="flex:5">rd<br><span class="dim">[11:7]</span></div>
+            <div class="bit-cell field-p fmt-bf" data-group="2" style="flex:7">opcode<br><span class="dim">[6:0]</span></div>
+          </div>
+          <div class="bit-label-row" style="margin-top:3px">
+            <div class="bit-label" style="flex:1">31</div>
+            <div class="bit-label" style="flex:10">30 ‥‥‥‥‥‥ 21</div>
+            <div class="bit-label" style="flex:1">20</div>
+            <div class="bit-label" style="flex:8">19 ‥‥‥ 12</div>
+            <div class="bit-label" style="flex:5">11 ‥ 7</div>
+            <div class="bit-label" style="flex:7">6 ‥ 0</div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Reassembly &amp; range</h3>
+          <p style="font-size:var(--small-size)">
+            <span class="mono accent">{imm[20], imm[19:12], imm[11], imm[10:1], 0}</span><br>
+            offset=8: imm[10:1]=0000000100 (bit 3 set) → PC+8.<br>
+            Range: ±1 MiB · x0 as rd = unconditional jump (no link).
+          </p>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <p class="label">Current field</p>
+        <div class="fmt-panel">
+          <p class="fp-init">All 4 imm fragments highlight together then rd and opcode…</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">10 / 25</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 11 — FORMAT PARSERS
+     ===================================================== -->
+<section class="slide" id="s11">
+  <div class="slide-inner">
+    <p class="label reveal">emu.cpp</p>
+    <h2 class="reveal">Format Parsers — Bit Extraction</h2>
+    <div class="rule reveal"></div>
+    <div class="cols-2 reveal">
+      <div>
+        <p class="dim" style="font-size:var(--small-size); margin-bottom:0.4em">parse_FormatR — register–register ops</p>
+        <div class="code-block">
+<span class="ty">FormatR</span> <span class="fn">parse_FormatR</span>(<span class="ty">u32</span> word) {<br>
+&nbsp;<span class="ty">FormatR</span> ret;<br>
+&nbsp;ret.rd  = (word <span class="op">&gt;&gt;</span>  <span class="num">7</span>) <span class="op">&amp;</span> <span class="num">0x1f</span>;<br>
+&nbsp;ret.rs1 = (word <span class="op">&gt;&gt;</span> <span class="num">15</span>) <span class="op">&amp;</span> <span class="num">0x1f</span>;<br>
+&nbsp;ret.rs2 = (word <span class="op">&gt;&gt;</span> <span class="num">20</span>) <span class="op">&amp;</span> <span class="num">0x1f</span>;<br>
+&nbsp;ret.rs3 = (word <span class="op">&gt;&gt;</span> <span class="num">27</span>) <span class="op">&amp;</span> <span class="num">0x1f</span>;<br>
+&nbsp;<span class="kw">return</span> ret;<br>
+}
+        </div>
+      </div>
+      <div>
+        <p class="dim" style="font-size:var(--small-size); margin-bottom:0.4em">parse_FormatB — branches (scattered imm)</p>
+        <div class="code-block">
+<span class="ty">FormatB</span> <span class="fn">parse_FormatB</span>(<span class="ty">u32</span> word) {<br>
+&nbsp;<span class="ty">FormatB</span> ret;<br>
+&nbsp;ret.rs1 = (word <span class="op">&gt;&gt;</span> <span class="num">15</span>) <span class="op">&amp;</span> <span class="num">0x1f</span>;<br>
+&nbsp;ret.rs2 = (word <span class="op">&gt;&gt;</span> <span class="num">20</span>) <span class="op">&amp;</span> <span class="num">0x1f</span>;<br>
+&nbsp;ret.imm =<br>
+&nbsp;&nbsp;(word <span class="op">&amp;</span> <span class="num">0x80000000</span> ? <span class="num">0xfffff000</span>:<span class="num">0</span>)<br>
+&nbsp;&nbsp;<span class="op">|</span> ((word <span class="op">&lt;&lt;</span>  <span class="num">4</span>) <span class="op">&amp;</span> <span class="num">0x00000800</span>) <span class="cm">// bit 11</span><br>
+&nbsp;&nbsp;<span class="op">|</span> ((word <span class="op">&gt;&gt;</span> <span class="num">20</span>) <span class="op">&amp;</span> <span class="num">0x000007e0</span>) <span class="cm">// bits 10:5</span><br>
+&nbsp;&nbsp;<span class="op">|</span> ((word <span class="op">&gt;&gt;</span>  <span class="num">7</span>) <span class="op">&amp;</span> <span class="num">0x0000001e</span>); <span class="cm">// bits 4:1</span><br>
+&nbsp;<span class="kw">return</span> ret;<br>
+}
+        </div>
+      </div>
+    </div>
+    <div class="card reveal">
+      <p style="font-size:var(--small-size)">
+        All 6 format parsers are <strong>pre-called once per instruction</strong> at the top of <span class="mono accent">insSelect()</span> before any dispatch —
+        the compiler eliminates dead computations. B/J immediates reassemble scattered bits with
+        <span class="mono">sign-extension</span> via the sign bit mask <span class="amber mono">0x80000000</span>.
+      </p>
+    </div>
+  </div>
+  <div class="slide-num">11 / 25</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 12 — insSelect DISPATCH
+     ===================================================== -->
+<section class="slide" id="s12">
+  <div class="slide-inner">
+    <p class="label reveal">emu.cpp · insSelect()</p>
+    <h2 class="reveal">Multi-Stage Masked Dispatch</h2>
+    <div class="rule reveal"></div>
+    <div class="cols-12 reveal">
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <div class="card">
+          <h3>Why masks?</h3>
+          <p style="font-size:var(--small-size)">Different instructions occupy different bit fields. A single opcode byte isn't enough — <span class="accent mono">funct3</span> and <span class="accent mono">funct7</span> disambiguate. Each switch uses a mask that exposes only the relevant discriminator bits.</p>
+        </div>
+        <div class="card">
+          <h3>7 mask stages</h3>
+          <ul style="font-size:var(--small-size)">
+            <li><span class="mono amber">0x0000007f</span> — opcode only (lui, jal)</li>
+            <li><span class="mono amber">0x0000707f</span> — opcode + funct3 (addi, lw…)</li>
+            <li><span class="mono amber">0xf800707f</span> — AMO ops</li>
+            <li><span class="mono amber">0xfc00707f</span> — shift immediates</li>
+            <li><span class="mono amber">0xfe00707f</span> — R-type arithmetic</li>
+            <li><span class="mono amber">0xfe007fff</span> — sfence.vma</li>
+            <li><span class="mono amber">0xffffffff</span> — exact match (ecall, mret…)</li>
+          </ul>
+        </div>
+      </div>
+      <div class="code-block">
+<span class="ty">ins_ret</span> <span class="fn">Emulator::insSelect</span>(<span class="ty">u32</span> ins_word) {<br>
+&nbsp;<span class="ty">u32</span> ins_masked;<br>
+&nbsp;<span class="ty">ins_ret</span> ret = cpu.<span class="fn">insReturnNoop</span>();<br>
+<br>
+&nbsp;<span class="cm">// Pre-parse ALL formats upfront</span><br>
+&nbsp;<span class="ty">FormatR</span>   ins_FormatR   = <span class="fn">parse_FormatR</span>(ins_word);<br>
+&nbsp;<span class="ty">FormatI</span>   ins_FormatI   = <span class="fn">parse_FormatI</span>(ins_word);<br>
+&nbsp;<span class="ty">FormatCSR</span> ins_FormatCSR = <span class="fn">parse_FormatCSR</span>(ins_word);<br>
+&nbsp;<span class="cm">// ...S, U, J, B, Empty...</span><br>
+<br>
+&nbsp;<span class="cm">// CSR pre-read if this looks like a CSR op</span><br>
+&nbsp;<span class="kw">if</span> ((ins_word <span class="op">&amp;</span> <span class="num">0x73</span>) == <span class="num">0x73</span>)<br>
+&nbsp;&nbsp;ins_FormatCSR.value = cpu.<span class="fn">getCsr</span>(ins_FormatCSR.csr, <span class="op">&amp;</span>ret);<br>
+<br>
+&nbsp;ins_masked = ins_word <span class="op">&amp;</span> <span class="num">0x0000007f</span>;<br>
+&nbsp;<span class="kw">switch</span> (ins_masked) {<br>
+&nbsp;&nbsp;<span class="fn">run</span>(auipc, <span class="num">0x00000017</span>, ins_FormatU)<br>
+&nbsp;&nbsp;<span class="fn">run</span>(jal,   <span class="num">0x0000006f</span>, ins_FormatJ)<br>
+&nbsp;&nbsp;<span class="fn">run</span>(lui,   <span class="num">0x00000037</span>, ins_FormatU)<br>
+&nbsp;}<br>
+&nbsp;ins_masked = ins_word <span class="op">&amp;</span> <span class="num">0x0000707f</span>;<br>
+&nbsp;<span class="kw">switch</span> (ins_masked) { <span class="cm">/* addi, lw, beq, csrrw … */</span> }<br>
+&nbsp;<span class="cm">// …5 more masked switch stages…</span><br>
+}
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">12 / 25</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 13 — imp/run MACRO DSL
+     ===================================================== -->
+<section class="slide" id="s13">
+  <div class="slide-inner">
+    <p class="label reveal">emu.cpp · Macro DSL</p>
+    <h2 class="reveal">Instruction Implementation Pattern</h2>
+    <div class="rule reveal"></div>
+    <div class="cols-2 reveal">
+      <div>
+        <p class="dim" style="font-size:var(--small-size); margin-bottom:0.4em">The three core macros</p>
+        <div class="code-block">
+<span class="cm">// Define an instruction handler</span><br>
+<span class="kw">#define</span> <span class="fn">imp</span>(name, fmt_t, code)<br>
+&nbsp;<span class="ty">void</span> <span class="fn">Emulator::emu_##name</span>(<span class="ty">u32</span> w,<br>
+&nbsp;&nbsp;<span class="ty">ins_ret</span> *ret, fmt_t ins) { code }<br>
+<br>
+<span class="cm">// Dispatch: match → call → return</span><br>
+<span class="kw">#define</span> <span class="fn">run</span>(name, opcode, insf)<br>
+&nbsp;<span class="kw">case</span> opcode:<br>
+&nbsp;&nbsp;<span class="kw">if</span> (debugMode) ins_p(name)<br>
+&nbsp;&nbsp;<span class="fn">emu_##name</span>(ins_word, &ret, insf);<br>
+&nbsp;&nbsp;<span class="kw">return</span> ret;<br>
+<br>
+<span class="cm">// Result write helpers</span><br>
+<span class="kw">#define</span> <span class="fn">WR_RD</span>(code) {<br>
+&nbsp;ret-&gt;write_reg = ins.rd;<br>
+&nbsp;ret-&gt;write_val = AS_UNSIGNED(code); }<br>
+<span class="kw">#define</span> <span class="fn">WR_PC</span>(code) { ret-&gt;pc_val = code; }<br>
+<span class="kw">#define</span> <span class="fn">WR_CSR</span>(code) {<br>
+&nbsp;ret-&gt;csr_write = ins.csr; ret-&gt;csr_val = code; }
+        </div>
+      </div>
+      <div>
+        <p class="dim" style="font-size:var(--small-size); margin-bottom:0.4em">Implementations look like inline specs</p>
+        <div class="code-block">
+<span class="fn">imp</span>(add, FormatR, {           <span class="cm">// rv32i</span><br>
+&nbsp;<span class="fn">WR_RD</span>(<span class="fn">AS_SIGNED</span>(cpu.xreg[ins.rs1])<br>
+&nbsp;&nbsp;+ <span class="fn">AS_SIGNED</span>(cpu.xreg[ins.rs2]));<br>
+})<br>
+<br>
+<span class="fn">imp</span>(beq, FormatB, {           <span class="cm">// rv32i</span><br>
+&nbsp;<span class="kw">if</span> (cpu.xreg[ins.rs1]<br>
+&nbsp;&nbsp;== cpu.xreg[ins.rs2])<br>
+&nbsp;&nbsp;&nbsp;<span class="fn">WR_PC</span>(cpu.pc + ins.imm);<br>
+})<br>
+<br>
+<span class="fn">imp</span>(amoswap_w, FormatR, {    <span class="cm">// rv32a</span><br>
+&nbsp;<span class="ty">u32</span> tmp = cpu.<span class="fn">memGetWord</span>(cpu.xreg[ins.rs1]);<br>
+&nbsp;cpu.<span class="fn">memSetWord</span>(cpu.xreg[ins.rs1], cpu.xreg[ins.rs2]);<br>
+&nbsp;<span class="fn">WR_RD</span>(tmp)<br>
+})
+        </div>
+        <div class="card" style="margin-top:var(--gap-sm)">
+          <p style="font-size:var(--small-size)">
+            <span class="mono accent">AS_SIGNED</span> / <span class="mono accent">AS_UNSIGNED</span> reinterpret bits without conversion — pointer cast trick to avoid UB via <span class="mono">*(int32_t*)&amp;val</span>.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">13 / 25</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 14 — ins_ret RESULT PATTERN
+     ===================================================== -->
+<section class="slide" id="s14">
+  <div class="slide-inner">
+    <p class="label reveal">types.h · emu.cpp</p>
+    <h2 class="reveal">ins_ret — The Result Bus</h2>
+    <div class="rule reveal"></div>
+    <div class="cols-12 reveal">
+      <div class="code-block">
+<span class="ty">typedef struct</span> {<br>
+&nbsp;<span class="ty">u32</span> write_reg; <span class="cm">// rd index</span><br>
+&nbsp;<span class="ty">u32</span> write_val; <span class="cm">// rd value</span><br>
+&nbsp;<span class="ty">u32</span> pc_val;    <span class="cm">// next PC</span><br>
+&nbsp;<span class="ty">u32</span> csr_write; <span class="cm">// CSR addr</span><br>
+&nbsp;<span class="ty">u32</span> csr_val;   <span class="cm">// CSR value</span><br>
+&nbsp;<span class="ty">Trap</span> trap;     <span class="cm">// exception</span><br>
+} <span class="ty">ins_ret</span>;<br>
+<br>
+<span class="ty">typedef struct</span> {<br>
+&nbsp;<span class="ty">bool</span> en;    <span class="cm">// pending?</span><br>
+&nbsp;<span class="ty">bool</span> irq;   <span class="cm">// interrupt?</span><br>
+&nbsp;<span class="ty">u32</span> type;  <span class="cm">// cause code</span><br>
+&nbsp;<span class="ty">u32</span> value; <span class="cm">// tval</span><br>
+} <span class="ty">Trap</span>;
+      </div>
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <div class="card">
+          <h3>Noop default</h3>
+          <p style="font-size:var(--small-size)">
+            <span class="mono accent">insReturnNoop()</span> zeroes the struct and sets <span class="mono">pc_val = pc + 4</span>.
+            Instruction handlers only populate fields they affect — most only call <span class="mono">WR_RD</span>.
+          </p>
+        </div>
+        <div class="card">
+          <h3>Commit phase</h3>
+          <p style="font-size:var(--small-size)">
+            After <span class="mono accent">insSelect()</span> returns, <span class="mono">emulate()</span> commits all side-effects:
+            apply <span class="mono">write_reg</span>, advance <span class="mono">pc</span>, write CSR, then call
+            <span class="mono accent">handleIrqAndTrap()</span> to check for exceptions.
+          </p>
+        </div>
+        <div class="card">
+          <h3>x0 hard-wired zero</h3>
+          <p style="font-size:var(--small-size)">
+            <span class="mono amber">write_reg == 0</span> → write is silently discarded at commit time.
+            No special casing inside instruction implementations needed.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">14 / 25</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 15 — CSR ARCHITECTURE
+     ===================================================== -->
+<section class="slide" id="s15">
+  <div class="slide-inner">
+    <p class="label reveal">rv32.h · rv32.cpp</p>
+    <h2 class="reveal">CSR Architecture</h2>
+    <div class="rule reveal"></div>
+    <div class="cols-2 reveal">
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <div class="code-block">
+<span class="ty">typedef struct</span> {<br>
+&nbsp;<span class="ty">u32</span> data[<span class="num">4096</span>]; <span class="cm">// all CSRs by addr</span><br>
+&nbsp;<span class="ty">u32</span> privilege;  <span class="cm">// current mode</span><br>
+} <span class="ty">csr_state</span>;<br>
+<br>
+<span class="cm">// Address encodes privilege in [9:8]</span><br>
+<span class="cm">// and read-only in [11:10] == 0b11</span><br>
+<span class="ty">bool</span> <span class="fn">hasCsrAccessPrivilege</span>(<span class="ty">u32</span> addr) {<br>
+&nbsp;<span class="ty">u32</span> req = (addr <span class="op">&gt;&gt;</span> <span class="num">8</span>) <span class="op">&amp;</span> <span class="num">0x3</span>;<br>
+&nbsp;<span class="kw">return</span> req <span class="op">&lt;=</span> csr.privilege;<br>
+}<br>
+<br>
+<span class="ty">void</span> <span class="fn">setCsr</span>(...) {<br>
+&nbsp;<span class="ty">bool</span> ro = ((addr <span class="op">&gt;&gt;</span> <span class="num">10</span>) <span class="op">&amp;</span> <span class="num">0x3</span>) == <span class="num">0x3</span>;<br>
+&nbsp;<span class="kw">if</span> (ro) → trap_IllegalInstruction<br>
+}
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <div class="card">
+          <h3>Address space layout</h3>
+          <ul style="font-size:var(--small-size)">
+            <li><span class="mono amber">0x000–0x0FF</span> — User CSRs (U-mode)</li>
+            <li><span class="mono amber">0x100–0x1FF</span> — Supervisor CSRs</li>
+            <li><span class="mono amber">0x300–0x3FF</span> — Machine CSRs</li>
+            <li><span class="mono amber">0xC00–0xCFF</span> — User read-only counters</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Key registers</h3>
+          <ul style="font-size:var(--small-size)">
+            <li><span class="mono green">MSTATUS  0x300</span> — global interrupt enable, MPP/SPP</li>
+            <li><span class="mono green">MTVEC    0x305</span> — trap handler address</li>
+            <li><span class="mono green">MEPC     0x341</span> — return address after trap</li>
+            <li><span class="mono green">MCAUSE   0x342</span> — trap cause code</li>
+            <li><span class="mono green">MIE/MIP  0x304/0x344</span> — enable/pending</li>
+            <li><span class="mono cyan">MIDELEG  0x303</span> — delegate to S-mode</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">15 / 25</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 16 — CSR SHADOW REGISTERS
+     ===================================================== -->
+<section class="slide" id="s16">
+  <div class="slide-inner">
+    <p class="label reveal">rv32.cpp · readCsrRaw / writeCsrRaw</p>
+    <h2 class="reveal">Shadow Registers — SSTATUS ⊂ MSTATUS</h2>
+    <div class="rule reveal"></div>
+    <div class="cols-2 reveal">
+      <div>
+        <p class="dim" style="font-size:var(--small-size); margin-bottom:0.4em">Supervisor sees a masked view of machine state</p>
+        <div class="code-block">
+<span class="ty">u32</span> <span class="fn">readCsrRaw</span>(<span class="ty">u32</span> addr) {<br>
+&nbsp;<span class="kw">switch</span> (addr) {<br>
+&nbsp;<span class="kw">case</span> CSR_SSTATUS:<br>
+&nbsp;&nbsp;<span class="cm">// SSTATUS is MSTATUS & legal S-bits</span><br>
+&nbsp;&nbsp;<span class="kw">return</span> csr.data[CSR_MSTATUS]<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&amp; <span class="num">0x000de162</span>;<br>
+&nbsp;<span class="kw">case</span> CSR_SIE:<br>
+&nbsp;&nbsp;<span class="kw">return</span> csr.data[CSR_MIE] <span class="op">&amp;</span> <span class="num">0x222</span>;<br>
+&nbsp;<span class="kw">case</span> CSR_SIP:<br>
+&nbsp;&nbsp;<span class="kw">return</span> csr.data[CSR_MIP] <span class="op">&amp;</span> <span class="num">0x222</span>;<br>
+&nbsp;<span class="kw">case</span> CSR_CYCLE:<br>
+&nbsp;&nbsp;<span class="kw">return</span> clock;<br>
+&nbsp;<span class="kw">case</span> CSR_TIME:<br>
+&nbsp;&nbsp;<span class="kw">return</span> clint.mtime_lo;<br>
+&nbsp;<span class="kw">default</span>:<br>
+&nbsp;&nbsp;<span class="kw">return</span> csr.data[addr <span class="op">&amp;</span> <span class="num">0xffff</span>];<br>
+&nbsp;}<br>
+}
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <div class="card">
+          <h3>The 0x000de162 mask</h3>
+          <p style="font-size:var(--small-size)">
+            Exposes only the SSTATUS-legal bits of MSTATUS:
+            <span class="mono">SD, MXR, SUM, XS, FS, SPP, SPIE, SIE</span>.
+            M-mode bits (MPP, MPIE, MIE) are hidden from S-mode.
+          </p>
+        </div>
+        <div class="card">
+          <h3>0x222 delegation mask (SIE/SIP)</h3>
+          <p style="font-size:var(--small-size)">
+            Bit pattern <span class="mono amber">0b001000100010</span> exposes only
+            <span class="mono">SEIP (bit 9)</span>, <span class="mono">STIP (bit 5)</span>, <span class="mono">SSIP (bit 1)</span>
+            — the supervisor-visible interrupt bits within MIE/MIP.
+          </p>
+        </div>
+        <div class="card">
+          <h3>No separate storage</h3>
+          <p style="font-size:var(--small-size)">
+            SSTATUS, SIE, SIP have <strong>no backing storage</strong>.
+            They're computed on read and written back as masked updates to the M-mode registers.
+            One source of truth.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">16 / 25</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 17 — CSR INSTRUCTIONS
+     ===================================================== -->
+<section class="slide" id="s17">
+  <div class="slide-inner">
+    <p class="label reveal">emu.cpp · CSRRW / CSRRS / CSRRC</p>
+    <h2 class="reveal">CSR Instructions — Atomic Read-Modify-Write</h2>
+    <div class="rule reveal"></div>
+    <div class="cols-2 reveal">
+      <div>
+        <div class="code-block">
+<span class="cm">// CSRRW rd, csr, rs1</span><br>
+<span class="cm">// rd = CSR; CSR = rs1</span><br>
+<span class="fn">imp</span>(csrrw, FormatCSR, {<br>
+&nbsp;<span class="fn">WR_CSR</span>(cpu.xreg[ins.rs]);<br>
+&nbsp;<span class="fn">WR_RD</span>(ins.value)   <span class="cm">// pre-read</span><br>
+})<br>
+<br>
+<span class="cm">// CSRRS rd, csr, rs1</span><br>
+<span class="cm">// rd = CSR; if rs1 != 0: CSR |= rs1</span><br>
+<span class="fn">imp</span>(csrrs, FormatCSR, {<br>
+&nbsp;<span class="ty">u32</span> rs = cpu.xreg[ins.rs];<br>
+&nbsp;<span class="kw">if</span> (rs != <span class="num">0</span>) <span class="fn">WR_CSR</span>(ins.value <span class="op">|</span> rs);<br>
+&nbsp;<span class="fn">WR_RD</span>(ins.value)<br>
+})<br>
+<br>
+<span class="cm">// CSRRC rd, csr, rs1</span><br>
+<span class="cm">// rd = CSR; if rs1 != 0: CSR &amp;= ~rs1</span><br>
+<span class="fn">imp</span>(csrrc, FormatCSR, {<br>
+&nbsp;<span class="ty">u32</span> rs = cpu.xreg[ins.rs];<br>
+&nbsp;<span class="kw">if</span> (rs != <span class="num">0</span>) <span class="fn">WR_CSR</span>(ins.value <span class="op">&amp;</span> <span class="op">~</span>rs);<br>
+&nbsp;<span class="fn">WR_RD</span>(ins.value)<br>
+})
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <div class="card">
+          <h3>Pre-read in insSelect</h3>
+          <p style="font-size:var(--small-size)">
+            Before any instruction runs, <span class="mono accent">ins_FormatCSR.value</span>
+            is populated by calling <span class="mono">getCsr()</span>. Instructions receive
+            the <em>old value</em> in <span class="mono">ins.value</span> — enabling atomic semantics.
+          </p>
+        </div>
+        <div class="card">
+          <h3>Atomicity model</h3>
+          <p style="font-size:var(--small-size)">
+            Read happens before dispatch. Write is committed via <span class="mono">WR_CSR</span>
+            in the result struct after the instruction returns. The old value goes to <span class="mono">rd</span>
+            simultaneously — true read-modify-write with no window.
+          </p>
+        </div>
+        <div class="card">
+          <h3>Immediate variants</h3>
+          <p style="font-size:var(--small-size)">
+            <span class="mono cyan">CSRRWI / CSRRSI / CSRRCI</span> use a 5-bit zero-extended
+            immediate from <span class="mono">ins.rs</span> instead of a register value.
+            Same atomic semantics, different source.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">17 / 25</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 18 — PRIVILEGE LEVELS
+     ===================================================== -->
+<section class="slide" id="s18">
+  <div class="slide-inner">
+    <p class="label reveal">rv32.h · rv32.cpp</p>
+    <h2 class="reveal">Privilege Levels</h2>
+    <div class="rule reveal"></div>
+    <div class="cols-3 reveal">
+      <div class="card" style="border-color:rgba(255,69,96,0.3)">
+        <h3 style="color:var(--red)">Machine (3)</h3>
+        <ul style="font-size:var(--small-size)">
+          <li>Boots here</li>
+          <li>Full hardware access</li>
+          <li>Owns M-mode CSRs</li>
+          <li>Final trap handler</li>
+          <li>Controls delegation</li>
+        </ul>
+      </div>
+      <div class="card" style="border-color:rgba(0,191,255,0.3)">
+        <h3 style="color:var(--cyan)">Supervisor (1)</h3>
+        <ul style="font-size:var(--small-size)">
+          <li>OS kernel runs here</li>
+          <li>Sees shadow CSRs</li>
+          <li>Handles delegated traps</li>
+          <li>Controls U-mode</li>
+          <li>SATP / MMU (TODO)</li>
+        </ul>
+      </div>
+      <div class="card" style="border-color:rgba(0,255,136,0.3)">
+        <h3>User (0)</h3>
+        <ul style="font-size:var(--small-size)">
+          <li>User processes</li>
+          <li>No privileged ops</li>
+          <li>ecall → S/M trap</li>
+          <li>No direct CSR access</li>
+          <li>Sandboxed by OS</li>
+        </ul>
+      </div>
+    </div>
+    <div class="rule reveal"></div>
+    <div class="cols-2 reveal">
+      <div class="code-block">
+<span class="kw">#define</span> PRIV_USER       <span class="num">0</span><br>
+<span class="kw">#define</span> PRIV_SUPERVISOR <span class="num">1</span><br>
+<span class="kw">#define</span> PRIV_MACHINE    <span class="num">3</span><br>
+<br>
+<span class="cm">// Stored in csr.privilege</span><br>
+<span class="cm">// Changed by traps and xRET</span>
+      </div>
+      <div class="card">
+        <p style="font-size:var(--small-size)">
+          <span class="mono accent">mret</span> / <span class="mono accent">sret</span> restore privilege from <span class="mono">MSTATUS.MPP</span> / <span class="mono">SSTATUS.SPP</span> and re-enable interrupts via <span class="mono">MPIE→MIE</span>.
+          Delegation registers (<span class="mono amber">MIDELEG</span> / <span class="mono amber">MEDELEG</span>) control which privilege level handles each trap — checked in <span class="mono">handleTrap()</span>.
+        </p>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">18 / 25</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 19 — handleIrqAndTrap
+     ===================================================== -->
+<section class="slide" id="s19">
+  <div class="slide-inner">
+    <p class="label reveal">rv32.cpp · handleIrqAndTrap()</p>
+    <h2 class="reveal">Trap &amp; IRQ Entry Point</h2>
+    <div class="rule reveal"></div>
+    <div class="cols-12 reveal">
+      <div>
+        <div class="card" style="margin-bottom:var(--gap-sm)">
+          <h3>Called every instruction</h3>
+          <p style="font-size:var(--small-size)">After commit, <span class="mono accent">handleIrqAndTrap(&amp;ret)</span> checks: did the instruction raise a trap? Are any interrupts pending and enabled?</p>
+        </div>
+        <div class="card" style="margin-bottom:var(--gap-sm)">
+          <h3>Priority: traps first</h3>
+          <p style="font-size:var(--small-size)">If <span class="mono">ret.trap.en</span> is set, skip IRQ scan — handle the synchronous exception. IRQs only checked when no synchronous trap fired.</p>
+        </div>
+        <div class="card">
+          <h3>MIP scan order</h3>
+          <p style="font-size:var(--small-size)">
+            <span class="mono amber">MEIP → MSIP → MTIP → SEIP → SSIP → STIP</span>
+            — first match wins. MIP bit is cleared after handling.
+          </p>
+        </div>
+      </div>
+      <div class="code-block">
+<span class="ty">void</span> <span class="fn">handleIrqAndTrap</span>(<span class="ty">ins_ret</span> *ret) {<br>
+&nbsp;<span class="ty">bool</span> trap = ret<span class="op">-&gt;</span>trap.en;<br>
+&nbsp;<span class="ty">u32</span> cur_mip = <span class="fn">readCsrRaw</span>(CSR_MIP);<br>
+&nbsp;<span class="ty">u32</span> mip_reset = MIP_ALL;<br>
+<br>
+&nbsp;<span class="kw">if</span> (<span class="op">!</span>trap) {<br>
+&nbsp;&nbsp;<span class="cm">// Check: which IRQs are enabled?</span><br>
+&nbsp;&nbsp;<span class="ty">u32</span> mirq = cur_mip<br>
+&nbsp;&nbsp;&nbsp;&amp; <span class="fn">readCsrRaw</span>(CSR_MIE);<br>
+<br>
+&nbsp;&nbsp;<span class="kw">switch</span> (mirq <span class="op">&amp;</span> MIP_ALL) {<br>
+&nbsp;&nbsp;&nbsp;<span class="fn">HANDLE</span>(MIP_MEIP, trap_MachineExternalInterrupt)<br>
+&nbsp;&nbsp;&nbsp;<span class="fn">HANDLE</span>(MIP_MSIP, trap_MachineSoftwareInterrupt)<br>
+&nbsp;&nbsp;&nbsp;<span class="fn">HANDLE</span>(MIP_MTIP, trap_MachineTimerInterrupt)<br>
+&nbsp;&nbsp;&nbsp;<span class="fn">HANDLE</span>(MIP_SEIP, trap_SupervisorExternalInterrupt)<br>
+&nbsp;&nbsp;}<br>
+&nbsp;}<br>
+&nbsp;<span class="kw">bool</span> irq = (mip_reset != MIP_ALL);<br>
+&nbsp;<span class="kw">if</span> (trap <span class="op">||</span> irq) {<br>
+&nbsp;&nbsp;<span class="ty">bool</span> ok = <span class="fn">handleTrap</span>(ret, irq);<br>
+&nbsp;&nbsp;<span class="kw">if</span> (ok <span class="op">&amp;&amp;</span> irq) <span class="cm">// clear MIP bit</span><br>
+&nbsp;&nbsp;&nbsp;<span class="fn">writeCsrRaw</span>(CSR_MIP,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;cur_mip <span class="op">&amp;</span> <span class="op">~</span>mip_reset);<br>
+&nbsp;}<br>
+}
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">19 / 25</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 20 — handleTrap
+     ===================================================== -->
+<section class="slide" id="s20">
+  <div class="slide-inner">
+    <p class="label reveal">rv32.cpp · handleTrap()</p>
+    <h2 class="reveal">Trap Handler — Delegation &amp; Vector</h2>
+    <div class="rule reveal"></div>
+    <div class="cols-2 reveal">
+      <div class="code-block" style="font-size:clamp(0.58rem,1vw,0.78rem)">
+<span class="cm">// 1. Determine target privilege via delegation</span><br>
+<span class="ty">u32</span> mdeleg = <span class="fn">readCsrRaw</span>(isIRQ<br>
+&nbsp;&nbsp;? CSR_MIDELEG : CSR_MEDELEG);<br>
+<span class="ty">u32</span> pos = t.type <span class="op">&amp;</span> <span class="num">0xFFFF</span>; <span class="cm">// cause bit</span><br>
+<span class="ty">u32</span> new_priv =<br>
+&nbsp;((mdeleg <span class="op">&gt;&gt;</span> pos) <span class="op">&amp;</span> <span class="num">1</span>) == <span class="num">0</span><br>
+&nbsp;&nbsp;? PRIV_MACHINE   <span class="cm">// M handles it</span><br>
+&nbsp;&nbsp;: PRIV_SUPERVISOR; <span class="cm">// delegated to S</span><br>
+<br>
+<span class="cm">// 2. Write trap registers</span><br>
+<span class="fn">writeCsrRaw</span>(EPC,   pc);       <span class="cm">// save return addr</span><br>
+<span class="fn">writeCsrRaw</span>(CAUSE, t.type);  <span class="cm">// why we trapped</span><br>
+<span class="fn">writeCsrRaw</span>(TVAL,  t.value); <span class="cm">// bad addr / insn</span><br>
+<br>
+<span class="cm">// 3. Jump to handler vector</span><br>
+ret-&gt;pc_val = <span class="fn">readCsrRaw</span>(TVEC);<br>
+<span class="kw">if</span> ((ret-&gt;pc_val <span class="op">&amp;</span> <span class="num">0x3</span>) != <span class="num">0</span>) {<br>
+&nbsp;<span class="cm">// Vectored mode: base + 4 * cause</span><br>
+&nbsp;ret-&gt;pc_val = (ret-&gt;pc_val <span class="op">&amp;</span> <span class="op">~</span><span class="num">0x3</span>)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;+ <span class="num">4</span> <span class="op">*</span> pos;<br>
+}<br>
+<br>
+<span class="cm">// 4. Update MSTATUS / SSTATUS</span><br>
+<span class="cm">// MIE→MPIE, privilege→MPP, MIE=0</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <div class="card">
+          <h3>TVEC modes</h3>
+          <p style="font-size:var(--small-size)">
+            <span class="mono">TVEC[1:0] == 0</span> → <strong>Direct</strong>: all traps jump to base.<br>
+            <span class="mono">TVEC[1:0] != 0</span> → <strong>Vectored</strong>: jump to <span class="mono">base + 4 × cause</span>.
+            Vectored mode lets the hardware jump directly to per-interrupt handlers without a dispatch table in software.
+          </p>
+        </div>
+        <div class="card">
+          <h3>MSTATUS update</h3>
+          <p style="font-size:var(--small-size)">
+            <span class="mono accent">MIE</span> → saved to <span class="mono">MPIE</span>, then <span class="mono">MIE = 0</span> (disable further IRQs).<br>
+            Current privilege → saved to <span class="mono">MPP</span>.<br>
+            Privilege → <span class="mono">new_privilege</span>.<br>
+            <span class="mono">mret</span> reverses this: <span class="mono">MPIE→MIE</span>, <span class="mono">MPP→privilege</span>.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">20 / 25</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 21 — CLINT TIMER
+     ===================================================== -->
+<section class="slide" id="s21">
+  <div class="slide-inner">
+    <p class="label reveal">rv32.h · rv32.cpp · CLINT</p>
+    <h2 class="reveal">CLINT — Core-Local Interruptor</h2>
+    <div class="rule reveal"></div>
+    <div class="cols-2 reveal">
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <div class="code-block">
+<span class="ty">typedef struct</span> {<br>
+&nbsp;<span class="ty">bool</span> msip;          <span class="cm">// SW interrupt</span><br>
+&nbsp;<span class="ty">u32</span>  mtimecmp_lo;   <span class="cm">// timer compare</span><br>
+&nbsp;<span class="ty">u32</span>  mtimecmp_hi;<br>
+&nbsp;<span class="ty">u32</span>  mtime_lo;      <span class="cm">// current time</span><br>
+&nbsp;<span class="ty">u32</span>  mtime_hi;<br>
+} <span class="ty">clint_state</span>;
+        </div>
+        <div class="card">
+          <h3>Memory-mapped registers</h3>
+          <ul style="font-size:var(--small-size)">
+            <li><span class="mono amber">0x02000000</span> — MSIP (software IRQ)</li>
+            <li><span class="mono amber">0x02004000</span> — MTIMECMP lo</li>
+            <li><span class="mono amber">0x02004004</span> — MTIMECMP hi</li>
+            <li><span class="mono amber">0x0200BFF8</span> — MTIME lo</li>
+            <li><span class="mono amber">0x0200BFFC</span> — MTIME hi</li>
+          </ul>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <div class="card">
+          <h3>Timer interrupt flow</h3>
+          <ol style="font-size:var(--small-size); list-style:decimal inside; padding-left:0.5em">
+            <li>OS writes <span class="mono">MTIMECMP = MTIME + period</span></li>
+            <li>Hardware increments <span class="mono">MTIME</span> each cycle (via <span class="mono">clint_state</span>)</li>
+            <li>When <span class="mono">MTIME &gt;= MTIMECMP</span>: <span class="mono">MIP.MTIP = 1</span></li>
+            <li><span class="mono">handleIrqAndTrap()</span> detects <span class="mono">MIP_MTIP &amp; MIE.MTIE</span></li>
+            <li>Trap to <span class="mono">MTVEC</span> with cause = <span class="mono">trap_MachineTimerInterrupt</span></li>
+          </ol>
+        </div>
+        <div class="card">
+          <h3>Byte-level access</h3>
+          <p style="font-size:var(--small-size)">
+            <span class="mono accent">memGetByte</span> / <span class="mono accent">memSetByte</span> have case-per-byte entries for all 8 CLINT registers. Little-endian: byte 0 at base, byte 3 at base+3. 64-bit time split across two 32-bit registers.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">21 / 25</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 22 — UART
+     ===================================================== -->
+<section class="slide" id="s22">
+  <div class="slide-inner">
+    <p class="label reveal">rv32.cpp · uartTick()</p>
+    <h2 class="reveal">UART — Serial Interrupt Path</h2>
+    <div class="rule reveal"></div>
+    <div class="cols-12 reveal">
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <div class="card">
+          <h3>Packed registers</h3>
+          <p style="font-size:var(--small-size)">Two <span class="mono ty">u32</span>s hold 8 UART registers, each accessed via <span class="mono accent">UART_GET1/2</span> + shift macros.<br>
+          <span class="mono">rbr_thr_ier_iir</span>: RBR·THR·IER·IIR<br>
+          <span class="mono">lcr_mcr_lsr_scr</span>: LCR·MCR·LSR·SCR</p>
+        </div>
+        <div class="card">
+          <h3>IIR update rule</h3>
+          <p style="font-size:var(--small-size)">
+            <span class="mono">RBR != 0 &amp;&amp; IER.RXINT</span> → <span class="mono amber">IIR_RD_AVAILABLE (4)</span><br>
+            <span class="mono">THR == 0 &amp;&amp; IER.THRE</span> → <span class="mono amber">IIR_THR_EMPTY (2)</span><br>
+            Otherwise → <span class="mono amber">IIR_NO_INTERRUPT (7)</span>
+          </p>
+        </div>
+        <div class="card">
+          <h3>SEIP path</h3>
+          <p style="font-size:var(--small-size)">
+            <span class="mono accent">uart.interrupting = true</span> →
+            <span class="mono">emu.cpp</span> sets <span class="mono">MIP.SEIP</span> →
+            <span class="mono">handleIrqAndTrap</span> fires <span class="mono">trap_SupervisorExternalInterrupt</span>.
+          </p>
+        </div>
+      </div>
+      <div class="code-block">
+<span class="ty">void</span> <span class="fn">uartTick</span>() {<br>
+&nbsp;<span class="cm">// TX: flush THR to stdout periodically</span><br>
+&nbsp;<span class="kw">if</span> ((clock <span class="op">&amp;</span> <span class="num">0x16</span>) == <span class="num">0</span><br>
+&nbsp;&nbsp;&amp;&amp; <span class="fn">UART_GET1</span>(THR) != <span class="num">0</span>) {<br>
+&nbsp;&nbsp;printf(<span class="str">"%c"</span>, (<span class="ty">char</span>)<span class="fn">UART_GET1</span>(THR));<br>
+&nbsp;&nbsp;<span class="fn">UART_SET1</span>(THR, <span class="num">0</span>);<br>
+&nbsp;&nbsp;<span class="fn">UART_SET2</span>(LSR, LSR <span class="op">|</span> LSR_THR_EMPTY);<br>
+&nbsp;&nbsp;<span class="fn">uartUpdateIir</span>();<br>
+&nbsp;&nbsp;<span class="kw">if</span> (<span class="fn">UART_GET1</span>(IER) <span class="op">&amp;</span> IER_THREINT_BIT)<br>
+&nbsp;&nbsp;&nbsp;uart.thre_ip = <span class="kw">true</span>;<br>
+&nbsp;}<br>
+&nbsp;<span class="cm">// Set interrupting flag if any IP</span><br>
+&nbsp;uart.interrupting =<br>
+&nbsp;&nbsp;uart.thre_ip <span class="op">||</span> rx_ip;<br>
+}
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">22 / 25</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 23 — ELF LOADING
+     ===================================================== -->
+<section class="slide" id="s23">
+  <div class="slide-inner">
+    <p class="label reveal">loader.cpp · loadElf()</p>
+    <h2 class="reveal">ELF Loading — Sections to RAM</h2>
+    <div class="rule reveal"></div>
+    <div class="cols-12 reveal">
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <div class="card">
+          <h3>Steps</h3>
+          <ol style="font-size:var(--small-size); list-style:decimal inside; padding-left:0.5em; line-height:1.8">
+            <li>Read <span class="mono">Elf32_Ehdr</span> (52 bytes)</li>
+            <li>Verify <span class="mono amber">ELFMAG</span> magic</li>
+            <li>Reject ELF64 (not supported)</li>
+            <li>Read all <span class="mono">e_shnum</span> section headers</li>
+            <li>Filter <span class="mono">SHT_PROGBITS</span> sections</li>
+            <li>Copy each section to <span class="mono">data[sh_addr &amp; 0x7FFFFFFF]</span></li>
+          </ol>
+        </div>
+        <div class="card">
+          <h3>Address stripping</h3>
+          <p style="font-size:var(--small-size)">
+            ELF virtual addresses start at <span class="mono amber">0x80000000</span>.
+            Masking with <span class="mono">0x7FFFFFFF</span> gives the physical offset
+            into the 128 MiB flat buffer — byte 0 of RAM.
+          </p>
+        </div>
+      </div>
+      <div class="code-block">
+<span class="cm">// Collect loadable sections</span><br>
+<span class="kw">for</span> (<span class="kw">const</span> <span class="kw">auto</span> <span class="op">&amp;</span>sh : sh_tbl) {<br>
+&nbsp;<span class="kw">if</span> (sh.sh_type == SHT_PROGBITS) {<br>
+&nbsp;&nbsp;ElfSection section{<br>
+&nbsp;&nbsp;&nbsp;sh.sh_addr <span class="op">&amp;</span> <span class="num">0x7FFFFFFF</span>,<br>
+&nbsp;&nbsp;&nbsp;sh.sh_offset,<br>
+&nbsp;&nbsp;&nbsp;sh.sh_size<br>
+&nbsp;&nbsp;};<br>
+&nbsp;&nbsp;sections.<span class="fn">push_back</span>(section);<br>
+&nbsp;}<br>
+}<br>
+<br>
+<span class="cm">// DMA sections into emulated RAM</span><br>
+<span class="kw">for</span> (<span class="kw">auto</span> <span class="op">&amp;</span>s : sections) {<br>
+&nbsp;s.sData.<span class="fn">resize</span>(s.size);<br>
+&nbsp;<span class="fn">lseek</span>(fd, s.offset, SEEK_SET);<br>
+&nbsp;<span class="fn">read</span>(fd, s.sData.<span class="fn">data</span>(), s.size);<br>
+&nbsp;std::<span class="fn">copy</span>(s.sData.<span class="fn">begin</span>(),<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;s.sData.<span class="fn">end</span>(),<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;data + s.addr_real);<br>
+}
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">23 / 25</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 24 — MEMORY MAP
+     ===================================================== -->
+<section class="slide" id="s24">
+  <div class="slide-inner">
+    <p class="label reveal">rv32.cpp · memGetByte</p>
+    <h2 class="reveal">Physical Memory Map</h2>
+    <div class="rule reveal"></div>
+    <div class="cols-2 reveal">
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <div style="font-family:var(--mono); font-size:var(--code-size); border:1px solid var(--border); border-radius:8px; overflow:hidden">
+          <div style="padding:0.4em 0.8em; background:rgba(255,69,96,0.1); border-bottom:1px solid var(--border); color:var(--red)">0x00001020 — 0x00001FFF &nbsp;<span class="dim">DTB blob</span></div>
+          <div style="padding:0.4em 0.8em; background:rgba(255,183,0,0.08); border-bottom:1px solid var(--border); color:var(--amber)">0x02000000 — 0x0200BFFF &nbsp;<span class="dim">CLINT</span></div>
+          <div style="padding:0.4em 0.8em; background:rgba(0,191,255,0.08); border-bottom:1px solid var(--border); color:var(--cyan)">0x10000000 — 0x10000007 &nbsp;<span class="dim">UART 16550</span></div>
+          <div style="padding:0.4em 0.8em; background:rgba(0,255,136,0.08); color:var(--green)">0x80000000 — 0x87FFFFFF &nbsp;<span class="dim">128 MiB RAM</span></div>
+        </div>
+        <div class="card">
+          <h3>Bit-31 fast path</h3>
+          <p style="font-size:var(--small-size)">
+            <span class="mono">memGetByte</span> first asserts <span class="mono accent">addr &amp; 0x80000000</span>.
+            After the MMIO switch table falls through, the final check is
+            <span class="mono">return mem[addr &amp; 0x7FFFFFFF]</span> — no branches for the hot path.
+          </p>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <div class="card">
+          <h3>DTB access</h3>
+          <p style="font-size:var(--small-size)">
+            Device Tree Blob is read from a separate pointer (<span class="mono">cpu.dtb</span>),
+            mapped at <span class="mono amber">0x1020</span>. x11 is pre-set to this address on reset
+            following the Linux boot protocol.
+          </p>
+        </div>
+        <div class="card">
+          <h3>Write path</h3>
+          <p style="font-size:var(--small-size)">
+            <span class="mono accent">memSetByte</span> mirrors the structure: same MMIO addresses
+            in a switch. UART writes to THR trigger <span class="mono">uartUpdateIir()</span> immediately.
+            CLINT writes update the packed 32-bit fields byte-by-byte.
+          </p>
+        </div>
+        <div class="card">
+          <h3>Emulated peripherals</h3>
+          <p style="font-size:var(--small-size)">
+            No DMA, no PCI, no GPU. Just <strong>CLINT</strong> (timer + software IRQ) and
+            <strong>UART 16550-compatible</strong> serial port — enough to boot Linux with a console.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">24 / 25</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 25 — END
+     ===================================================== -->
+<section class="slide title-slide" id="s25">
+  <div class="slide-inner">
+    <p class="eyebrow reveal">That's a wrap</p>
+    <h1 class="reveal" style="font-size:clamp(1.5rem,4.5vw,4rem)">The full decode-execute-trap pipeline in ~800 lines of C++</h1>
+    <p class="subtitle reveal">Instruction decode · CSR access · privilege transitions · vectored traps</p>
+    <div class="rule reveal"></div>
+    <div class="cols-3 reveal">
+      <div class="card">
+        <h3>Key insight #1</h3>
+        <p style="font-size:var(--small-size)">Format parsers and CSR pre-reads happen unconditionally. The dispatch table is dead-simple masked switches — no decode trees, no microcode.</p>
+      </div>
+      <div class="card">
+        <h3>Key insight #2</h3>
+        <p style="font-size:var(--small-size)">Shadow registers (SSTATUS, SIE, SIP) are not stored — they're computed on-demand from M-mode CSRs with a single bitmask. One source of truth.</p>
+      </div>
+      <div class="card">
+        <h3>Key insight #3</h3>
+        <p style="font-size:var(--small-size)">Traps and IRQs share a single <span class="mono">handleTrap()</span>. Delegation is pure bit-shifting on MIDELEG/MEDELEG — hardware privilege routing in 3 lines.</p>
+      </div>
+    </div>
+  </div>
+  <div class="corner-decor">ISA</div>
+  <div class="slide-num">25 / 25</div>
+</section>
+
+<script>
+/* ===========================================
+   FORMAT FIELD DATA
+   Displayed in the animated panel as each bit
+   field is highlighted. Keyed by data-format.
+   =========================================== */
+const FMT_FIELD_DATA = {
+  'r-type': [
+    { name:'funct7', range:'[31:25]', color:'var(--amber)',
+      desc:'Modifier bits. Bit [30] differentiates ADD (0) vs SUB (1), and SRL vs SRA. Mul-extension ops encode their own funct7 patterns.',
+      val:'0000000 → ADD variant (bit[30]=0)' },
+    { name:'rs2', range:'[24:20]', color:'var(--cyan)',
+      desc:'Second source register index. 5 bits → 32 GPRs. rs2 is at [24:20] across all R / S / B formats — consistent position.',
+      val:'00011 (3) → x3 / gp' },
+    { name:'rs1', range:'[19:15]', color:'var(--cyan)',
+      desc:'First source register index. rs1 is always at [19:15] across ALL six formats — the register file can be read before opcode is decoded.',
+      val:'00001 (1) → x1 / ra' },
+    { name:'funct3', range:'[14:12]', color:'var(--green)',
+      desc:'Operation type (3 bits). Combined with funct7 uniquely identifies the operation within the opcode family (ADD / AND / OR / XOR / SLL…).',
+      val:'000 → ADD / SUB family' },
+    { name:'rd', range:'[11:7]', color:'var(--cyan)',
+      desc:'Destination register. Writeback happens in the commit phase after insSelect() returns. A write to x0 is silently discarded.',
+      val:'00010 (2) → x2 / sp' },
+    { name:'opcode', range:'[6:0]', color:'var(--red)',
+      desc:'Instruction family. 0110011 = OP (register-register). This alone tells the decoder to expect funct3 + funct7 for full identification.',
+      val:'0110011 → OP (R-type)' },
+  ],
+  'i-type': [
+    { name:'imm[11:0]', range:'[31:20]', color:'var(--amber)',
+      desc:'12-bit signed immediate. Sign-extended to 32 bits before use. Range −2048…+2047. For shift ops (SLLI/SRLI/SRAI) only the lower 5 bits are used as shamt.',
+      val:'000000101010 → 42' },
+    { name:'rs1', range:'[19:15]', color:'var(--cyan)',
+      desc:'Source / base register. For loads: effective address = rs1 + imm. For JALR: jump target base. For OP-IMM: operand.',
+      val:'00010 (2) → x2 / sp' },
+    { name:'funct3', range:'[14:12]', color:'var(--green)',
+      desc:'Selects the specific operation: 000=ADDI, 010=SLTI, 100=XORI, 110=ORI, 111=ANDI, 001=SLLI, 101=SRLI/SRAI (bit[30] of imm distinguishes them).',
+      val:'000 → ADDI' },
+    { name:'rd', range:'[11:7]', color:'var(--cyan)',
+      desc:'Destination register for arithmetic result or loaded value.',
+      val:'00001 (1) → x1 / ra' },
+    { name:'opcode', range:'[6:0]', color:'var(--red)',
+      desc:'Four families share I-type: 0010011=OP-IMM, 0000011=LOAD, 1100111=JALR, 1110011=SYSTEM (ecall / CSR instructions).',
+      val:'0010011 → OP-IMM' },
+  ],
+  's-type': [
+    { name:'imm[11:5]', range:'[31:25] + [11:7]', color:'var(--amber)',
+      desc:'Both amber fields are ONE split immediate. Upper 7 bits here, lower 5 bits at [11:7]. The split keeps rs1/rs2 at fixed positions — identical to R-type for pipelined decode.',
+      val:'{0000000, 01000} → imm = 8' },
+    { name:'rs2', range:'[24:20]', color:'var(--cyan)',
+      desc:'Data register — the value to store in memory.',
+      val:'00011 (3) → x3 / gp (value to write)' },
+    { name:'rs1', range:'[19:15]', color:'var(--cyan)',
+      desc:'Base address register. Effective store address = rs1 + {imm[11:5], imm[4:0]}.',
+      val:'00001 (1) → x1 / ra (base address)' },
+    { name:'funct3', range:'[14:12]', color:'var(--green)',
+      desc:'Store width: 000=SB (byte, 8-bit), 001=SH (halfword, 16-bit), 010=SW (word, 32-bit).',
+      val:'010 → SW (32-bit store)' },
+    { name:'opcode', range:'[6:0]', color:'var(--red)',
+      desc:'0100011 = STORE. No rd field — stores have no destination register. The "slot" at [11:7] is used for the lower immediate bits.',
+      val:'0100011 → STORE' },
+  ],
+  'b-type': [
+    { name:'imm (all 4 fragments)', range:'[31:25] + [11:7]', color:'var(--amber)',
+      desc:'Bits are scattered across 4 sub-fields: imm[12]→[31], imm[10:5]→[30:25], imm[4:1]→[11:8], imm[11]→[7]. Reassemble: {imm[12], imm[11], imm[10:5], imm[4:1], 0}. Always even.',
+      val:'offset=8: imm[4:1]=0100, others=0 → {0,0,000000,0100,0}=8' },
+    { name:'rs2', range:'[24:20]', color:'var(--cyan)',
+      desc:'Second comparison register.',
+      val:'00010 (2) → x2 / sp' },
+    { name:'rs1', range:'[19:15]', color:'var(--cyan)',
+      desc:'First comparison register.',
+      val:'00001 (1) → x1 / ra' },
+    { name:'funct3', range:'[14:12]', color:'var(--green)',
+      desc:'Branch condition: 000=BEQ, 001=BNE, 100=BLT, 101=BGE, 110=BLTU, 111=BGEU.',
+      val:'000 → BEQ (branch if rs1 == rs2)' },
+    { name:'opcode', range:'[6:0]', color:'var(--red)',
+      desc:'1100011 = BRANCH. Target = PC + imm (PC-relative, ±4 KiB range). All compare-and-branch in one instruction.',
+      val:'1100011 → BRANCH' },
+  ],
+  'u-type': [
+    { name:'imm[31:12]', range:'[31:12]', color:'var(--amber)',
+      desc:'20-bit upper immediate placed directly into rd[31:12]; rd[11:0]=0. Pair with ADDI to synthesize any 32-bit constant. If ADDI imm bit[11]=1 (negative sign-ext), increment the LUI immediate by 1.',
+      val:'0xABCDE → x5 = 0xABCDE000' },
+    { name:'rd', range:'[11:7]', color:'var(--cyan)',
+      desc:'Destination register.',
+      val:'00101 (5) → x5 / t0' },
+    { name:'opcode', range:'[6:0]', color:'var(--red)',
+      desc:'0110111=LUI (rd = imm << 12), 0010111=AUIPC (rd = PC + imm << 12). AUIPC enables position-independent addressing anywhere in the 32-bit space.',
+      val:'0110111 → LUI' },
+  ],
+  'j-type': [
+    { name:'imm[20|10:1|11|19:12]', range:'[31:12]', color:'var(--amber)',
+      desc:'One 20-bit offset fragmented across 4 sub-fields — same scrambling scheme as B-type for hardware regularity. Reassemble: {imm[20], imm[19:12], imm[11], imm[10:1], 0}. Range ±1 MiB.',
+      val:'JAL x1,8: imm[10:1]=0000000100 (bit 3=1) → offset=8' },
+    { name:'rd', range:'[11:7]', color:'var(--cyan)',
+      desc:'Link register — receives PC+4 (return address). Use x1 (ra) by convention. Use x0 to discard the return address (unconditional jump).',
+      val:'00001 (1) → x1 / ra (return address = PC+4)' },
+    { name:'opcode', range:'[6:0]', color:'var(--red)',
+      desc:'1101111 = JAL. Only one instruction uses the J-type encoding. JALR (register-indirect jump) uses I-type instead.',
+      val:'1101111 → JAL' },
+  ],
+};
+
+/* ===========================================
+   FORMAT ANIMATOR
+   Groups bit-field cells by data-group attribute,
+   then highlights each group in turn while updating
+   the info panel on the right.
+   =========================================== */
+class FormatAnimator {
+  constructor(slide) {
+    this.slide = slide;
+    this.formatId = slide.dataset.format;
+    this.cells = Array.from(slide.querySelectorAll('.fmt-bf'));
+    this.panel = slide.querySelector('.fmt-panel');
+    this.infos = FMT_FIELD_DATA[this.formatId] || [];
+
+    // Group cells by data-group number
+    const map = {};
+    this.cells.forEach(cell => {
+      const g = parseInt(cell.dataset.group, 10);
+      if (!map[g]) map[g] = [];
+      map[g].push(cell);
+    });
+    // Sorted unique group indices → array of cell arrays
+    this.groups = Object.keys(map).sort((a,b)=>a-b).map(k => map[k]);
+
+    this.idx = -1;
+    this.timer = null;
+    this.played = false;
+  }
+
+  play() {
+    if (this.played) return;
+    this.played = true;
+    // Wait for .reveal animations to settle before starting
+    setTimeout(() => this._next(), 900);
+  }
+
+  _next() {
+    this.idx++;
+    if (this.idx >= this.groups.length) return;
+
+    // Highlight current group, dim seen, hide unseen
+    this.groups.forEach((grp, i) => {
+      grp.forEach(cell => {
+        cell.classList.toggle('fmt-active', i === this.idx);
+        cell.classList.toggle('fmt-seen',   i < this.idx);
+      });
+    });
+
+    // Update info panel
+    const info = this.infos[this.idx];
+    if (this.panel && info) {
+      this.panel.style.borderLeftColor = info.color;
+      this.panel.innerHTML =
+        `<div class="fp-name" style="color:${info.color}">${info.name}` +
+        ` <span style="color:var(--text-dim);font-weight:300;font-size:0.8em">${info.range}</span></div>` +
+        `<p class="fp-desc">${info.desc}</p>` +
+        `<span class="fp-val">${info.val}</span>`;
+    }
+
+    if (this.idx + 1 < this.groups.length) {
+      this.timer = setTimeout(() => this._next(), 1500);
+    }
+  }
+
+  reset() {
+    clearTimeout(this.timer);
+    this.idx = -1;
+    this.played = false;
+    this.cells.forEach(c => c.classList.remove('fmt-active', 'fmt-seen'));
+    if (this.panel) {
+      this.panel.style.borderLeftColor = '';
+      this.panel.innerHTML = '<p class="fp-init">Fields highlight left → right as each is decoded…</p>';
+    }
+  }
+}
+
+/* ===========================================
+   SLIDE CONTROLLER
+   Handles navigation, animations, progress bar
+   =========================================== */
+class Presentation {
+  constructor() {
+    this.slides = Array.from(document.querySelectorAll('.slide'));
+    this.current = 0;
+    this.progress = document.getElementById('progress');
+    this.dotsContainer = document.getElementById('navDots');
+
+    // Initialize a FormatAnimator for each format slide
+    this.formatAnimators = new Map();
+    document.querySelectorAll('.fmt-slide').forEach(s => {
+      this.formatAnimators.set(s, new FormatAnimator(s));
+    });
+
+    this.buildDots();
+    this.setupObserver();
+    this.setupKeys();
+    this.setupTouch();
+    this.setupWheel();
+    this.updateUI(0);
+  }
+
+  buildDots() {
+    this.slides.forEach((_, i) => {
+      const d = document.createElement('div');
+      d.className = 'nav-dot';
+      d.title = `Slide ${i + 1}`;
+      d.addEventListener('click', () => this.goTo(i));
+      this.dotsContainer.appendChild(d);
+    });
+    this.dots = Array.from(this.dotsContainer.querySelectorAll('.nav-dot'));
+  }
+
+  setupObserver() {
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+          const idx = this.slides.indexOf(entry.target);
+          if (idx !== -1) this.updateUI(idx);
+          // Trigger bit-field animation for format slides
+          const anim = this.formatAnimators.get(entry.target);
+          if (anim) anim.play();
+        }
+      });
+    }, { threshold: 0.5 });
+
+    this.slides.forEach(s => observer.observe(s));
+  }
+
+  updateUI(idx) {
+    this.current = idx;
+    // Progress bar
+    const pct = this.slides.length > 1
+      ? (idx / (this.slides.length - 1)) * 100 : 0;
+    this.progress.style.width = pct + '%';
+    // Nav dots
+    this.dots.forEach((d, i) => d.classList.toggle('active', i === idx));
+  }
+
+  goTo(idx) {
+    idx = Math.max(0, Math.min(this.slides.length - 1, idx));
+    this.slides[idx].scrollIntoView({ behavior: 'smooth' });
+  }
+
+  setupKeys() {
+    document.addEventListener('keydown', e => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowRight' || e.key === ' ')
+        this.goTo(this.current + 1);
+      if (e.key === 'ArrowUp' || e.key === 'ArrowLeft')
+        this.goTo(this.current - 1);
+      if (e.key === 'Home') this.goTo(0);
+      if (e.key === 'End')  this.goTo(this.slides.length - 1);
+    });
+  }
+
+  setupTouch() {
+    let startY = 0;
+    document.addEventListener('touchstart', e => { startY = e.touches[0].clientY; }, { passive: true });
+    document.addEventListener('touchend', e => {
+      const dy = startY - e.changedTouches[0].clientY;
+      if (Math.abs(dy) > 50) this.goTo(this.current + (dy > 0 ? 1 : -1));
+    }, { passive: true });
+  }
+
+  setupWheel() {
+    let last = 0;
+    document.addEventListener('wheel', e => {
+      const now = Date.now();
+      if (now - last < 600) return;
+      last = now;
+      this.goTo(this.current + (e.deltaY > 0 ? 1 : -1));
+    }, { passive: true });
+  }
+}
+
+new Presentation();
+</script>
+</body>
+</html>

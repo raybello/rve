@@ -112,7 +112,7 @@ all: $(BUILD_DIR)/$(EXE)
 
 web: clean_web
 	@echo Building for Web on $(ECHO_MESSAGE)
-	make -f Makefile.emscripten serve
+	make -f Makefile.emscripten serve -j16
 
 clean_web:
 	rm -rf web

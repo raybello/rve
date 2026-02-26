@@ -4,6 +4,9 @@
 #include <cstdint>
 #include <stdio.h>
 #include <assert.h>
+#include <math.h>
+#include <time.h>
+#include <sys/time.h>
 
 #include "types.h"
 
@@ -49,11 +52,40 @@ const u32 CSR_MTVAL = 0x343;       // Machine bad address or instruction
 const u32 CSR_MIP = 0x344;         // Machine interrupt pending
 const u32 _CSR_PMPCFG0 = 0x3a0;    // Physical memory protection config (reserved)
 const u32 _CSR_PMPADDR0 = 0x3b0;   // Physical memory protection address (reserved)
-const u32 _CSR_MCYCLE = 0xb00;     // Cycle counter for machines (reserved)
+const u32 CSR_MCYCLE = 0xb00;      // Machine cycle counter
 const u32 CSR_CYCLE = 0xc00;       // User mode cycle counter
 const u32 CSR_TIME = 0xc01;        // Timer register for user mode
 const u32 _CSR_INSERT = 0xc02;     // Insert reserved CSR (reserved)
 const u32 CSR_MHARTID = 0xf14;     // Hardware thread ID
+
+// Custom / vendor CSRs (same layout as src_new)
+const u32 CSR_MEMOP_OP  = 0x0b0;   // Trigger DMA copy (write)
+const u32 CSR_MEMOP_SRC = 0x0b1;   // DMA source virtual address
+const u32 CSR_MEMOP_DST = 0x0b2;   // DMA destination virtual address
+const u32 CSR_MEMOP_N   = 0x0b3;   // DMA byte count
+const u32 CSR_PLAYER_ID = 0x0be;   // Network player identifier
+const u32 CSR_RNG       = 0x0bf;   // Hardware RNG (read-only)
+const u32 CSR_NET_TX_BUF_ADDR         = 0x0c0; // TX buffer physical address (read-only)
+const u32 CSR_NET_TX_BUF_SIZE_AND_SEND= 0x0c1; // Write = send N bytes from TX buf
+const u32 CSR_NET_RX_BUF_ADDR         = 0x0c2; // RX buffer physical address (read-only)
+const u32 CSR_NET_RX_BUF_READY        = 0x0c3; // Write = signal RX buffer is ready
+
+// RAM size available to the CPU (must match Emulator::MEM_SIZE)
+static const int RV32_MEM_SIZE = 1024 * 1024 * 128; // 128 MiB
+
+// MMU mode constants
+#define MMU_MODE_OFF  0
+#define MMU_MODE_SV32 1
+
+// Memory access type constants (used by mmuTranslate)
+#define MMU_ACCESS_FETCH 0
+#define MMU_ACCESS_READ  1
+#define MMU_ACCESS_WRITE 2
+
+// RTC base address offset within its MMIO window (ds1742 compatible)
+#define RTC_MMIO_BASE 0x03000000u
+#define RTC_MMIO_SIZE 0x800u
+#define RTC_REG_BASE  (RTC_MMIO_SIZE - 8u) // registers at offset 0x7F8
 
 // Trap and interrupt constants with privilege levels for RISC-V architecture.
 #define PRIV_USER 0                // Privilege level for User mode
@@ -166,9 +198,20 @@ public:
     u32 pc;
     u8 *mem;
     u8 *dtb;
+    // MTD (initrd / flash) - optional
+    u8 *mtd;
+    u32 mtd_size;
     csr_state csr;
     clint_state clint;
     uart_state uart;
+    // MMU state (Sv32)
+    mmu_state mmu;
+    // Network device state
+    net_state net;
+    // RTC registers (ds1742 compatible)
+    u32 rtc0, rtc1;
+    // Wall-clock reference for CLINT mtime
+    float start_time_ref;
 
     bool reservation_en;
     u32 reservation_addr;
@@ -178,7 +221,8 @@ public:
     RV32();
     ~RV32();
 
-    bool init(u8 *memory, u8 *dtb, bool debug_mode);
+    bool init(u8 *memory, u8 *dtb, bool debug_mode = false,
+              u8 *mtd = nullptr, u32 mtd_size = 0);
     void dump();
     void tick();
 
@@ -196,6 +240,14 @@ public:
     // Trap Functions
     bool handleTrap(ins_ret *ret, bool isInterrupt);
     void handleIrqAndTrap(ins_ret *ret);
+
+    // MMU Functions
+    u32 mmuTranslate(ins_ret *ret, u32 vaddr, u32 mode);
+    void mmuUpdate(u32 satp);
+
+    // RTC Functions
+    u8  rtcRead(u32 offset);
+    void rtcWrite(u32 offset, u8 data);
 
     // Memory Functions
     // Getters
