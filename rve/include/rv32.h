@@ -160,7 +160,10 @@ const u32 IIR_NO_INTERRUPT = 0x7;     // Indicates no pending interrupts
 // Line Status Register (LSR) flags for UART.
 // These status flags provide information about the line status and data availability.
 const u32 LSR_DATA_AVAILABLE = 0x1;   // Data available in receiver buffer
-const u32 LSR_THR_EMPTY = 0x20;       // Transmitter holding register is empty
+// 0x20 = THRE (Transmitter Holding Register Empty)
+// 0x40 = TEMT (Transmitter Empty — shift register also empty)
+// Linux wait_for_xmitr() waits for both; mini-rv32ima always returns 0x60.
+const u32 LSR_THR_EMPTY = 0x60;       // THRE | TEMT — transmitter fully idle
 
 
 // Macros to extract 8-bit data from specific bit positions in UART registers.
@@ -210,6 +213,8 @@ public:
     net_state net;
     // RTC registers (ds1742 compatible)
     u32 rtc0, rtc1;
+    // SYSCON (poweroff/reboot): set when 0x11100000 is written
+    u32 syscon_cmd;
     // Wall-clock reference for CLINT mtime
     float start_time_ref;
 

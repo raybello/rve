@@ -2,6 +2,41 @@
 #include "loader.h"
 
 
+int loadLinuxImage(const char *path, uint64_t path_len, uint8_t *data, uint64_t data_len)
+{
+    (void)path_len;
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file.is_open())
+    {
+        fprintf(stderr, "ERRO: Failed to open Linux image: %s\n", path);
+        return 1;
+    }
+
+    std::streamsize file_size = file.tellg();
+    file.seekg(0, std::ios::beg);
+
+    if (static_cast<uint64_t>(file_size) > data_len)
+    {
+        fprintf(stderr, "ERRO: Linux image too large (%ld bytes) for buffer (%lu bytes)\n",
+                (long)file_size, (unsigned long)data_len);
+        return 2;
+    }
+
+    if (!file.read(reinterpret_cast<char *>(data), file_size))
+    {
+        fprintf(stderr, "ERRO: Failed to read Linux image\n");
+        return 3;
+    }
+
+    printf("INFO: Loaded Linux image: %ld bytes\n", (long)file_size);
+    return 0;
+}
+
+int loadBin(const char *path, uint64_t path_len, uint8_t *data, uint64_t data_len)
+{
+    return loadLinuxImage(path, path_len, data, data_len);
+}
+
 int loadElf(const char *path, uint64_t path_len, uint8_t *data, uint64_t data_len)
 {
 

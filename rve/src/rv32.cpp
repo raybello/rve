@@ -1,5 +1,7 @@
 #include "rv32.h"
 #include "net.h"
+#include <sys/ioctl.h>
+#include <unistd.h>
 
 
 RV32::RV32(/* args */)
@@ -39,7 +41,7 @@ bool RV32::init(u8 *memory, u8 *dtb, bool debug_mode, u8 *mtd, u32 mtd_size)
     clint.mtime_hi = 0;
 
     uart.rbr_thr_ier_iir = 0;
-    uart.lcr_mcr_lsr_scr = 0x00200000; // LSR_THR_EMPTY is set
+    uart.lcr_mcr_lsr_scr = 0x00600000; // LSR THRE|TEMT both set (0x60 at shift 16)
     uart.thre_ip = false;
     uart.interrupting = false;
 
@@ -52,6 +54,7 @@ bool RV32::init(u8 *memory, u8 *dtb, bool debug_mode, u8 *mtd, u32 mtd_size)
 
     rtc0 = 0;
     rtc1 = 0;
+    syscon_cmd = 0;
 
     // Record wall-clock start time for CLINT mtime
     struct timeval tv;
@@ -421,7 +424,7 @@ u32 RV32::memGetByte(u32 addr)
 
         switch (addr)
         {
-        // CLINT
+        // CLINT (SiFive 0x02000000 base — used by ELF tests)
         case 0x02000000u: return clint.msip ? 1 : 0;
         case 0x02000001u: return 0;
         case 0x02000002u: return 0;
@@ -444,6 +447,30 @@ u32 RV32::memGetByte(u32 addr)
         case 0x0200bffdu: return (clint.mtime_hi >>  8) & 0xFF;
         case 0x0200bffeu: return (clint.mtime_hi >> 16) & 0xFF;
         case 0x0200bfffu: return (clint.mtime_hi >> 24) & 0xFF;
+
+        // CLINT (mini-rv32ima 0x11000000 base — matches default DTB)
+        case 0x11000000u: return clint.msip ? 1 : 0;
+        case 0x11000001u: return 0;
+        case 0x11000002u: return 0;
+        case 0x11000003u: return 0;
+
+        case 0x11004000u: return (clint.mtimecmp_lo >>  0) & 0xFF;
+        case 0x11004001u: return (clint.mtimecmp_lo >>  8) & 0xFF;
+        case 0x11004002u: return (clint.mtimecmp_lo >> 16) & 0xFF;
+        case 0x11004003u: return (clint.mtimecmp_lo >> 24) & 0xFF;
+        case 0x11004004u: return (clint.mtimecmp_hi >>  0) & 0xFF;
+        case 0x11004005u: return (clint.mtimecmp_hi >>  8) & 0xFF;
+        case 0x11004006u: return (clint.mtimecmp_hi >> 16) & 0xFF;
+        case 0x11004007u: return (clint.mtimecmp_hi >> 24) & 0xFF;
+
+        case 0x1100bff8u: return (clint.mtime_lo >>  0) & 0xFF;
+        case 0x1100bff9u: return (clint.mtime_lo >>  8) & 0xFF;
+        case 0x1100bffau: return (clint.mtime_lo >> 16) & 0xFF;
+        case 0x1100bffbu: return (clint.mtime_lo >> 24) & 0xFF;
+        case 0x1100bffcu: return (clint.mtime_hi >>  0) & 0xFF;
+        case 0x1100bffdu: return (clint.mtime_hi >>  8) & 0xFF;
+        case 0x1100bffeu: return (clint.mtime_hi >> 16) & 0xFF;
+        case 0x1100bfffu: return (clint.mtime_hi >> 24) & 0xFF;
 
         // UART
         case 0x10000000u:
@@ -493,8 +520,15 @@ void RV32::memSetByte(u32 addr, u32 val)
     {
         // ---- Low-address MMIO ----
 
-        // Network TX DMA buffer at 0x11000000–0x11000fff
-        if (addr >= 0x11000000u && addr < 0x11001000u)
+        // CLINT (mini-rv32ima 0x11000000 base) msip — must precede network TX buffer
+        if (addr >= 0x11000000u && addr < 0x11000004u)
+        {
+            if (addr == 0x11000000u) clint.msip = (val & 1) != 0;
+            return;
+        }
+
+        // Network TX DMA buffer at 0x11000004–0x11000fff
+        if (addr >= 0x11000004u && addr < 0x11001000u)
         {
             net.nettx[addr - 0x11000000u] = (u8)val;
             return;
@@ -508,7 +542,8 @@ void RV32::memSetByte(u32 addr, u32 val)
         }
 
         // Writing to mtimecmp clears MTIP/STIP (spec requirement)
-        if (addr >= 0x02004000u && addr < 0x02004008u)
+        if ((addr >= 0x02004000u && addr < 0x02004008u) ||
+            (addr >= 0x11004000u && addr < 0x11004008u))
         {
             u32 cur_mip = readCsrRaw(CSR_MIP);
             writeCsrRaw(CSR_MIP, cur_mip & ~(MIP_MTIP | MIP_STIP));
@@ -539,6 +574,34 @@ void RV32::memSetByte(u32 addr, u32 val)
         case 0x0200bffdu: clint.mtime_hi = (clint.mtime_hi & ~(0xffu << 8))  | ((val & 0xff) << 8);  return;
         case 0x0200bffeu: clint.mtime_hi = (clint.mtime_hi & ~(0xffu << 16)) | ((val & 0xff) << 16); return;
         case 0x0200bfffu: clint.mtime_hi = (clint.mtime_hi & ~(0xffu << 24)) | ((val & 0xff) << 24); return;
+
+        // CLINT (mini-rv32ima 0x11000000 base — matches default DTB)
+        case 0x11004000u: clint.mtimecmp_lo = (clint.mtimecmp_lo & ~(0xffu << 0))  | ((val & 0xff) << 0);  return;
+        case 0x11004001u: clint.mtimecmp_lo = (clint.mtimecmp_lo & ~(0xffu << 8))  | ((val & 0xff) << 8);  return;
+        case 0x11004002u: clint.mtimecmp_lo = (clint.mtimecmp_lo & ~(0xffu << 16)) | ((val & 0xff) << 16); return;
+        case 0x11004003u: clint.mtimecmp_lo = (clint.mtimecmp_lo & ~(0xffu << 24)) | ((val & 0xff) << 24); return;
+        case 0x11004004u: clint.mtimecmp_hi = (clint.mtimecmp_hi & ~(0xffu << 0))  | ((val & 0xff) << 0);  return;
+        case 0x11004005u: clint.mtimecmp_hi = (clint.mtimecmp_hi & ~(0xffu << 8))  | ((val & 0xff) << 8);  return;
+        case 0x11004006u: clint.mtimecmp_hi = (clint.mtimecmp_hi & ~(0xffu << 16)) | ((val & 0xff) << 16); return;
+        case 0x11004007u: clint.mtimecmp_hi = (clint.mtimecmp_hi & ~(0xffu << 24)) | ((val & 0xff) << 24); return;
+
+        case 0x1100bff8u: clint.mtime_lo = (clint.mtime_lo & ~(0xffu << 0))  | ((val & 0xff) << 0);  return;
+        case 0x1100bff9u: clint.mtime_lo = (clint.mtime_lo & ~(0xffu << 8))  | ((val & 0xff) << 8);  return;
+        case 0x1100bffau: clint.mtime_lo = (clint.mtime_lo & ~(0xffu << 16)) | ((val & 0xff) << 16); return;
+        case 0x1100bffbu: clint.mtime_lo = (clint.mtime_lo & ~(0xffu << 24)) | ((val & 0xff) << 24); return;
+        case 0x1100bffcu: clint.mtime_hi = (clint.mtime_hi & ~(0xffu << 0))  | ((val & 0xff) << 0);  return;
+        case 0x1100bffdu: clint.mtime_hi = (clint.mtime_hi & ~(0xffu << 8))  | ((val & 0xff) << 8);  return;
+        case 0x1100bffeu: clint.mtime_hi = (clint.mtime_hi & ~(0xffu << 16)) | ((val & 0xff) << 16); return;
+        case 0x1100bfffu: clint.mtime_hi = (clint.mtime_hi & ~(0xffu << 24)) | ((val & 0xff) << 24); return;
+
+        // SYSCON at 0x11100000 (poweroff=0x5555, reboot=0x7777)
+        case 0x11100000u:
+            if (val == 0x55) syscon_cmd = 0x5555;
+            else if (val == 0x77) syscon_cmd = 0x7777;
+            return;
+        case 0x11100001u: return;
+        case 0x11100002u: return;
+        case 0x11100003u: return;
 
         // UART
         case 0x10000000u:
@@ -607,23 +670,32 @@ void RV32::uartTick()
 
     if ((clock % 0x38400) == 0 && UART_GET1(RBR) == 0)
     {
-        u32 value = 0; // TODO: Add actual input logic
-        if (value != 0)
+#ifndef __EMSCRIPTEN__
+        int byteswaiting = 0;
+        ioctl(STDIN_FILENO, FIONREAD, &byteswaiting);
+        if (byteswaiting > 0)
         {
-            UART_SET1(RBR, value);
-            UART_SET2(LSR, (UART_GET2(LSR) | LSR_DATA_AVAILABLE));
-            uartUpdateIir();
-            if ((UART_GET1(IER) & IER_RXINT_BIT) != 0)
+            char c;
+            if (read(STDIN_FILENO, &c, 1) == 1)
             {
-                rx_ip = true;
+                u32 value = (u8)c;
+                UART_SET1(RBR, value);
+                UART_SET2(LSR, (UART_GET2(LSR) | LSR_DATA_AVAILABLE));
+                uartUpdateIir();
+                if ((UART_GET1(IER) & IER_RXINT_BIT) != 0)
+                {
+                    rx_ip = true;
+                }
             }
         }
+#endif
     }
 
     u32 thr = UART_GET1(THR);
-    if ((clock & 0x16) == 0 && thr != 0)
+    if (thr != 0)
     {
         printf("%c", (char)thr);
+        fflush(stdout);
         UART_SET1(THR, 0);
         UART_SET2(LSR, (UART_GET2(LSR) | LSR_THR_EMPTY));
         uartUpdateIir();

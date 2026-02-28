@@ -208,6 +208,7 @@ int App::initializeEmu(int argc, char *argv[])
     if (bin_file_name)
     {
         printf("INFO: Binary File: %s\n", bin_file_name);
+        emu.initializeBin(bin_file_name);
     }
     if (dtb_file_name)
     {
@@ -388,8 +389,7 @@ void App::createTerminal()
     ImGuiIO &io = ImGui::GetIO();
     (void)io;
     ImGui::Begin("Terminal");
-    ImGui::Checkbox("Demo Window", &settings.show_demo_window);
-    ImGui::ColorEdit3("BG Color", (float *)&window_bg_color);
+    // ImGui::ColorEdit3("BG Color", (float *)&window_bg_color);
     ImGui::Text("Application average %.3f ms/frame %.1f fps", 1000.0f / io.Framerate, io.Framerate);
 
     static char buf1[256] = "ls -al";
@@ -475,7 +475,7 @@ void App::createCpuState()
             ImGui::SameLine();
             if (ImGui::Button("2.Load IMG"))
             {
-                emu.initializeElf(emu.bin_file_path.c_str());
+                emu.initializeBin(emu.bin_file_path.c_str());
             }
             ImGui::SameLine();
             ImGui::Text("%s", emu.bin_file_path.c_str());
@@ -497,6 +497,17 @@ void App::createCpuState()
     ImGui::SameLine();
     if (ImGui::Button("Step"))
     {
+        if (!emu.running && emu.ready_to_run)
+        {
+            emu.emulate();
+        }
+        else {
+            if (!emu.ready_to_run) {
+                printf("Not ready to execute. Memory maybe corrupted\n");
+            } else {
+                printf("Cannot step while running. Please stop the emulator first.\n");
+            }
+        }
     }
     ImGui::SameLine();
     if (ImGui::Button("Reset"))
@@ -602,26 +613,39 @@ void App::stepEmu()
 {
     if (emu.running)
     {
-        // ImGuiIO io = ImGui::GetIO();
         ImGuiIO &io = ImGui::GetIO();
         (void)io;
 
-        emu.time_sum += 1.0 / io.Framerate; // seconds
-
         if (emu.clk_freq_sel != -1)
         {
+            emu.time_sum += 1.0 / io.Framerate;
             if (emu.time_sum >= emu.sec_per_cycle)
             {
-                emu.time_sum = 0; // reset timer
-
+                emu.time_sum = 0;
                 emu.emulate();
-
                 emu.sec_per_cycle = 1.0 / std::max(1, emu.clk_freq_sel);
             }
         }
         else
         {
-            emu.emulate();
+            // Run as many instructions as possible within a ~10ms budget per frame,
+            // matching mini-rv32ima's "run at full speed" behaviour while keeping
+            // the GUI alive.  Time is sampled every 1024 instructions to avoid the
+            // overhead of a syscall on every step.
+            struct timeval t0, t1;
+            gettimeofday(&t0, NULL);
+            int count = 0;
+            while (emu.running)
+            {
+                emu.emulate();
+                if ((++count & 0x3FF) == 0)
+                {
+                    gettimeofday(&t1, NULL);
+                    long us = (long)(t1.tv_sec  - t0.tv_sec)  * 1000000L
+                            + (long)(t1.tv_usec - t0.tv_usec);
+                    if (us >= 10000L) break;
+                }
+            }
         }
     }
 }

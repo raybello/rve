@@ -1,6 +1,36 @@
 #include "emu.h"
 #include "net.h"
+#include "default64mbdtc.h"
 #include <sys/time.h>
+#ifndef __EMSCRIPTEN__
+#include <termios.h>
+#include <signal.h>
+#include <unistd.h>
+
+static struct termios orig_term;
+static bool term_captured = false;
+
+static void resetKeyboardInput()
+{
+    if (term_captured)
+    {
+        tcsetattr(STDIN_FILENO, TCSANOW, &orig_term);
+        term_captured = false;
+    }
+}
+
+static void captureKeyboardInput()
+{
+    if (term_captured) return;
+    atexit(resetKeyboardInput);
+    struct termios term;
+    tcgetattr(STDIN_FILENO, &term);
+    orig_term = term;
+    term.c_lflag &= ~(ICANON | ECHO);
+    tcsetattr(STDIN_FILENO, TCSANOW, &term);
+    term_captured = true;
+}
+#endif
 
 
 ////////////////////////////////////////////////////////////////
@@ -302,12 +332,13 @@ imp(add, FormatR, { // rv32i
     {
         // EXIT CALL
         u32 status = cpu.xreg[10] >> 1;
-        printf("ecall EXIT = %d (0x%x)\n", status, status);
+        u32 x10 = cpu.xreg[10];
 
         #ifndef __EMSCRIPTEN__
+        printf("ECALL EXIT = x10[%x] %d (0x%x)\n", x10, status, status);
         exit(status);
         #else
-        printf("Exit called in WebAssembly environment. Ignoring exit and halting execution.\n");
+        printf("Exit called in WebAssembly environment. Ignoring exit.\n");
         #endif
     }
 
@@ -657,6 +688,7 @@ imp(add, FormatR, { // rv32i
     }
 
     printf("Invalid instruction: %08x\n", ins_word);
+    exit(EXIT_FAILURE);
     ret.trap.en = true;
     ret.trap.type = trap_IllegalInstruction;
     ret.trap.value = ins_word;
@@ -691,6 +723,9 @@ u8 Emulator::getMmapPtr(const char *path)
 void Emulator::initialize()
 {
     printf("INFO: Emulator started\n");
+#ifndef __EMSCRIPTEN__
+    captureKeyboardInput();
+#endif
     cpu = RV32();
     memory = (uint8_t *)malloc(MEM_SIZE);
     cpu.init(memory, NULL, debugMode);
@@ -723,8 +758,36 @@ void Emulator::initializeElfDts(const char *elf_file, const char *dts_file)
 void Emulator::initializeBin(const char *path)
 {
     initialize();
-    // Load binary image
-    // loadBin()
+    // Zero memory for a clean boot
+    memset(memory, 0, MEM_SIZE);
+
+    // Load Linux kernel binary at memory[0] (maps to CPU VA 0x80000000)
+    if (loadLinuxImage(path, strlen(path) + 1, memory, MEM_SIZE) != 0)
+        return;
+
+    // Place default DTB at end of RAM
+    uint32_t dtb_size   = (uint32_t)sizeof(default64mbdtb);
+    uint32_t dtb_offset = (uint32_t)MEM_SIZE - dtb_size;
+    memcpy(memory + dtb_offset, default64mbdtb, dtb_size);
+
+    // Patch DTB memory-size field (offset 0x13c contains magic 0x00c0ff03)
+    // uint32_t *dtb_u32 = (uint32_t *)(memory + dtb_offset);
+    // if (dtb_u32[0x13c / 4] == 0x00c0ff03u)
+    // {
+    //     uint32_t v = dtb_offset; // usable RAM = offset of DTB from base
+    //     dtb_u32[0x13c / 4] = (v >> 24) |
+    //                           (((v >> 16) & 0xff) << 8) |
+    //                           (((v >>  8) & 0xff) << 16) |
+    //                           ((v & 0xff) << 24);
+    // }
+
+    // Re-init CPU for Linux boot
+    cpu.init(memory, NULL, debugMode);
+    cpu.xreg[10] = 0;                        // hart ID
+    cpu.xreg[11] = 0x80000000u + dtb_offset; // DTB virtual address
+
+    bin_file_path = path;
+    ready_to_run = true;
 }
 
 void print_inst(uint64_t pc, uint32_t inst)
@@ -819,6 +882,25 @@ void Emulator::emulate()
     }
 
     cpu.handleIrqAndTrap(&ret);
+
+    // Handle SYSCON poweroff/reboot
+    if (cpu.syscon_cmd != 0)
+    {
+        u32 cmd = cpu.syscon_cmd;
+        cpu.syscon_cmd = 0;
+        if (cmd == 0x5555)
+        {
+            printf("INFO: SYSCON POWEROFF\n");
+            running = false;
+            ready_to_run = false;
+        }
+        else if (cmd == 0x7777)
+        {
+            printf("INFO: SYSCON REBOOT\n");
+            initializeBin(bin_file_path.c_str());
+            return; // initializeBin reset CPU state; don't overwrite pc
+        }
+    }
 
     // Advance PC (ret.pc_val defaults to pc+4)
     cpu.pc = ret.pc_val;

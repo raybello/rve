@@ -108,10 +108,10 @@ $(BUILD_DIR)/$(EXE): $(OBJS)
 
 # Build commands
 all: $(BUILD_DIR)/$(EXE)
-	@echo Build complete for $(ECHO_MESSAGE)
+	@echo ============ Build complete for $(ECHO_MESSAGE) ============
 
 web: clean_web
-	@echo Building for Web on $(ECHO_MESSAGE)
+	@echo ============ Building for Web on $(ECHO_MESSAGE) ============
 	make -f Makefile.emscripten serve -j16
 
 clean_web:
@@ -127,6 +127,20 @@ isa: all
 
 isas: all
 	@$(foreach test, $(ISA_TEST_FILES), ./$(BUILD_DIR)/$(EXE) $(ISAFLAGS) $(ISA_TEST_DIR)/$(test);)
+
+linux-clean:
+	@echo ============ Cleaning Linux Test ============
+	rm -rf $(BUILD_DIR)/Image $(BUILD_DIR)/linux-6.1.14-rv32nommu-cnl-1.zip
+
+linux-dl:
+	@echo ============ Downloading Linux Image ============ 
+	wget https://github.com/cnlohr/mini-rv32ima-images/raw/master/images/linux-6.1.14-rv32nommu-cnl-1.zip -O $(BUILD_DIR)/linux-6.1.14-rv32nommu-cnl-1.zip
+	unzip $(BUILD_DIR)/linux-6.1.14-rv32nommu-cnl-1.zip -d $(BUILD_DIR)
+	
+
+linux: all linux-clean linux-dl
+	@echo ============ Running Linux Test ============
+	./$(BUILD_DIR)/$(EXE) -n -b $(BUILD_DIR)/Image
 
 rerun: clean
 	make run -j8

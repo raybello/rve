@@ -125,6 +125,7 @@ var REMOTE_PACKAGE_SIZE = metadata['remote_package_size'];
 Module['FS_createPath']("/", "assets", true, true);
 Module['FS_createPath']("/assets", "fonts", true, true);
 Module['FS_createPath']("/assets", "isa-test", true, true);
+Module['FS_createPath']("/assets", "linux", true, true);
 
       /** @constructor */
       function DataRequest(start, end, audio) {
@@ -192,7 +193,7 @@ Module['FS_createPath']("/assets", "isa-test", true, true);
     }
 
     }
-    loadPackage({"files": [{"filename": "/assets/fonts/FiraCode-Regular.ttf", "start": 0, "end": 289624}, {"filename": "/assets/fonts/SFPro.ttf", "start": 289624, "end": 6400084}, {"filename": "/assets/isa-test/rv32mi-p-csr", "start": 6400084, "end": 6413788}, {"filename": "/assets/isa-test/rv32mi-p-mcsr", "start": 6413788, "end": 6422932}, {"filename": "/assets/isa-test/rv32si-p-csr", "start": 6422932, "end": 6436588}, {"filename": "/assets/isa-test/rv32ua-p-amoadd_w", "start": 6436588, "end": 6445868}, {"filename": "/assets/isa-test/rv32ua-p-amoand_w", "start": 6445868, "end": 6455148}, {"filename": "/assets/isa-test/rv32ua-p-amomax_w", "start": 6455148, "end": 6464428}, {"filename": "/assets/isa-test/rv32ua-p-amomaxu_w", "start": 6464428, "end": 6473708}, {"filename": "/assets/isa-test/rv32ua-p-amomin_w", "start": 6473708, "end": 6482988}, {"filename": "/assets/isa-test/rv32ua-p-amominu_w", "start": 6482988, "end": 6492268}, {"filename": "/assets/isa-test/rv32ua-p-amoor_w", "start": 6492268, "end": 6501548}, {"filename": "/assets/isa-test/rv32ua-p-amoswap_w", "start": 6501548, "end": 6510828}, {"filename": "/assets/isa-test/rv32ua-p-amoxor_w", "start": 6510828, "end": 6520108}, {"filename": "/assets/isa-test/rv32ua-p-lrsc", "start": 6520108, "end": 6534516}, {"filename": "/assets/isa-test/rv32ui-p-add", "start": 6534516, "end": 6544496}, {"filename": "/assets/isa-test/rv32ui-p-add.dump", "start": 6544496, "end": 6564940}, {"filename": "/assets/isa-test/rv32ui-p-addi", "start": 6564940, "end": 6574608}, {"filename": "/assets/isa-test/rv32ui-p-addi.dump", "start": 6574608, "end": 6587648}, {"filename": "/assets/isa-test/rv32ui-p-and", "start": 6587648, "end": 6597364}, {"filename": "/assets/isa-test/rv32ui-p-and.dump", "start": 6597364, "end": 6618798}, {"filename": "/assets/isa-test/rv32ui-p-andi", "start": 6618798, "end": 6628202}, {"filename": "/assets/isa-test/rv32ui-p-andi.dump", "start": 6628202, "end": 6639166}, {"filename": "/assets/isa-test/rv32ui-p-auipc", "start": 6639166, "end": 6648310}, {"filename": "/assets/isa-test/rv32ui-p-auipc.dump", "start": 6648310, "end": 6654350}, {"filename": "/assets/isa-test/rv32ui-p-beq", "start": 6654350, "end": 6663922}, {"filename": "/assets/isa-test/rv32ui-p-beq.dump", "start": 6663922, "end": 6677775}, {"filename": "/assets/isa-test/rv32ui-p-bge", "start": 6677775, "end": 6687419}, {"filename": "/assets/isa-test/rv32ui-p-bge.dump", "start": 6687419, "end": 6703164}, {"filename": "/assets/isa-test/rv32ui-p-bgeu", "start": 6703164, "end": 6712808}, {"filename": "/assets/isa-test/rv32ui-p-bgeu.dump", "start": 6712808, "end": 6728734}, {"filename": "/assets/isa-test/rv32ui-p-blt", "start": 6728734, "end": 6738306}, {"filename": "/assets/isa-test/rv32ui-p-blt.dump", "start": 6738306, "end": 6752160}, {"filename": "/assets/isa-test/rv32ui-p-bltu", "start": 6752160, "end": 6761732}, {"filename": "/assets/isa-test/rv32ui-p-bltu.dump", "start": 6761732, "end": 6776974}, {"filename": "/assets/isa-test/rv32ui-p-bne", "start": 6776974, "end": 6786546}, {"filename": "/assets/isa-test/rv32ui-p-bne.dump", "start": 6786546, "end": 6800363}, {"filename": "/assets/isa-test/rv32ui-p-fence_i", "start": 6800363, "end": 6813647}, {"filename": "/assets/isa-test/rv32ui-p-fence_i.dump", "start": 6813647, "end": 6822083}, {"filename": "/assets/isa-test/rv32ui-p-jal", "start": 6822083, "end": 6831279}, {"filename": "/assets/isa-test/rv32ui-p-jal.dump", "start": 6831279, "end": 6837216}, {"filename": "/assets/isa-test/rv32ui-p-jalr", "start": 6837216, "end": 6846556}, {"filename": "/assets/isa-test/rv32ui-p-jalr.dump", "start": 6846556, "end": 6855160}, {"filename": "/assets/isa-test/rv32ui-p-lb", "start": 6855160, "end": 6868892}, {"filename": "/assets/isa-test/rv32ui-p-lb.dump", "start": 6868892, "end": 6881700}, {"filename": "/assets/isa-test/rv32ui-p-lbu", "start": 6881700, "end": 6895432}, {"filename": "/assets/isa-test/rv32ui-p-lbu.dump", "start": 6895432, "end": 6908262}, {"filename": "/assets/isa-test/rv32ui-p-lh", "start": 6908262, "end": 6921994}, {"filename": "/assets/isa-test/rv32ui-p-lh.dump", "start": 6921994, "end": 6935895}, {"filename": "/assets/isa-test/rv32ui-p-lhu", "start": 6935895, "end": 6949627}, {"filename": "/assets/isa-test/rv32ui-p-lhu.dump", "start": 6949627, "end": 6963518}, {"filename": "/assets/isa-test/rv32ui-p-lui", "start": 6963518, "end": 6972730}, {"filename": "/assets/isa-test/rv32ui-p-lui.dump", "start": 6972730, "end": 6979773}, {"filename": "/assets/isa-test/rv32ui-p-lw", "start": 6979773, "end": 6993505}, {"filename": "/assets/isa-test/rv32ui-p-lw.dump", "start": 6993505, "end": 7007483}, {"filename": "/assets/isa-test/rv32ui-p-or", "start": 7007483, "end": 7017199}, {"filename": "/assets/isa-test/rv32ui-p-or.dump", "start": 7017199, "end": 7038657}, {"filename": "/assets/isa-test/rv32ui-p-ori", "start": 7038657, "end": 7048061}, {"filename": "/assets/isa-test/rv32ui-p-ori.dump", "start": 7048061, "end": 7060225}, {"filename": "/assets/isa-test/rv32ui-p-sb", "start": 7060225, "end": 7074189}, {"filename": "/assets/isa-test/rv32ui-p-sb.dump", "start": 7074189, "end": 7092794}, {"filename": "/assets/isa-test/rv32ui-p-sh", "start": 7092794, "end": 7106774}, {"filename": "/assets/isa-test/rv32ui-p-sh.dump", "start": 7106774, "end": 7127961}, {"filename": "/assets/isa-test/rv32ui-p-simple", "start": 7127961, "end": 7137017}, {"filename": "/assets/isa-test/rv32ui-p-simple.dump", "start": 7137017, "end": 7142510}, {"filename": "/assets/isa-test/rv32ui-p-sll", "start": 7142510, "end": 7152586}, {"filename": "/assets/isa-test/rv32ui-p-sll.dump", "start": 7152586, "end": 7173615}, {"filename": "/assets/isa-test/rv32ui-p-slli", "start": 7173615, "end": 7183283}, {"filename": "/assets/isa-test/rv32ui-p-slli.dump", "start": 7183283, "end": 7196334}, {"filename": "/assets/isa-test/rv32ui-p-slt", "start": 7196334, "end": 7206314}, {"filename": "/assets/isa-test/rv32ui-p-slt.dump", "start": 7206314, "end": 7225493}, {"filename": "/assets/isa-test/rv32ui-p-slti", "start": 7225493, "end": 7235161}, {"filename": "/assets/isa-test/rv32ui-p-slti.dump", "start": 7235161, "end": 7248097}, {"filename": "/assets/isa-test/rv32ui-p-sltiu", "start": 7248097, "end": 7257765}, {"filename": "/assets/isa-test/rv32ui-p-sltiu.dump", "start": 7257765, "end": 7270720}, {"filename": "/assets/isa-test/rv32ui-p-sltu", "start": 7270720, "end": 7280700}, {"filename": "/assets/isa-test/rv32ui-p-sltu.dump", "start": 7280700, "end": 7299919}, {"filename": "/assets/isa-test/rv32ui-p-sra", "start": 7299919, "end": 7310019}, {"filename": "/assets/isa-test/rv32ui-p-sra.dump", "start": 7310019, "end": 7333412}, {"filename": "/assets/isa-test/rv32ui-p-srai", "start": 7333412, "end": 7343080}, {"filename": "/assets/isa-test/rv32ui-p-srai.dump", "start": 7343080, "end": 7357394}, {"filename": "/assets/isa-test/rv32ui-p-srl", "start": 7357394, "end": 7367494}, {"filename": "/assets/isa-test/rv32ui-p-srl.dump", "start": 7367494, "end": 7389666}, {"filename": "/assets/isa-test/rv32ui-p-srli", "start": 7389666, "end": 7399334}, {"filename": "/assets/isa-test/rv32ui-p-srli.dump", "start": 7399334, "end": 7413632}, {"filename": "/assets/isa-test/rv32ui-p-sub", "start": 7413632, "end": 7423588}, {"filename": "/assets/isa-test/rv32ui-p-sub.dump", "start": 7423588, "end": 7442991}, {"filename": "/assets/isa-test/rv32ui-p-sw", "start": 7442991, "end": 7456987}, {"filename": "/assets/isa-test/rv32ui-p-sw.dump", "start": 7456987, "end": 7478459}, {"filename": "/assets/isa-test/rv32ui-p-xor", "start": 7478459, "end": 7488175}, {"filename": "/assets/isa-test/rv32ui-p-xor.dump", "start": 7488175, "end": 7509647}, {"filename": "/assets/isa-test/rv32ui-p-xori", "start": 7509647, "end": 7519051}, {"filename": "/assets/isa-test/rv32ui-p-xori.dump", "start": 7519051, "end": 7531234}, {"filename": "/assets/isa-test/rv32um-p-div", "start": 7531234, "end": 7540542}, {"filename": "/assets/isa-test/rv32um-p-divu", "start": 7540542, "end": 7549850}, {"filename": "/assets/isa-test/rv32um-p-mul", "start": 7549850, "end": 7559806}, {"filename": "/assets/isa-test/rv32um-p-mulh", "start": 7559806, "end": 7569714}, {"filename": "/assets/isa-test/rv32um-p-mulhsu", "start": 7569714, "end": 7579622}, {"filename": "/assets/isa-test/rv32um-p-mulhu", "start": 7579622, "end": 7589530}, {"filename": "/assets/isa-test/rv32um-p-rem", "start": 7589530, "end": 7598838}, {"filename": "/assets/isa-test/rv32um-p-remu", "start": 7598838, "end": 7608146}], "remote_package_size": 7608146});
+    loadPackage({"files": [{"filename": "/assets/fonts/FiraCode-Regular.ttf", "start": 0, "end": 289624}, {"filename": "/assets/fonts/SFPro.ttf", "start": 289624, "end": 6400084}, {"filename": "/assets/isa-test/rv32mi-p-csr", "start": 6400084, "end": 6413788}, {"filename": "/assets/isa-test/rv32mi-p-mcsr", "start": 6413788, "end": 6422932}, {"filename": "/assets/isa-test/rv32si-p-csr", "start": 6422932, "end": 6436588}, {"filename": "/assets/isa-test/rv32ua-p-amoadd_w", "start": 6436588, "end": 6445868}, {"filename": "/assets/isa-test/rv32ua-p-amoand_w", "start": 6445868, "end": 6455148}, {"filename": "/assets/isa-test/rv32ua-p-amomax_w", "start": 6455148, "end": 6464428}, {"filename": "/assets/isa-test/rv32ua-p-amomaxu_w", "start": 6464428, "end": 6473708}, {"filename": "/assets/isa-test/rv32ua-p-amomin_w", "start": 6473708, "end": 6482988}, {"filename": "/assets/isa-test/rv32ua-p-amominu_w", "start": 6482988, "end": 6492268}, {"filename": "/assets/isa-test/rv32ua-p-amoor_w", "start": 6492268, "end": 6501548}, {"filename": "/assets/isa-test/rv32ua-p-amoswap_w", "start": 6501548, "end": 6510828}, {"filename": "/assets/isa-test/rv32ua-p-amoxor_w", "start": 6510828, "end": 6520108}, {"filename": "/assets/isa-test/rv32ua-p-lrsc", "start": 6520108, "end": 6534516}, {"filename": "/assets/isa-test/rv32ui-p-add", "start": 6534516, "end": 6544496}, {"filename": "/assets/isa-test/rv32ui-p-add.dump", "start": 6544496, "end": 6564940}, {"filename": "/assets/isa-test/rv32ui-p-addi", "start": 6564940, "end": 6574608}, {"filename": "/assets/isa-test/rv32ui-p-addi.dump", "start": 6574608, "end": 6587648}, {"filename": "/assets/isa-test/rv32ui-p-and", "start": 6587648, "end": 6597364}, {"filename": "/assets/isa-test/rv32ui-p-and.dump", "start": 6597364, "end": 6618798}, {"filename": "/assets/isa-test/rv32ui-p-andi", "start": 6618798, "end": 6628202}, {"filename": "/assets/isa-test/rv32ui-p-andi.dump", "start": 6628202, "end": 6639166}, {"filename": "/assets/isa-test/rv32ui-p-auipc", "start": 6639166, "end": 6648310}, {"filename": "/assets/isa-test/rv32ui-p-auipc.dump", "start": 6648310, "end": 6654350}, {"filename": "/assets/isa-test/rv32ui-p-beq", "start": 6654350, "end": 6663922}, {"filename": "/assets/isa-test/rv32ui-p-beq.dump", "start": 6663922, "end": 6677775}, {"filename": "/assets/isa-test/rv32ui-p-bge", "start": 6677775, "end": 6687419}, {"filename": "/assets/isa-test/rv32ui-p-bge.dump", "start": 6687419, "end": 6703164}, {"filename": "/assets/isa-test/rv32ui-p-bgeu", "start": 6703164, "end": 6712808}, {"filename": "/assets/isa-test/rv32ui-p-bgeu.dump", "start": 6712808, "end": 6728734}, {"filename": "/assets/isa-test/rv32ui-p-blt", "start": 6728734, "end": 6738306}, {"filename": "/assets/isa-test/rv32ui-p-blt.dump", "start": 6738306, "end": 6752160}, {"filename": "/assets/isa-test/rv32ui-p-bltu", "start": 6752160, "end": 6761732}, {"filename": "/assets/isa-test/rv32ui-p-bltu.dump", "start": 6761732, "end": 6776974}, {"filename": "/assets/isa-test/rv32ui-p-bne", "start": 6776974, "end": 6786546}, {"filename": "/assets/isa-test/rv32ui-p-bne.dump", "start": 6786546, "end": 6800363}, {"filename": "/assets/isa-test/rv32ui-p-fence_i", "start": 6800363, "end": 6813647}, {"filename": "/assets/isa-test/rv32ui-p-fence_i.dump", "start": 6813647, "end": 6822083}, {"filename": "/assets/isa-test/rv32ui-p-jal", "start": 6822083, "end": 6831279}, {"filename": "/assets/isa-test/rv32ui-p-jal.dump", "start": 6831279, "end": 6837216}, {"filename": "/assets/isa-test/rv32ui-p-jalr", "start": 6837216, "end": 6846556}, {"filename": "/assets/isa-test/rv32ui-p-jalr.dump", "start": 6846556, "end": 6855160}, {"filename": "/assets/isa-test/rv32ui-p-lb", "start": 6855160, "end": 6868892}, {"filename": "/assets/isa-test/rv32ui-p-lb.dump", "start": 6868892, "end": 6881700}, {"filename": "/assets/isa-test/rv32ui-p-lbu", "start": 6881700, "end": 6895432}, {"filename": "/assets/isa-test/rv32ui-p-lbu.dump", "start": 6895432, "end": 6908262}, {"filename": "/assets/isa-test/rv32ui-p-lh", "start": 6908262, "end": 6921994}, {"filename": "/assets/isa-test/rv32ui-p-lh.dump", "start": 6921994, "end": 6935895}, {"filename": "/assets/isa-test/rv32ui-p-lhu", "start": 6935895, "end": 6949627}, {"filename": "/assets/isa-test/rv32ui-p-lhu.dump", "start": 6949627, "end": 6963518}, {"filename": "/assets/isa-test/rv32ui-p-lui", "start": 6963518, "end": 6972730}, {"filename": "/assets/isa-test/rv32ui-p-lui.dump", "start": 6972730, "end": 6979773}, {"filename": "/assets/isa-test/rv32ui-p-lw", "start": 6979773, "end": 6993505}, {"filename": "/assets/isa-test/rv32ui-p-lw.dump", "start": 6993505, "end": 7007483}, {"filename": "/assets/isa-test/rv32ui-p-or", "start": 7007483, "end": 7017199}, {"filename": "/assets/isa-test/rv32ui-p-or.dump", "start": 7017199, "end": 7038657}, {"filename": "/assets/isa-test/rv32ui-p-ori", "start": 7038657, "end": 7048061}, {"filename": "/assets/isa-test/rv32ui-p-ori.dump", "start": 7048061, "end": 7060225}, {"filename": "/assets/isa-test/rv32ui-p-sb", "start": 7060225, "end": 7074189}, {"filename": "/assets/isa-test/rv32ui-p-sb.dump", "start": 7074189, "end": 7092794}, {"filename": "/assets/isa-test/rv32ui-p-sh", "start": 7092794, "end": 7106774}, {"filename": "/assets/isa-test/rv32ui-p-sh.dump", "start": 7106774, "end": 7127961}, {"filename": "/assets/isa-test/rv32ui-p-simple", "start": 7127961, "end": 7137017}, {"filename": "/assets/isa-test/rv32ui-p-simple.dump", "start": 7137017, "end": 7142510}, {"filename": "/assets/isa-test/rv32ui-p-sll", "start": 7142510, "end": 7152586}, {"filename": "/assets/isa-test/rv32ui-p-sll.dump", "start": 7152586, "end": 7173615}, {"filename": "/assets/isa-test/rv32ui-p-slli", "start": 7173615, "end": 7183283}, {"filename": "/assets/isa-test/rv32ui-p-slli.dump", "start": 7183283, "end": 7196334}, {"filename": "/assets/isa-test/rv32ui-p-slt", "start": 7196334, "end": 7206314}, {"filename": "/assets/isa-test/rv32ui-p-slt.dump", "start": 7206314, "end": 7225493}, {"filename": "/assets/isa-test/rv32ui-p-slti", "start": 7225493, "end": 7235161}, {"filename": "/assets/isa-test/rv32ui-p-slti.dump", "start": 7235161, "end": 7248097}, {"filename": "/assets/isa-test/rv32ui-p-sltiu", "start": 7248097, "end": 7257765}, {"filename": "/assets/isa-test/rv32ui-p-sltiu.dump", "start": 7257765, "end": 7270720}, {"filename": "/assets/isa-test/rv32ui-p-sltu", "start": 7270720, "end": 7280700}, {"filename": "/assets/isa-test/rv32ui-p-sltu.dump", "start": 7280700, "end": 7299919}, {"filename": "/assets/isa-test/rv32ui-p-sra", "start": 7299919, "end": 7310019}, {"filename": "/assets/isa-test/rv32ui-p-sra.dump", "start": 7310019, "end": 7333412}, {"filename": "/assets/isa-test/rv32ui-p-srai", "start": 7333412, "end": 7343080}, {"filename": "/assets/isa-test/rv32ui-p-srai.dump", "start": 7343080, "end": 7357394}, {"filename": "/assets/isa-test/rv32ui-p-srl", "start": 7357394, "end": 7367494}, {"filename": "/assets/isa-test/rv32ui-p-srl.dump", "start": 7367494, "end": 7389666}, {"filename": "/assets/isa-test/rv32ui-p-srli", "start": 7389666, "end": 7399334}, {"filename": "/assets/isa-test/rv32ui-p-srli.dump", "start": 7399334, "end": 7413632}, {"filename": "/assets/isa-test/rv32ui-p-sub", "start": 7413632, "end": 7423588}, {"filename": "/assets/isa-test/rv32ui-p-sub.dump", "start": 7423588, "end": 7442991}, {"filename": "/assets/isa-test/rv32ui-p-sw", "start": 7442991, "end": 7456987}, {"filename": "/assets/isa-test/rv32ui-p-sw.dump", "start": 7456987, "end": 7478459}, {"filename": "/assets/isa-test/rv32ui-p-xor", "start": 7478459, "end": 7488175}, {"filename": "/assets/isa-test/rv32ui-p-xor.dump", "start": 7488175, "end": 7509647}, {"filename": "/assets/isa-test/rv32ui-p-xori", "start": 7509647, "end": 7519051}, {"filename": "/assets/isa-test/rv32ui-p-xori.dump", "start": 7519051, "end": 7531234}, {"filename": "/assets/isa-test/rv32um-p-div", "start": 7531234, "end": 7540542}, {"filename": "/assets/isa-test/rv32um-p-divu", "start": 7540542, "end": 7549850}, {"filename": "/assets/isa-test/rv32um-p-mul", "start": 7549850, "end": 7559806}, {"filename": "/assets/isa-test/rv32um-p-mulh", "start": 7559806, "end": 7569714}, {"filename": "/assets/isa-test/rv32um-p-mulhsu", "start": 7569714, "end": 7579622}, {"filename": "/assets/isa-test/rv32um-p-mulhu", "start": 7579622, "end": 7589530}, {"filename": "/assets/isa-test/rv32um-p-rem", "start": 7589530, "end": 7598838}, {"filename": "/assets/isa-test/rv32um-p-remu", "start": 7598838, "end": 7608146}, {"filename": "/assets/linux/Image", "start": 7608146, "end": 11084898}], "remote_package_size": 11084898});
 
   })();
 
@@ -1204,22 +1205,22 @@ function dbg(text) {
 // === Body ===
 
 var ASM_CONSTS = {
-  344652: ($0) => { var str = UTF8ToString($0) + '\n\n' + 'Abort/Retry/Ignore/AlwaysIgnore? [ariA] :'; var reply = window.prompt(str, "i"); if (reply === null) { reply = "i"; } return allocate(intArrayFromString(reply), 'i8', ALLOC_NORMAL); },  
- 344877: () => { if (typeof(AudioContext) !== 'undefined') { return true; } else if (typeof(webkitAudioContext) !== 'undefined') { return true; } return false; },  
- 345024: () => { if ((typeof(navigator.mediaDevices) !== 'undefined') && (typeof(navigator.mediaDevices.getUserMedia) !== 'undefined')) { return true; } else if (typeof(navigator.webkitGetUserMedia) !== 'undefined') { return true; } return false; },  
- 345258: ($0) => { if(typeof(Module['SDL2']) === 'undefined') { Module['SDL2'] = {}; } var SDL2 = Module['SDL2']; if (!$0) { SDL2.audio = {}; } else { SDL2.capture = {}; } if (!SDL2.audioContext) { if (typeof(AudioContext) !== 'undefined') { SDL2.audioContext = new AudioContext(); } else if (typeof(webkitAudioContext) !== 'undefined') { SDL2.audioContext = new webkitAudioContext(); } if (SDL2.audioContext) { autoResumeAudioContext(SDL2.audioContext); } } return SDL2.audioContext === undefined ? -1 : 0; },  
- 345751: () => { var SDL2 = Module['SDL2']; return SDL2.audioContext.sampleRate; },  
- 345819: ($0, $1, $2, $3) => { var SDL2 = Module['SDL2']; var have_microphone = function(stream) { if (SDL2.capture.silenceTimer !== undefined) { clearTimeout(SDL2.capture.silenceTimer); SDL2.capture.silenceTimer = undefined; } SDL2.capture.mediaStreamNode = SDL2.audioContext.createMediaStreamSource(stream); SDL2.capture.scriptProcessorNode = SDL2.audioContext.createScriptProcessor($1, $0, 1); SDL2.capture.scriptProcessorNode.onaudioprocess = function(audioProcessingEvent) { if ((SDL2 === undefined) || (SDL2.capture === undefined)) { return; } audioProcessingEvent.outputBuffer.getChannelData(0).fill(0.0); SDL2.capture.currentCaptureBuffer = audioProcessingEvent.inputBuffer; dynCall('vi', $2, [$3]); }; SDL2.capture.mediaStreamNode.connect(SDL2.capture.scriptProcessorNode); SDL2.capture.scriptProcessorNode.connect(SDL2.audioContext.destination); SDL2.capture.stream = stream; }; var no_microphone = function(error) { }; SDL2.capture.silenceBuffer = SDL2.audioContext.createBuffer($0, $1, SDL2.audioContext.sampleRate); SDL2.capture.silenceBuffer.getChannelData(0).fill(0.0); var silence_callback = function() { SDL2.capture.currentCaptureBuffer = SDL2.capture.silenceBuffer; dynCall('vi', $2, [$3]); }; SDL2.capture.silenceTimer = setTimeout(silence_callback, ($1 / SDL2.audioContext.sampleRate) * 1000); if ((navigator.mediaDevices !== undefined) && (navigator.mediaDevices.getUserMedia !== undefined)) { navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then(have_microphone).catch(no_microphone); } else if (navigator.webkitGetUserMedia !== undefined) { navigator.webkitGetUserMedia({ audio: true, video: false }, have_microphone, no_microphone); } },  
- 347471: ($0, $1, $2, $3) => { var SDL2 = Module['SDL2']; SDL2.audio.scriptProcessorNode = SDL2.audioContext['createScriptProcessor']($1, 0, $0); SDL2.audio.scriptProcessorNode['onaudioprocess'] = function (e) { if ((SDL2 === undefined) || (SDL2.audio === undefined)) { return; } SDL2.audio.currentOutputBuffer = e['outputBuffer']; dynCall('vi', $2, [$3]); }; SDL2.audio.scriptProcessorNode['connect'](SDL2.audioContext['destination']); },  
- 347881: ($0, $1) => { var SDL2 = Module['SDL2']; var numChannels = SDL2.capture.currentCaptureBuffer.numberOfChannels; for (var c = 0; c < numChannels; ++c) { var channelData = SDL2.capture.currentCaptureBuffer.getChannelData(c); if (channelData.length != $1) { throw 'Web Audio capture buffer length mismatch! Destination size: ' + channelData.length + ' samples vs expected ' + $1 + ' samples!'; } if (numChannels == 1) { for (var j = 0; j < $1; ++j) { setValue($0 + (j * 4), channelData[j], 'float'); } } else { for (var j = 0; j < $1; ++j) { setValue($0 + (((j * numChannels) + c) * 4), channelData[j], 'float'); } } } },  
- 348486: ($0, $1) => { var SDL2 = Module['SDL2']; var numChannels = SDL2.audio.currentOutputBuffer['numberOfChannels']; for (var c = 0; c < numChannels; ++c) { var channelData = SDL2.audio.currentOutputBuffer['getChannelData'](c); if (channelData.length != $1) { throw 'Web Audio output buffer length mismatch! Destination size: ' + channelData.length + ' samples vs expected ' + $1 + ' samples!'; } for (var j = 0; j < $1; ++j) { channelData[j] = HEAPF32[$0 + ((j*numChannels + c) << 2) >> 2]; } } },  
- 348966: ($0) => { var SDL2 = Module['SDL2']; if ($0) { if (SDL2.capture.silenceTimer !== undefined) { clearTimeout(SDL2.capture.silenceTimer); } if (SDL2.capture.stream !== undefined) { var tracks = SDL2.capture.stream.getAudioTracks(); for (var i = 0; i < tracks.length; i++) { SDL2.capture.stream.removeTrack(tracks[i]); } SDL2.capture.stream = undefined; } if (SDL2.capture.scriptProcessorNode !== undefined) { SDL2.capture.scriptProcessorNode.onaudioprocess = function(audioProcessingEvent) {}; SDL2.capture.scriptProcessorNode.disconnect(); SDL2.capture.scriptProcessorNode = undefined; } if (SDL2.capture.mediaStreamNode !== undefined) { SDL2.capture.mediaStreamNode.disconnect(); SDL2.capture.mediaStreamNode = undefined; } if (SDL2.capture.silenceBuffer !== undefined) { SDL2.capture.silenceBuffer = undefined } SDL2.capture = undefined; } else { if (SDL2.audio.scriptProcessorNode != undefined) { SDL2.audio.scriptProcessorNode.disconnect(); SDL2.audio.scriptProcessorNode = undefined; } SDL2.audio = undefined; } if ((SDL2.audioContext !== undefined) && (SDL2.audio === undefined) && (SDL2.capture === undefined)) { SDL2.audioContext.close(); SDL2.audioContext = undefined; } },  
- 350138: ($0, $1, $2) => { var w = $0; var h = $1; var pixels = $2; if (!Module['SDL2']) Module['SDL2'] = {}; var SDL2 = Module['SDL2']; if (SDL2.ctxCanvas !== Module['canvas']) { SDL2.ctx = Module['createContext'](Module['canvas'], false, true); SDL2.ctxCanvas = Module['canvas']; } if (SDL2.w !== w || SDL2.h !== h || SDL2.imageCtx !== SDL2.ctx) { SDL2.image = SDL2.ctx.createImageData(w, h); SDL2.w = w; SDL2.h = h; SDL2.imageCtx = SDL2.ctx; } var data = SDL2.image.data; var src = pixels >> 2; var dst = 0; var num; if (typeof CanvasPixelArray !== 'undefined' && data instanceof CanvasPixelArray) { num = data.length; while (dst < num) { var val = HEAP32[src]; data[dst ] = val & 0xff; data[dst+1] = (val >> 8) & 0xff; data[dst+2] = (val >> 16) & 0xff; data[dst+3] = 0xff; src++; dst += 4; } } else { if (SDL2.data32Data !== data) { SDL2.data32 = new Int32Array(data.buffer); SDL2.data8 = new Uint8Array(data.buffer); SDL2.data32Data = data; } var data32 = SDL2.data32; num = data32.length; data32.set(HEAP32.subarray(src, src + num)); var data8 = SDL2.data8; var i = 3; var j = i + 4*num; if (num % 8 == 0) { while (i < j) { data8[i] = 0xff; i = i + 4 | 0; data8[i] = 0xff; i = i + 4 | 0; data8[i] = 0xff; i = i + 4 | 0; data8[i] = 0xff; i = i + 4 | 0; data8[i] = 0xff; i = i + 4 | 0; data8[i] = 0xff; i = i + 4 | 0; data8[i] = 0xff; i = i + 4 | 0; data8[i] = 0xff; i = i + 4 | 0; } } else { while (i < j) { data8[i] = 0xff; i = i + 4 | 0; } } } SDL2.ctx.putImageData(SDL2.image, 0, 0); },  
- 351607: ($0, $1, $2, $3, $4) => { var w = $0; var h = $1; var hot_x = $2; var hot_y = $3; var pixels = $4; var canvas = document.createElement("canvas"); canvas.width = w; canvas.height = h; var ctx = canvas.getContext("2d"); var image = ctx.createImageData(w, h); var data = image.data; var src = pixels >> 2; var dst = 0; var num; if (typeof CanvasPixelArray !== 'undefined' && data instanceof CanvasPixelArray) { num = data.length; while (dst < num) { var val = HEAP32[src]; data[dst ] = val & 0xff; data[dst+1] = (val >> 8) & 0xff; data[dst+2] = (val >> 16) & 0xff; data[dst+3] = (val >> 24) & 0xff; src++; dst += 4; } } else { var data32 = new Int32Array(data.buffer); num = data32.length; data32.set(HEAP32.subarray(src, src + num)); } ctx.putImageData(image, 0, 0); var url = hot_x === 0 && hot_y === 0 ? "url(" + canvas.toDataURL() + "), auto" : "url(" + canvas.toDataURL() + ") " + hot_x + " " + hot_y + ", auto"; var urlBuf = _malloc(url.length + 1); stringToUTF8(url, urlBuf, url.length + 1); return urlBuf; },  
- 352596: ($0) => { if (Module['canvas']) { Module['canvas'].style['cursor'] = UTF8ToString($0); } },  
- 352679: () => { if (Module['canvas']) { Module['canvas'].style['cursor'] = 'none'; } },  
- 352748: () => { return window.innerWidth; },  
- 352778: () => { return window.innerHeight; }
+  357500: ($0) => { var str = UTF8ToString($0) + '\n\n' + 'Abort/Retry/Ignore/AlwaysIgnore? [ariA] :'; var reply = window.prompt(str, "i"); if (reply === null) { reply = "i"; } return allocate(intArrayFromString(reply), 'i8', ALLOC_NORMAL); },  
+ 357725: () => { if (typeof(AudioContext) !== 'undefined') { return true; } else if (typeof(webkitAudioContext) !== 'undefined') { return true; } return false; },  
+ 357872: () => { if ((typeof(navigator.mediaDevices) !== 'undefined') && (typeof(navigator.mediaDevices.getUserMedia) !== 'undefined')) { return true; } else if (typeof(navigator.webkitGetUserMedia) !== 'undefined') { return true; } return false; },  
+ 358106: ($0) => { if(typeof(Module['SDL2']) === 'undefined') { Module['SDL2'] = {}; } var SDL2 = Module['SDL2']; if (!$0) { SDL2.audio = {}; } else { SDL2.capture = {}; } if (!SDL2.audioContext) { if (typeof(AudioContext) !== 'undefined') { SDL2.audioContext = new AudioContext(); } else if (typeof(webkitAudioContext) !== 'undefined') { SDL2.audioContext = new webkitAudioContext(); } if (SDL2.audioContext) { autoResumeAudioContext(SDL2.audioContext); } } return SDL2.audioContext === undefined ? -1 : 0; },  
+ 358599: () => { var SDL2 = Module['SDL2']; return SDL2.audioContext.sampleRate; },  
+ 358667: ($0, $1, $2, $3) => { var SDL2 = Module['SDL2']; var have_microphone = function(stream) { if (SDL2.capture.silenceTimer !== undefined) { clearTimeout(SDL2.capture.silenceTimer); SDL2.capture.silenceTimer = undefined; } SDL2.capture.mediaStreamNode = SDL2.audioContext.createMediaStreamSource(stream); SDL2.capture.scriptProcessorNode = SDL2.audioContext.createScriptProcessor($1, $0, 1); SDL2.capture.scriptProcessorNode.onaudioprocess = function(audioProcessingEvent) { if ((SDL2 === undefined) || (SDL2.capture === undefined)) { return; } audioProcessingEvent.outputBuffer.getChannelData(0).fill(0.0); SDL2.capture.currentCaptureBuffer = audioProcessingEvent.inputBuffer; dynCall('vi', $2, [$3]); }; SDL2.capture.mediaStreamNode.connect(SDL2.capture.scriptProcessorNode); SDL2.capture.scriptProcessorNode.connect(SDL2.audioContext.destination); SDL2.capture.stream = stream; }; var no_microphone = function(error) { }; SDL2.capture.silenceBuffer = SDL2.audioContext.createBuffer($0, $1, SDL2.audioContext.sampleRate); SDL2.capture.silenceBuffer.getChannelData(0).fill(0.0); var silence_callback = function() { SDL2.capture.currentCaptureBuffer = SDL2.capture.silenceBuffer; dynCall('vi', $2, [$3]); }; SDL2.capture.silenceTimer = setTimeout(silence_callback, ($1 / SDL2.audioContext.sampleRate) * 1000); if ((navigator.mediaDevices !== undefined) && (navigator.mediaDevices.getUserMedia !== undefined)) { navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then(have_microphone).catch(no_microphone); } else if (navigator.webkitGetUserMedia !== undefined) { navigator.webkitGetUserMedia({ audio: true, video: false }, have_microphone, no_microphone); } },  
+ 360319: ($0, $1, $2, $3) => { var SDL2 = Module['SDL2']; SDL2.audio.scriptProcessorNode = SDL2.audioContext['createScriptProcessor']($1, 0, $0); SDL2.audio.scriptProcessorNode['onaudioprocess'] = function (e) { if ((SDL2 === undefined) || (SDL2.audio === undefined)) { return; } SDL2.audio.currentOutputBuffer = e['outputBuffer']; dynCall('vi', $2, [$3]); }; SDL2.audio.scriptProcessorNode['connect'](SDL2.audioContext['destination']); },  
+ 360729: ($0, $1) => { var SDL2 = Module['SDL2']; var numChannels = SDL2.capture.currentCaptureBuffer.numberOfChannels; for (var c = 0; c < numChannels; ++c) { var channelData = SDL2.capture.currentCaptureBuffer.getChannelData(c); if (channelData.length != $1) { throw 'Web Audio capture buffer length mismatch! Destination size: ' + channelData.length + ' samples vs expected ' + $1 + ' samples!'; } if (numChannels == 1) { for (var j = 0; j < $1; ++j) { setValue($0 + (j * 4), channelData[j], 'float'); } } else { for (var j = 0; j < $1; ++j) { setValue($0 + (((j * numChannels) + c) * 4), channelData[j], 'float'); } } } },  
+ 361334: ($0, $1) => { var SDL2 = Module['SDL2']; var numChannels = SDL2.audio.currentOutputBuffer['numberOfChannels']; for (var c = 0; c < numChannels; ++c) { var channelData = SDL2.audio.currentOutputBuffer['getChannelData'](c); if (channelData.length != $1) { throw 'Web Audio output buffer length mismatch! Destination size: ' + channelData.length + ' samples vs expected ' + $1 + ' samples!'; } for (var j = 0; j < $1; ++j) { channelData[j] = HEAPF32[$0 + ((j*numChannels + c) << 2) >> 2]; } } },  
+ 361814: ($0) => { var SDL2 = Module['SDL2']; if ($0) { if (SDL2.capture.silenceTimer !== undefined) { clearTimeout(SDL2.capture.silenceTimer); } if (SDL2.capture.stream !== undefined) { var tracks = SDL2.capture.stream.getAudioTracks(); for (var i = 0; i < tracks.length; i++) { SDL2.capture.stream.removeTrack(tracks[i]); } SDL2.capture.stream = undefined; } if (SDL2.capture.scriptProcessorNode !== undefined) { SDL2.capture.scriptProcessorNode.onaudioprocess = function(audioProcessingEvent) {}; SDL2.capture.scriptProcessorNode.disconnect(); SDL2.capture.scriptProcessorNode = undefined; } if (SDL2.capture.mediaStreamNode !== undefined) { SDL2.capture.mediaStreamNode.disconnect(); SDL2.capture.mediaStreamNode = undefined; } if (SDL2.capture.silenceBuffer !== undefined) { SDL2.capture.silenceBuffer = undefined } SDL2.capture = undefined; } else { if (SDL2.audio.scriptProcessorNode != undefined) { SDL2.audio.scriptProcessorNode.disconnect(); SDL2.audio.scriptProcessorNode = undefined; } SDL2.audio = undefined; } if ((SDL2.audioContext !== undefined) && (SDL2.audio === undefined) && (SDL2.capture === undefined)) { SDL2.audioContext.close(); SDL2.audioContext = undefined; } },  
+ 362986: ($0, $1, $2) => { var w = $0; var h = $1; var pixels = $2; if (!Module['SDL2']) Module['SDL2'] = {}; var SDL2 = Module['SDL2']; if (SDL2.ctxCanvas !== Module['canvas']) { SDL2.ctx = Module['createContext'](Module['canvas'], false, true); SDL2.ctxCanvas = Module['canvas']; } if (SDL2.w !== w || SDL2.h !== h || SDL2.imageCtx !== SDL2.ctx) { SDL2.image = SDL2.ctx.createImageData(w, h); SDL2.w = w; SDL2.h = h; SDL2.imageCtx = SDL2.ctx; } var data = SDL2.image.data; var src = pixels >> 2; var dst = 0; var num; if (typeof CanvasPixelArray !== 'undefined' && data instanceof CanvasPixelArray) { num = data.length; while (dst < num) { var val = HEAP32[src]; data[dst ] = val & 0xff; data[dst+1] = (val >> 8) & 0xff; data[dst+2] = (val >> 16) & 0xff; data[dst+3] = 0xff; src++; dst += 4; } } else { if (SDL2.data32Data !== data) { SDL2.data32 = new Int32Array(data.buffer); SDL2.data8 = new Uint8Array(data.buffer); SDL2.data32Data = data; } var data32 = SDL2.data32; num = data32.length; data32.set(HEAP32.subarray(src, src + num)); var data8 = SDL2.data8; var i = 3; var j = i + 4*num; if (num % 8 == 0) { while (i < j) { data8[i] = 0xff; i = i + 4 | 0; data8[i] = 0xff; i = i + 4 | 0; data8[i] = 0xff; i = i + 4 | 0; data8[i] = 0xff; i = i + 4 | 0; data8[i] = 0xff; i = i + 4 | 0; data8[i] = 0xff; i = i + 4 | 0; data8[i] = 0xff; i = i + 4 | 0; data8[i] = 0xff; i = i + 4 | 0; } } else { while (i < j) { data8[i] = 0xff; i = i + 4 | 0; } } } SDL2.ctx.putImageData(SDL2.image, 0, 0); },  
+ 364455: ($0, $1, $2, $3, $4) => { var w = $0; var h = $1; var hot_x = $2; var hot_y = $3; var pixels = $4; var canvas = document.createElement("canvas"); canvas.width = w; canvas.height = h; var ctx = canvas.getContext("2d"); var image = ctx.createImageData(w, h); var data = image.data; var src = pixels >> 2; var dst = 0; var num; if (typeof CanvasPixelArray !== 'undefined' && data instanceof CanvasPixelArray) { num = data.length; while (dst < num) { var val = HEAP32[src]; data[dst ] = val & 0xff; data[dst+1] = (val >> 8) & 0xff; data[dst+2] = (val >> 16) & 0xff; data[dst+3] = (val >> 24) & 0xff; src++; dst += 4; } } else { var data32 = new Int32Array(data.buffer); num = data32.length; data32.set(HEAP32.subarray(src, src + num)); } ctx.putImageData(image, 0, 0); var url = hot_x === 0 && hot_y === 0 ? "url(" + canvas.toDataURL() + "), auto" : "url(" + canvas.toDataURL() + ") " + hot_x + " " + hot_y + ", auto"; var urlBuf = _malloc(url.length + 1); stringToUTF8(url, urlBuf, url.length + 1); return urlBuf; },  
+ 365444: ($0) => { if (Module['canvas']) { Module['canvas'].style['cursor'] = UTF8ToString($0); } },  
+ 365527: () => { if (Module['canvas']) { Module['canvas'].style['cursor'] = 'none'; } },  
+ 365596: () => { return window.innerWidth; },  
+ 365626: () => { return window.innerHeight; }
 };
 function ImGui_ImplSDL2_EmscriptenOpenURL(url) { url = url ? UTF8ToString(url) : null; if (url) window.open(url, '_blank'); }
 
@@ -9024,6 +9025,343 @@ function ImGui_ImplSDL2_EmscriptenOpenURL(url) { url = url ? UTF8ToString(url) :
 
 
 
+  
+  function arraySum(array, index) {
+      var sum = 0;
+      for (var i = 0; i <= index; sum += array[i++]) {
+        // no-op
+      }
+      return sum;
+    }
+  
+  
+  var MONTH_DAYS_LEAP = [31,29,31,30,31,30,31,31,30,31,30,31];
+  
+  var MONTH_DAYS_REGULAR = [31,28,31,30,31,30,31,31,30,31,30,31];
+  function addDays(date, days) {
+      var newDate = new Date(date.getTime());
+      while (days > 0) {
+        var leap = isLeapYear(newDate.getFullYear());
+        var currentMonth = newDate.getMonth();
+        var daysInCurrentMonth = (leap ? MONTH_DAYS_LEAP : MONTH_DAYS_REGULAR)[currentMonth];
+  
+        if (days > daysInCurrentMonth-newDate.getDate()) {
+          // we spill over to next month
+          days -= (daysInCurrentMonth-newDate.getDate()+1);
+          newDate.setDate(1);
+          if (currentMonth < 11) {
+            newDate.setMonth(currentMonth+1)
+          } else {
+            newDate.setMonth(0);
+            newDate.setFullYear(newDate.getFullYear()+1);
+          }
+        } else {
+          // we stay in current month
+          newDate.setDate(newDate.getDate()+days);
+          return newDate;
+        }
+      }
+  
+      return newDate;
+    }
+  
+  
+  
+  
+  function writeArrayToMemory(array, buffer) {
+      assert(array.length >= 0, 'writeArrayToMemory array must have a length (should be an array or typed array)')
+      HEAP8.set(array, buffer);
+    }
+  
+  function _strftime(s, maxsize, format, tm) {
+      // size_t strftime(char *restrict s, size_t maxsize, const char *restrict format, const struct tm *restrict timeptr);
+      // http://pubs.opengroup.org/onlinepubs/009695399/functions/strftime.html
+  
+      var tm_zone = HEAP32[(((tm)+(40))>>2)];
+  
+      var date = {
+        tm_sec: HEAP32[((tm)>>2)],
+        tm_min: HEAP32[(((tm)+(4))>>2)],
+        tm_hour: HEAP32[(((tm)+(8))>>2)],
+        tm_mday: HEAP32[(((tm)+(12))>>2)],
+        tm_mon: HEAP32[(((tm)+(16))>>2)],
+        tm_year: HEAP32[(((tm)+(20))>>2)],
+        tm_wday: HEAP32[(((tm)+(24))>>2)],
+        tm_yday: HEAP32[(((tm)+(28))>>2)],
+        tm_isdst: HEAP32[(((tm)+(32))>>2)],
+        tm_gmtoff: HEAP32[(((tm)+(36))>>2)],
+        tm_zone: tm_zone ? UTF8ToString(tm_zone) : ''
+      };
+  
+      var pattern = UTF8ToString(format);
+  
+      // expand format
+      var EXPANSION_RULES_1 = {
+        '%c': '%a %b %d %H:%M:%S %Y',     // Replaced by the locale's appropriate date and time representation - e.g., Mon Aug  3 14:02:01 2013
+        '%D': '%m/%d/%y',                 // Equivalent to %m / %d / %y
+        '%F': '%Y-%m-%d',                 // Equivalent to %Y - %m - %d
+        '%h': '%b',                       // Equivalent to %b
+        '%r': '%I:%M:%S %p',              // Replaced by the time in a.m. and p.m. notation
+        '%R': '%H:%M',                    // Replaced by the time in 24-hour notation
+        '%T': '%H:%M:%S',                 // Replaced by the time
+        '%x': '%m/%d/%y',                 // Replaced by the locale's appropriate date representation
+        '%X': '%H:%M:%S',                 // Replaced by the locale's appropriate time representation
+        // Modified Conversion Specifiers
+        '%Ec': '%c',                      // Replaced by the locale's alternative appropriate date and time representation.
+        '%EC': '%C',                      // Replaced by the name of the base year (period) in the locale's alternative representation.
+        '%Ex': '%m/%d/%y',                // Replaced by the locale's alternative date representation.
+        '%EX': '%H:%M:%S',                // Replaced by the locale's alternative time representation.
+        '%Ey': '%y',                      // Replaced by the offset from %EC (year only) in the locale's alternative representation.
+        '%EY': '%Y',                      // Replaced by the full alternative year representation.
+        '%Od': '%d',                      // Replaced by the day of the month, using the locale's alternative numeric symbols, filled as needed with leading zeros if there is any alternative symbol for zero; otherwise, with leading <space> characters.
+        '%Oe': '%e',                      // Replaced by the day of the month, using the locale's alternative numeric symbols, filled as needed with leading <space> characters.
+        '%OH': '%H',                      // Replaced by the hour (24-hour clock) using the locale's alternative numeric symbols.
+        '%OI': '%I',                      // Replaced by the hour (12-hour clock) using the locale's alternative numeric symbols.
+        '%Om': '%m',                      // Replaced by the month using the locale's alternative numeric symbols.
+        '%OM': '%M',                      // Replaced by the minutes using the locale's alternative numeric symbols.
+        '%OS': '%S',                      // Replaced by the seconds using the locale's alternative numeric symbols.
+        '%Ou': '%u',                      // Replaced by the weekday as a number in the locale's alternative representation (Monday=1).
+        '%OU': '%U',                      // Replaced by the week number of the year (Sunday as the first day of the week, rules corresponding to %U ) using the locale's alternative numeric symbols.
+        '%OV': '%V',                      // Replaced by the week number of the year (Monday as the first day of the week, rules corresponding to %V ) using the locale's alternative numeric symbols.
+        '%Ow': '%w',                      // Replaced by the number of the weekday (Sunday=0) using the locale's alternative numeric symbols.
+        '%OW': '%W',                      // Replaced by the week number of the year (Monday as the first day of the week) using the locale's alternative numeric symbols.
+        '%Oy': '%y',                      // Replaced by the year (offset from %C ) using the locale's alternative numeric symbols.
+      };
+      for (var rule in EXPANSION_RULES_1) {
+        pattern = pattern.replace(new RegExp(rule, 'g'), EXPANSION_RULES_1[rule]);
+      }
+  
+      var WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  
+      function leadingSomething(value, digits, character) {
+        var str = typeof value == 'number' ? value.toString() : (value || '');
+        while (str.length < digits) {
+          str = character[0]+str;
+        }
+        return str;
+      }
+  
+      function leadingNulls(value, digits) {
+        return leadingSomething(value, digits, '0');
+      }
+  
+      function compareByDay(date1, date2) {
+        function sgn(value) {
+          return value < 0 ? -1 : (value > 0 ? 1 : 0);
+        }
+  
+        var compare;
+        if ((compare = sgn(date1.getFullYear()-date2.getFullYear())) === 0) {
+          if ((compare = sgn(date1.getMonth()-date2.getMonth())) === 0) {
+            compare = sgn(date1.getDate()-date2.getDate());
+          }
+        }
+        return compare;
+      }
+  
+      function getFirstWeekStartDate(janFourth) {
+          switch (janFourth.getDay()) {
+            case 0: // Sunday
+              return new Date(janFourth.getFullYear()-1, 11, 29);
+            case 1: // Monday
+              return janFourth;
+            case 2: // Tuesday
+              return new Date(janFourth.getFullYear(), 0, 3);
+            case 3: // Wednesday
+              return new Date(janFourth.getFullYear(), 0, 2);
+            case 4: // Thursday
+              return new Date(janFourth.getFullYear(), 0, 1);
+            case 5: // Friday
+              return new Date(janFourth.getFullYear()-1, 11, 31);
+            case 6: // Saturday
+              return new Date(janFourth.getFullYear()-1, 11, 30);
+          }
+      }
+  
+      function getWeekBasedYear(date) {
+          var thisDate = addDays(new Date(date.tm_year+1900, 0, 1), date.tm_yday);
+  
+          var janFourthThisYear = new Date(thisDate.getFullYear(), 0, 4);
+          var janFourthNextYear = new Date(thisDate.getFullYear()+1, 0, 4);
+  
+          var firstWeekStartThisYear = getFirstWeekStartDate(janFourthThisYear);
+          var firstWeekStartNextYear = getFirstWeekStartDate(janFourthNextYear);
+  
+          if (compareByDay(firstWeekStartThisYear, thisDate) <= 0) {
+            // this date is after the start of the first week of this year
+            if (compareByDay(firstWeekStartNextYear, thisDate) <= 0) {
+              return thisDate.getFullYear()+1;
+            }
+            return thisDate.getFullYear();
+          }
+          return thisDate.getFullYear()-1;
+      }
+  
+      var EXPANSION_RULES_2 = {
+        '%a': function(date) {
+          return WEEKDAYS[date.tm_wday].substring(0,3);
+        },
+        '%A': function(date) {
+          return WEEKDAYS[date.tm_wday];
+        },
+        '%b': function(date) {
+          return MONTHS[date.tm_mon].substring(0,3);
+        },
+        '%B': function(date) {
+          return MONTHS[date.tm_mon];
+        },
+        '%C': function(date) {
+          var year = date.tm_year+1900;
+          return leadingNulls((year/100)|0,2);
+        },
+        '%d': function(date) {
+          return leadingNulls(date.tm_mday, 2);
+        },
+        '%e': function(date) {
+          return leadingSomething(date.tm_mday, 2, ' ');
+        },
+        '%g': function(date) {
+          // %g, %G, and %V give values according to the ISO 8601:2000 standard week-based year.
+          // In this system, weeks begin on a Monday and week 1 of the year is the week that includes
+          // January 4th, which is also the week that includes the first Thursday of the year, and
+          // is also the first week that contains at least four days in the year.
+          // If the first Monday of January is the 2nd, 3rd, or 4th, the preceding days are part of
+          // the last week of the preceding year; thus, for Saturday 2nd January 1999,
+          // %G is replaced by 1998 and %V is replaced by 53. If December 29th, 30th,
+          // or 31st is a Monday, it and any following days are part of week 1 of the following year.
+          // Thus, for Tuesday 30th December 1997, %G is replaced by 1998 and %V is replaced by 01.
+  
+          return getWeekBasedYear(date).toString().substring(2);
+        },
+        '%G': function(date) {
+          return getWeekBasedYear(date);
+        },
+        '%H': function(date) {
+          return leadingNulls(date.tm_hour, 2);
+        },
+        '%I': function(date) {
+          var twelveHour = date.tm_hour;
+          if (twelveHour == 0) twelveHour = 12;
+          else if (twelveHour > 12) twelveHour -= 12;
+          return leadingNulls(twelveHour, 2);
+        },
+        '%j': function(date) {
+          // Day of the year (001-366)
+          return leadingNulls(date.tm_mday + arraySum(isLeapYear(date.tm_year+1900) ? MONTH_DAYS_LEAP : MONTH_DAYS_REGULAR, date.tm_mon-1), 3);
+        },
+        '%m': function(date) {
+          return leadingNulls(date.tm_mon+1, 2);
+        },
+        '%M': function(date) {
+          return leadingNulls(date.tm_min, 2);
+        },
+        '%n': function() {
+          return '\n';
+        },
+        '%p': function(date) {
+          if (date.tm_hour >= 0 && date.tm_hour < 12) {
+            return 'AM';
+          }
+          return 'PM';
+        },
+        '%S': function(date) {
+          return leadingNulls(date.tm_sec, 2);
+        },
+        '%t': function() {
+          return '\t';
+        },
+        '%u': function(date) {
+          return date.tm_wday || 7;
+        },
+        '%U': function(date) {
+          var days = date.tm_yday + 7 - date.tm_wday;
+          return leadingNulls(Math.floor(days / 7), 2);
+        },
+        '%V': function(date) {
+          // Replaced by the week number of the year (Monday as the first day of the week)
+          // as a decimal number [01,53]. If the week containing 1 January has four
+          // or more days in the new year, then it is considered week 1.
+          // Otherwise, it is the last week of the previous year, and the next week is week 1.
+          // Both January 4th and the first Thursday of January are always in week 1. [ tm_year, tm_wday, tm_yday]
+          var val = Math.floor((date.tm_yday + 7 - (date.tm_wday + 6) % 7 ) / 7);
+          // If 1 Jan is just 1-3 days past Monday, the previous week
+          // is also in this year.
+          if ((date.tm_wday + 371 - date.tm_yday - 2) % 7 <= 2) {
+            val++;
+          }
+          if (!val) {
+            val = 52;
+            // If 31 December of prev year a Thursday, or Friday of a
+            // leap year, then the prev year has 53 weeks.
+            var dec31 = (date.tm_wday + 7 - date.tm_yday - 1) % 7;
+            if (dec31 == 4 || (dec31 == 5 && isLeapYear(date.tm_year%400-1))) {
+              val++;
+            }
+          } else if (val == 53) {
+            // If 1 January is not a Thursday, and not a Wednesday of a
+            // leap year, then this year has only 52 weeks.
+            var jan1 = (date.tm_wday + 371 - date.tm_yday) % 7;
+            if (jan1 != 4 && (jan1 != 3 || !isLeapYear(date.tm_year)))
+              val = 1;
+          }
+          return leadingNulls(val, 2);
+        },
+        '%w': function(date) {
+          return date.tm_wday;
+        },
+        '%W': function(date) {
+          var days = date.tm_yday + 7 - ((date.tm_wday + 6) % 7);
+          return leadingNulls(Math.floor(days / 7), 2);
+        },
+        '%y': function(date) {
+          // Replaced by the last two digits of the year as a decimal number [00,99]. [ tm_year]
+          return (date.tm_year+1900).toString().substring(2);
+        },
+        '%Y': function(date) {
+          // Replaced by the year as a decimal number (for example, 1997). [ tm_year]
+          return date.tm_year+1900;
+        },
+        '%z': function(date) {
+          // Replaced by the offset from UTC in the ISO 8601:2000 standard format ( +hhmm or -hhmm ).
+          // For example, "-0430" means 4 hours 30 minutes behind UTC (west of Greenwich).
+          var off = date.tm_gmtoff;
+          var ahead = off >= 0;
+          off = Math.abs(off) / 60;
+          // convert from minutes into hhmm format (which means 60 minutes = 100 units)
+          off = (off / 60)*100 + (off % 60);
+          return (ahead ? '+' : '-') + String("0000" + off).slice(-4);
+        },
+        '%Z': function(date) {
+          return date.tm_zone;
+        },
+        '%%': function() {
+          return '%';
+        }
+      };
+  
+      // Replace %% with a pair of NULLs (which cannot occur in a C string), then
+      // re-inject them after processing.
+      pattern = pattern.replace(/%%/g, '\0\0')
+      for (var rule in EXPANSION_RULES_2) {
+        if (pattern.includes(rule)) {
+          pattern = pattern.replace(new RegExp(rule, 'g'), EXPANSION_RULES_2[rule](date));
+        }
+      }
+      pattern = pattern.replace(/\0\0/g, '%')
+  
+      var bytes = intArrayFromString(pattern, false);
+      if (bytes.length > maxsize) {
+        return 0;
+      }
+  
+      writeArrayToMemory(bytes, s);
+      return bytes.length-1;
+    }
+  function _strftime_l(s, maxsize, format, tm, loc) {
+      return _strftime(s, maxsize, format, tm); // no locale support yet
+    }
+
 
 
 
@@ -9598,7 +9936,8 @@ var wasmImports = {
   "glUniformMatrix4fv": _glUniformMatrix4fv,
   "glUseProgram": _glUseProgram,
   "glVertexAttribPointer": _glVertexAttribPointer,
-  "glViewport": _glViewport
+  "glViewport": _glViewport,
+  "strftime_l": _strftime_l
 };
 var asm = createWasm();
 /** @type {function(...*):?} */
@@ -9652,8 +9991,16 @@ var dynCall_iijii = Module["dynCall_iijii"] = createExportWrapper("dynCall_iijii
 var dynCall_jiji = Module["dynCall_jiji"] = createExportWrapper("dynCall_jiji");
 /** @type {function(...*):?} */
 var dynCall_ji = Module["dynCall_ji"] = createExportWrapper("dynCall_ji");
-var ___start_em_js = Module['___start_em_js'] = 344552;
-var ___stop_em_js = Module['___stop_em_js'] = 344652;
+/** @type {function(...*):?} */
+var dynCall_viijii = Module["dynCall_viijii"] = createExportWrapper("dynCall_viijii");
+/** @type {function(...*):?} */
+var dynCall_iiiiij = Module["dynCall_iiiiij"] = createExportWrapper("dynCall_iiiiij");
+/** @type {function(...*):?} */
+var dynCall_iiiiijj = Module["dynCall_iiiiijj"] = createExportWrapper("dynCall_iiiiijj");
+/** @type {function(...*):?} */
+var dynCall_iiiiiijj = Module["dynCall_iiiiiijj"] = createExportWrapper("dynCall_iiiiiijj");
+var ___start_em_js = Module['___start_em_js'] = 357400;
+var ___stop_em_js = Module['___stop_em_js'] = 357500;
 
 // include: postamble.js
 // === Auto-generated postamble setup entry stuff ===
@@ -9667,8 +10014,6 @@ Module["FS_createDevice"] = FS.createDevice;
 Module["FS_unlink"] = FS.unlink;
 Module["FS_createPreloadedFile"] = FS.createPreloadedFile;
 var missingLibrarySymbols = [
-  'arraySum',
-  'addDays',
   'inetPton4',
   'inetNtop4',
   'inetPton6',
@@ -9720,7 +10065,6 @@ var missingLibrarySymbols = [
   'UTF32ToString',
   'stringToUTF32',
   'lengthBytesUTF32',
-  'writeArrayToMemory',
   'getSocketFromFD',
   'getSocketAddress',
   'fillDeviceOrientationEventData',
@@ -9797,6 +10141,8 @@ var unexportedSymbols = [
   'MONTH_DAYS_LEAP_CUMULATIVE',
   'isLeapYear',
   'ydayFromDate',
+  'arraySum',
+  'addDays',
   'ERRNO_CODES',
   'ERRNO_MESSAGES',
   'setErrNo',
@@ -9848,6 +10194,7 @@ var unexportedSymbols = [
   'UTF16Decoder',
   'stringToNewUTF8',
   'stringToUTF8OnStack',
+  'writeArrayToMemory',
   'SYSCALLS',
   'JSEvents',
   'registerKeyEventCallback',
