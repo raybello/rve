@@ -503,15 +503,32 @@ u32 RV32::memGetByte(u32 addr)
 
 u32 RV32::memGetHalfWord(u32 addr)
 {
-    return memGetByte(addr) | ((uint16_t)memGetByte(addr + 1) << 8);
+    // Fast path: RAM addresses have bit 31 set — skip MMIO dispatch
+    if (addr & 0x80000000u)
+    {
+        u32 phys = addr & 0x7FFFFFFFu;
+        if (phys <= (u32)(RV32_MEM_SIZE - 2))
+            return ((u32)mem[phys]) | ((u32)mem[phys + 1] << 8);
+        return 0;
+    }
+    return memGetByte(addr) | ((u32)memGetByte(addr + 1) << 8);
 }
 
 u32 RV32::memGetWord(u32 addr)
 {
+    // Fast path: RAM addresses have bit 31 set — skip MMIO dispatch (4x cheaper)
+    if (addr & 0x80000000u)
+    {
+        u32 phys = addr & 0x7FFFFFFFu;
+        if (phys <= (u32)(RV32_MEM_SIZE - 4))
+            return ((u32)mem[phys]) | ((u32)mem[phys + 1] << 8) |
+                   ((u32)mem[phys + 2] << 16) | ((u32)mem[phys + 3] << 24);
+        return 0;
+    }
     return memGetByte(addr) |
-           ((uint16_t)memGetByte(addr + 1) << 8) |
-           ((uint16_t)memGetByte(addr + 2) << 16) |
-           ((uint16_t)memGetByte(addr + 3) << 24);
+           ((u32)memGetByte(addr + 1) << 8) |
+           ((u32)memGetByte(addr + 2) << 16) |
+           ((u32)memGetByte(addr + 3) << 24);
 }
 
 void RV32::memSetByte(u32 addr, u32 val)
@@ -642,12 +659,36 @@ void RV32::memSetByte(u32 addr, u32 val)
 
 void RV32::memSetHalfWord(u32 addr, u32 val)
 {
+    // Fast path: RAM addresses have bit 31 set — skip MMIO dispatch
+    if (addr & 0x80000000u)
+    {
+        u32 phys = addr & 0x7FFFFFFFu;
+        if (phys <= (u32)(RV32_MEM_SIZE - 2))
+        {
+            mem[phys]     = (u8)(val);
+            mem[phys + 1] = (u8)(val >> 8);
+        }
+        return;
+    }
     memSetByte(addr, val & 0xFF);
     memSetByte(addr + 1, (val >> 8) & 0xFF);
 }
 
 void RV32::memSetWord(u32 addr, u32 val)
 {
+    // Fast path: RAM addresses have bit 31 set — skip MMIO dispatch (4x cheaper)
+    if (addr & 0x80000000u)
+    {
+        u32 phys = addr & 0x7FFFFFFFu;
+        if (phys <= (u32)(RV32_MEM_SIZE - 4))
+        {
+            mem[phys]     = (u8)(val);
+            mem[phys + 1] = (u8)(val >> 8);
+            mem[phys + 2] = (u8)(val >> 16);
+            mem[phys + 3] = (u8)(val >> 24);
+        }
+        return;
+    }
     memSetByte(addr, val & 0xFF);
     memSetByte(addr + 1, (val >> 8) & 0xFF);
     memSetByte(addr + 2, (val >> 16) & 0xFF);
@@ -668,7 +709,7 @@ void RV32::uartTick()
 {
     bool rx_ip = false;
 
-    if ((clock % 0x38400) == 0 && UART_GET1(RBR) == 0)
+    if ((clock % 0x400) == 0 && UART_GET1(RBR) == 0)
     {
 #ifndef __EMSCRIPTEN__
         int byteswaiting = 0;

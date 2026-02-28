@@ -834,7 +834,9 @@ void Emulator::emulate()
     if (cpu.clint.msip)
         cpu.csr.data[CSR_MIP] |= MIP_MSIP;
 
-    // Update CLINT mtime from wall-clock (same approach as src_new)
+    // Update CLINT mtime from wall-clock — throttled to every 1024 instructions
+    // to avoid a gettimeofday() syscall on every emulated instruction.
+    if ((cpu.clock & 0x3FF) == 0)
     {
         struct timeval now;
         gettimeofday(&now, NULL);

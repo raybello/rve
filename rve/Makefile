@@ -79,7 +79,7 @@ ifeq ($(OS), Windows_NT)
 endif
 
 # C & C++ Compiler flags
-CXXFLAGS += -g -Wall -Wformat
+CXXFLAGS += -g -O2 -Wall -Wformat
 CCFLAGS  := $(CXXFLAGS)
 CXXFLAGS += -std=c++17
 
