@@ -460,17 +460,19 @@ ul li::before { content: '▸ '; color: var(--green); font-size: 0.8em; }
   <div class="slide-inner">
     <p class="eyebrow reveal">RVE · Source Code Walkthrough</p>
     <h1 class="reveal">RISC-V<br>Emulator<br>Internals</h1>
-    <p class="subtitle reveal">Instruction decoding, CSRs, traps &amp; IRQs, ELF loading</p>
+    <p class="subtitle reveal">Instruction decoding, CSRs, traps &amp; IRQs, ELF loading, Sv32 MMU, Linux boot</p>
     <div class="title-tags reveal">
       <span class="badge green">RV32I</span>
       <span class="badge green">RV32M</span>
       <span class="badge green">RV32A</span>
       <span class="badge cyan">Supervisor</span>
       <span class="badge amber">Machine</span>
+      <span class="badge cyan">Sv32 MMU</span>
+      <span class="badge amber">Linux</span>
     </div>
   </div>
   <div class="corner-decor">RV</div>
-  <div class="slide-num">01 / 25</div>
+  <div class="slide-num">01 / 31</div>
 </section>
 
 <!-- =====================================================
@@ -498,6 +500,9 @@ ul li::before { content: '▸ '; color: var(--green); font-size: 0.8em; }
           <li><span class="cyan mono">Privilege Levels</span> — U / S / M modes</li>
           <li><span class="amber mono">Traps &amp; IRQs</span> — delegation, TVEC, EPC</li>
           <li><span class="amber mono">ELF Loading</span> — section mapping to RAM</li>
+          <li><span class="accent mono">Build &amp; ISA Tests</span> — make all / run / isas / linux</li>
+          <li><span class="red mono">Sv32 MMU</span> — SATP, PTE, two-level walk</li>
+          <li><span class="red mono">Linux Boot</span> — flat image, DTB, nommu mode</li>
         </ul>
       </div>
     </div>
@@ -510,7 +515,7 @@ ul li::before { content: '▸ '; color: var(--green); font-size: 0.8em; }
       </p>
     </div>
   </div>
-  <div class="slide-num">02 / 25</div>
+  <div class="slide-num">02 / 31</div>
 </section>
 
 <!-- =====================================================
@@ -563,7 +568,7 @@ ul li::before { content: '▸ '; color: var(--green); font-size: 0.8em; }
       </div>
     </div>
   </div>
-  <div class="slide-num">03 / 25</div>
+  <div class="slide-num">03 / 31</div>
 </section>
 
 <!-- =====================================================
@@ -653,7 +658,7 @@ ul li::before { content: '▸ '; color: var(--green); font-size: 0.8em; }
       </p>
     </div>
   </div>
-  <div class="slide-num">04 / 25</div>
+  <div class="slide-num">04 / 31</div>
 </section>
 
 <!-- =====================================================
@@ -706,7 +711,7 @@ ul li::before { content: '▸ '; color: var(--green); font-size: 0.8em; }
       </div>
     </div>
   </div>
-  <div class="slide-num">05 / 25</div>
+  <div class="slide-num">05 / 31</div>
 </section>
 
 <!-- =====================================================
@@ -759,7 +764,7 @@ ul li::before { content: '▸ '; color: var(--green); font-size: 0.8em; }
       </div>
     </div>
   </div>
-  <div class="slide-num">06 / 25</div>
+  <div class="slide-num">06 / 31</div>
 </section>
 
 <!-- =====================================================
@@ -812,7 +817,7 @@ ul li::before { content: '▸ '; color: var(--green); font-size: 0.8em; }
       </div>
     </div>
   </div>
-  <div class="slide-num">07 / 25</div>
+  <div class="slide-num">07 / 31</div>
 </section>
 
 <!-- =====================================================
@@ -869,7 +874,7 @@ ul li::before { content: '▸ '; color: var(--green); font-size: 0.8em; }
       </div>
     </div>
   </div>
-  <div class="slide-num">08 / 25</div>
+  <div class="slide-num">08 / 31</div>
 </section>
 
 <!-- =====================================================
@@ -917,7 +922,7 @@ ul li::before { content: '▸ '; color: var(--green); font-size: 0.8em; }
       </div>
     </div>
   </div>
-  <div class="slide-num">09 / 25</div>
+  <div class="slide-num">09 / 31</div>
 </section>
 
 <!-- =====================================================
@@ -971,7 +976,7 @@ ul li::before { content: '▸ '; color: var(--green); font-size: 0.8em; }
       </div>
     </div>
   </div>
-  <div class="slide-num">10 / 25</div>
+  <div class="slide-num">10 / 31</div>
 </section>
 
 <!-- =====================================================
@@ -1021,7 +1026,7 @@ ul li::before { content: '▸ '; color: var(--green); font-size: 0.8em; }
       </p>
     </div>
   </div>
-  <div class="slide-num">11 / 25</div>
+  <div class="slide-num">11 / 31</div>
 </section>
 
 <!-- =====================================================
@@ -1079,7 +1084,7 @@ ul li::before { content: '▸ '; color: var(--green); font-size: 0.8em; }
       </div>
     </div>
   </div>
-  <div class="slide-num">12 / 25</div>
+  <div class="slide-num">12 / 31</div>
 </section>
 
 <!-- =====================================================
@@ -1143,7 +1148,7 @@ ul li::before { content: '▸ '; color: var(--green); font-size: 0.8em; }
       </div>
     </div>
   </div>
-  <div class="slide-num">13 / 25</div>
+  <div class="slide-num">13 / 31</div>
 </section>
 
 <!-- =====================================================
@@ -1198,7 +1203,7 @@ ul li::before { content: '▸ '; color: var(--green); font-size: 0.8em; }
       </div>
     </div>
   </div>
-  <div class="slide-num">14 / 25</div>
+  <div class="slide-num">14 / 31</div>
 </section>
 
 <!-- =====================================================
@@ -1254,7 +1259,7 @@ ul li::before { content: '▸ '; color: var(--green); font-size: 0.8em; }
       </div>
     </div>
   </div>
-  <div class="slide-num">15 / 25</div>
+  <div class="slide-num">15 / 31</div>
 </section>
 
 <!-- =====================================================
@@ -1317,7 +1322,7 @@ ul li::before { content: '▸ '; color: var(--green); font-size: 0.8em; }
       </div>
     </div>
   </div>
-  <div class="slide-num">16 / 25</div>
+  <div class="slide-num">16 / 31</div>
 </section>
 
 <!-- =====================================================
@@ -1383,7 +1388,7 @@ ul li::before { content: '▸ '; color: var(--green); font-size: 0.8em; }
       </div>
     </div>
   </div>
-  <div class="slide-num">17 / 25</div>
+  <div class="slide-num">17 / 31</div>
 </section>
 
 <!-- =====================================================
@@ -1444,7 +1449,7 @@ ul li::before { content: '▸ '; color: var(--green); font-size: 0.8em; }
       </div>
     </div>
   </div>
-  <div class="slide-num">18 / 25</div>
+  <div class="slide-num">18 / 31</div>
 </section>
 
 <!-- =====================================================
@@ -1502,7 +1507,7 @@ ul li::before { content: '▸ '; color: var(--green); font-size: 0.8em; }
       </div>
     </div>
   </div>
-  <div class="slide-num">19 / 25</div>
+  <div class="slide-num">19 / 31</div>
 </section>
 
 <!-- =====================================================
@@ -1561,7 +1566,7 @@ ret-&gt;pc_val = <span class="fn">readCsrRaw</span>(TVEC);<br>
       </div>
     </div>
   </div>
-  <div class="slide-num">20 / 25</div>
+  <div class="slide-num">20 / 31</div>
 </section>
 
 <!-- =====================================================
@@ -1614,7 +1619,7 @@ ret-&gt;pc_val = <span class="fn">readCsrRaw</span>(TVEC);<br>
       </div>
     </div>
   </div>
-  <div class="slide-num">21 / 25</div>
+  <div class="slide-num">21 / 31</div>
 </section>
 
 <!-- =====================================================
@@ -1669,7 +1674,7 @@ ret-&gt;pc_val = <span class="fn">readCsrRaw</span>(TVEC);<br>
       </div>
     </div>
   </div>
-  <div class="slide-num">22 / 25</div>
+  <div class="slide-num">22 / 31</div>
 </section>
 
 <!-- =====================================================
@@ -1727,7 +1732,7 @@ ret-&gt;pc_val = <span class="fn">readCsrRaw</span>(TVEC);<br>
       </div>
     </div>
   </div>
-  <div class="slide-num">23 / 25</div>
+  <div class="slide-num">23 / 31</div>
 </section>
 
 <!-- =====================================================
@@ -1782,35 +1787,345 @@ ret-&gt;pc_val = <span class="fn">readCsrRaw</span>(TVEC);<br>
       </div>
     </div>
   </div>
-  <div class="slide-num">24 / 25</div>
+  <div class="slide-num">24 / 31</div>
 </section>
 
 <!-- =====================================================
-     SLIDE 25 — END
+     SLIDE 25 — BUILDING & RUNNING RVE
      ===================================================== -->
-<section class="slide title-slide" id="s25">
+<section class="slide" id="s25">
+  <div class="slide-inner">
+    <p class="label reveal">Makefile · main.cpp · app.cpp</p>
+    <h2 class="reveal">Building &amp; Running RVE</h2>
+    <div class="rule reveal"></div>
+    <div class="cols-2 reveal">
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <div class="card">
+          <h3><span class="accent mono">make all</span></h3>
+          <p style="font-size:var(--small-size)">Compiles <span class="mono">src/*.cpp</span> + ImGui + ImPlot + disassembler. Flags: <span class="mono cyan">g++ -std=c++17 -O2 -Wall</span>. Links <span class="mono amber">SDL2 + OpenGL + Cocoa/IOKit</span> (macOS) or <span class="mono amber">libGL + SDL2</span> (Linux). Output: <span class="mono accent">build/rve</span>.</p>
+        </div>
+        <div class="card">
+          <h3><span class="accent mono">make run</span></h3>
+          <p style="font-size:var(--small-size)">Builds then launches <span class="mono accent">./build/rve</span> with no extra flags — GUI mode (SDL2 + ImGui). Emulator paused on start. Load a binary from the UI or pass <span class="mono">-e &lt;elf&gt;</span> / <span class="mono">-b &lt;bin&gt;</span>.</p>
+        </div>
+        <div class="card">
+          <h3><span class="accent mono">make isas</span></h3>
+          <p style="font-size:var(--small-size)">Runs all 60 ISA compliance tests: <span class="mono cyan">./build/rve -re &lt;test&gt;</span> per binary. <span class="mono">-r</span> = auto-start (<span class="mono">emu.running=true</span>), <span class="mono">-e &lt;file&gt;</span> = load ELF. All 60 tests must exit cleanly.</p>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <div class="card">
+          <h3><span class="cyan mono">make linuxn</span></h3>
+          <p style="font-size:var(--small-size)">Downloads <span class="mono">linux-6.1.14-rv32nommu</span> image, then: <span class="mono cyan">./build/rve -n -b Image</span>. Flag <span class="mono">-n</span> = headless — no SDL window, pure terminal I/O. stdin set to raw mode so keystrokes go directly to guest UART.</p>
+        </div>
+        <div class="card">
+          <h3><span class="cyan mono">make linux</span></h3>
+          <p style="font-size:var(--small-size)">Same image download, then: <span class="mono cyan">./build/rve -r -b Image</span>. Opens GUI window and auto-starts emulator (<span class="mono">-r</span> sets <span class="mono">emu.running=true</span>). Linux UART output visible in the ImGui console panel.</p>
+        </div>
+        <div class="card">
+          <h3>Entry point split</h3>
+          <p style="font-size:var(--small-size)"><span class="mono">main.cpp</span>: if <span class="mono">-n</span> → <span class="mono accent">runHeadless()</span> tight loop (<span class="mono">while (emu.running) emu.emulate()</span>). Otherwise → <span class="mono accent">App</span> SDL2 window + ImGui render loop calling <span class="mono">emu.emulate()</span> each frame.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">25 / 31</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 26 — ISA TEST SUITE
+     ===================================================== -->
+<section class="slide" id="s26">
+  <div class="slide-inner">
+    <p class="label reveal">assets/isa-test/ · Makefile · RISC-V ISA compliance</p>
+    <h2 class="reveal">ISA Test Suite — make isas</h2>
+    <div class="rule reveal"></div>
+    <div class="cols-2 reveal">
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <div class="code-block">
+<span class="cm"># Filter dump files, iterate binaries</span><br>
+ISA_TEST_FILES = $(filter-out <span class="str">%.dump</span>,<br>
+&nbsp;&nbsp;$(notdir $(wildcard $(ISA_TEST_DIR)/*))<br>
+)<br>
+<br>
+isas: all<br>
+&nbsp;$(foreach test, $(ISA_TEST_FILES),<br>
+&nbsp;&nbsp;./build/rve <span class="str">-re</span> isa-test/$(test);)<br>
+<br>
+<span class="cm"># -r = emu.running=true (auto-start)</span><br>
+<span class="cm"># -e &lt;file&gt; = load as ELF via loadElf()</span><br>
+<span class="cm"># ; = continue on failure, don't stop</span>
+        </div>
+        <div class="card">
+          <h3>Test suites — 60 total</h3>
+          <ul style="font-size:var(--small-size)">
+            <li><span class="mono green">rv32ui-p-*</span> — RV32I integer (43): add/sub/load/store/branch/jump/lui/auipc…</li>
+            <li><span class="mono amber">rv32um-p-*</span> — RV32M multiply/divide (8): mul/mulh/div/rem…</li>
+            <li><span class="mono cyan">rv32ua-p-*</span> — RV32A atomics (9): amoswap/amoadd/amoand/lrsc…</li>
+            <li><span class="mono red">rv32mi/si-p-*</span> — Machine/Supervisor CSR tests</li>
+          </ul>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <div class="card">
+          <h3>Binary format</h3>
+          <p style="font-size:var(--small-size)">Each is a bare-metal ELF32 loaded at <span class="mono amber">0x80000000</span>. No OS, no MMU (<span class="mono">-p-</span> = physical-only mode). Test runs in M-mode with no trap delegation. Exercises raw instruction semantics.</p>
+        </div>
+        <div class="card">
+          <h3>Pass / fail mechanism</h3>
+          <p style="font-size:var(--small-size)">Pass: test writes <span class="mono amber">0x55</span> to SYSCON at <span class="mono">0x11100000</span> → <span class="mono">syscon_cmd = 0x5555</span> → emulator prints <span class="mono">SYSCON POWEROFF</span> and halts. Fail: any illegal instruction trap or loop timeout before SYSCON write.</p>
+        </div>
+        <div class="card">
+          <h3>Dump files</h3>
+          <p style="font-size:var(--small-size)">Each test ships with a <span class="mono">*.dump</span> disassembly, excluded from the run by <span class="mono">filter-out %.dump</span>. Cross-reference the dump with a failing PC to locate the broken instruction.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">26 / 31</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 27 — LINUX IMAGE LOADING & BOOT SETUP
+     ===================================================== -->
+<section class="slide" id="s27">
+  <div class="slide-inner">
+    <p class="label reveal">loader.cpp · rv32.cpp · RISC-V Linux boot protocol</p>
+    <h2 class="reveal">Linux Image Loading &amp; Boot Setup</h2>
+    <div class="rule reveal"></div>
+    <div class="cols-2 reveal">
+      <div>
+        <div class="code-block">
+<span class="cm">// loadLinuxImage() — flat binary, not ELF</span><br>
+<span class="ty">int</span> <span class="fn">loadLinuxImage</span>(path, data, len) {<br>
+&nbsp;ifstream file(path, binary | ate);<br>
+&nbsp;<span class="cm">// ≈7–8 MiB: kernel + initramfs</span><br>
+&nbsp;file.<span class="fn">read</span>((<span class="ty">char</span>*)data, file_size);<br>
+&nbsp;<span class="cm">// data[0..N] = Image bytes</span><br>
+}<br>
+<br>
+<span class="cm">// CPU reset state for Linux boot:</span><br>
+pc &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;= <span class="str">0x80000000</span>; <span class="cm">// → mem[0]</span><br>
+xreg[<span class="num">0xa</span>] = <span class="str">0x0000</span>; &nbsp;&nbsp;<span class="cm">// a0 = hart ID (0)</span><br>
+xreg[<span class="num">0xb</span>] = <span class="str">0x1020</span>; &nbsp;&nbsp;<span class="cm">// a1 = DTB ptr</span>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <div class="card">
+          <h3>Image format</h3>
+          <p style="font-size:var(--small-size)">Not an ELF — a flat binary: Linux 6.1.14 rv32nommu kernel + BusyBox initramfs. Load address is <span class="mono amber">0x80000000</span>; loading at buffer offset 0 is identical since <span class="mono">0x80000000 &amp; 0x7FFFFFFF = 0</span>.</p>
+        </div>
+        <div class="card">
+          <h3>Device Tree Blob (DTB)</h3>
+          <p style="font-size:var(--small-size)">A compiled <span class="mono">.dtb</span> mapped at <span class="mono amber">mem[0x1020]</span> via a separate <span class="mono">cpu.dtb</span> pointer. Describes the machine: 1 hart at 100 MHz, RAM at <span class="mono">0x80000000</span> (128 MiB), UART at <span class="mono">0x10000000</span>, CLINT at <span class="mono">0x02000000</span>.</p>
+        </div>
+        <div class="card">
+          <h3>RISC-V Linux boot ABI</h3>
+          <p style="font-size:var(--small-size)">Standard convention: <span class="mono accent">a0</span> = hart ID, <span class="mono accent">a1</span> = physical DTB address. Kernel entry reads DTB immediately to discover memory map, configure UART and CLINT drivers, then starts the scheduler. No firmware (BBL/OpenSBI) layer needed — kernel boots directly in M-mode.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">27 / 31</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 28 — Sv32 MMU: SATP & PTE FORMAT
+     ===================================================== -->
+<section class="slide" id="s28">
+  <div class="slide-inner">
+    <p class="label reveal">rv32.cpp · mmuUpdate() · Sv32 ISA spec §4.3</p>
+    <h2 class="reveal">Sv32 MMU — SATP &amp; Page Table Entry Format</h2>
+    <div class="rule reveal"></div>
+    <div class="cols-2 reveal">
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <p class="dim" style="font-size:var(--small-size)">SATP CSR (0x180) — supervisor address translation &amp; protection</p>
+        <div class="bit-row">
+          <div class="bit-cell field-p" style="flex:1">MODE<br><span style="font-size:0.7em">[31]</span></div>
+          <div class="bit-cell field-a" style="flex:9">ASID (ignored)<br><span style="font-size:0.7em">[30:22]</span></div>
+          <div class="bit-cell field-g" style="flex:22">PPN — root page directory frame<br><span style="font-size:0.7em">[21:0]</span></div>
+        </div>
+        <div class="code-block">
+<span class="cm">// Called on every CSRW satp, rs1</span><br>
+<span class="ty">void</span> <span class="fn">mmuUpdate</span>(<span class="ty">u32</span> satp) {<br>
+&nbsp;mmu.mode = (satp <span class="op">&gt;&gt;</span> <span class="num">31</span>) <span class="op">&amp;</span> <span class="num">1</span>;<br>
+&nbsp;<span class="cm">// 0 = MMU_MODE_OFF (bare/physical)</span><br>
+&nbsp;<span class="cm">// 1 = MMU_MODE_SV32 (paged Sv32)</span><br>
+&nbsp;mmu.ppn = satp <span class="op">&amp;</span> <span class="num">0x3fffff</span>;<br>
+&nbsp;<span class="cm">// root page dir PA = mmu.ppn × 4096</span><br>
+}
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <p class="dim" style="font-size:var(--small-size)">PTE format — 32-bit entry at each level of the page table</p>
+        <div class="bit-row">
+          <div class="bit-cell field-g" style="flex:12">PPN[1]<br><span style="font-size:0.7em">[31:20]</span></div>
+          <div class="bit-cell field-g" style="flex:10">PPN[0]<br><span style="font-size:0.7em">[19:10]</span></div>
+          <div class="bit-cell" style="flex:2">RSW<br><span style="font-size:0.7em">[9:8]</span></div>
+          <div class="bit-cell field-p" style="flex:1">D<br><span style="font-size:0.7em">[7]</span></div>
+          <div class="bit-cell field-a" style="flex:1">A<br><span style="font-size:0.7em">[6]</span></div>
+          <div class="bit-cell" style="flex:1">G<br><span style="font-size:0.7em">[5]</span></div>
+          <div class="bit-cell field-r" style="flex:1">U<br><span style="font-size:0.7em">[4]</span></div>
+          <div class="bit-cell field-r" style="flex:1">X<br><span style="font-size:0.7em">[3]</span></div>
+          <div class="bit-cell field-r" style="flex:1">W<br><span style="font-size:0.7em">[2]</span></div>
+          <div class="bit-cell field-r" style="flex:1">R<br><span style="font-size:0.7em">[1]</span></div>
+          <div class="bit-cell field-g" style="flex:1">V<br><span style="font-size:0.7em">[0]</span></div>
+        </div>
+        <ul style="font-size:var(--small-size); margin-top:0.3em">
+          <li><span class="mono green">V</span> valid · <span class="mono cyan">R</span> readable · <span class="mono cyan">W</span> writable · <span class="mono cyan">X</span> executable · <span class="mono cyan">U</span> user page</li>
+          <li><span class="mono amber">A</span> accessed · <span class="mono red">D</span> dirty · <span class="dim mono">RSW</span> reserved for OS software</li>
+          <li>Leaf PTE: <span class="mono">R|X == 1</span> → points to a page frame</li>
+          <li>Non-leaf: <span class="mono">R==0 &amp;&amp; X==0</span> → PPN points to next-level table</li>
+          <li>Invalid: <span class="mono">V==0</span> or <span class="mono">(!R &amp;&amp; W)</span> → immediate page fault</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">28 / 31</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 29 — Sv32 TWO-LEVEL PAGE WALK
+     ===================================================== -->
+<section class="slide" id="s29">
+  <div class="slide-inner">
+    <p class="label reveal">rv32.cpp · mmuTranslate() · called on every fetch, load &amp; store</p>
+    <h2 class="reveal">Sv32 Two-Level Page Table Walk</h2>
+    <div class="rule reveal"></div>
+    <div class="cols-12 reveal">
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <p class="dim" style="font-size:var(--small-size)">32-bit virtual address decomposition</p>
+        <div class="bit-row">
+          <div class="bit-cell field-a" style="flex:10">VPN[1]<br><span style="font-size:0.7em">[31:22]</span></div>
+          <div class="bit-cell field-r" style="flex:10">VPN[0]<br><span style="font-size:0.7em">[21:12]</span></div>
+          <div class="bit-cell field-g" style="flex:12">page offset<br><span style="font-size:0.7em">[11:0]</span></div>
+        </div>
+        <div class="card" style="margin-top:0.2em">
+          <h3>4 KiB page PA</h3>
+          <p style="font-size:var(--small-size)"><span class="mono">PPN[1]&lt;&lt;22 | PPN[0]&lt;&lt;12 | offset[11:0]</span></p>
+        </div>
+        <div class="card">
+          <h3>4 MiB superpage</h3>
+          <p style="font-size:var(--small-size)">Leaf at level 0; PPN[0] must be 0 (else fault).<br><span class="mono">PPN[1]&lt;&lt;22 | VPN[0]&lt;&lt;12 | offset[11:0]</span></p>
+        </div>
+      </div>
+      <div class="code-block" style="font-size:clamp(0.57rem,0.98vw,0.76rem)">
+<span class="kw">for</span> (<span class="ty">int</span> level = <span class="num">0</span>; level &lt; <span class="num">2</span>; level++) {<br>
+&nbsp;<span class="ty">u32</span> page_addr;<br>
+&nbsp;<span class="kw">if</span> (level == <span class="num">0</span>) {<br>
+&nbsp;&nbsp;<span class="cm">// L0: root PD, indexed by VPN[1]</span><br>
+&nbsp;&nbsp;page_addr = mmu.ppn * <span class="num">4096u</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;+ ((addr <span class="op">&gt;&gt;</span> <span class="num">22</span>) <span class="op">&amp;</span> <span class="num">0x3ff</span>) * <span class="num">4u</span>;<br>
+&nbsp;} <span class="kw">else</span> {<br>
+&nbsp;&nbsp;<span class="cm">// L1: L0 PTE's PPN, indexed by VPN[0]</span><br>
+&nbsp;&nbsp;page_addr = (ppn0 | (ppn1 <span class="op">&lt;&lt;</span> <span class="num">10</span>)) * <span class="num">4096u</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;+ ((addr <span class="op">&gt;&gt;</span> <span class="num">12</span>) <span class="op">&amp;</span> <span class="num">0x3ff</span>) * <span class="num">4u</span>;<br>
+&nbsp;}<br>
+&nbsp;<span class="ty">u32</span> pte = <span class="fn">memGetWord</span>(page_addr);<br>
+&nbsp;ppn0 = (pte <span class="op">&gt;&gt;</span> <span class="num">10</span>) <span class="op">&amp;</span> <span class="num">0x3ff</span>; <span class="cm">// PTE[19:10]</span><br>
+&nbsp;ppn1 = (pte <span class="op">&gt;&gt;</span> <span class="num">20</span>) <span class="op">&amp;</span> <span class="num">0xfff</span>; <span class="cm">// PTE[31:20]</span><br>
+<br>
+&nbsp;<span class="kw">if</span> (!V || (!R &amp;&amp; W)) <span class="fn">MMU_FAULT</span>; <span class="cm">// invalid</span><br>
+&nbsp;<span class="kw">if</span> (R || X) <span class="kw">break</span>; &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="cm">// leaf found</span><br>
+&nbsp;<span class="kw">else if</span> (level == <span class="num">1</span>) <span class="fn">MMU_FAULT</span>; <span class="cm">// L1 non-leaf</span><br>
+}<br>
+<span class="cm">// Assemble physical address</span><br>
+<span class="ty">u32</span> pa = addr <span class="op">&amp;</span> <span class="num">0xfff</span>; <span class="cm">// page offset</span><br>
+pa |= super ? ((addr<span class="op">&gt;&gt;</span><span class="num">12</span>)<span class="op">&amp;</span><span class="num">0x3ff</span>)<span class="op">&lt;&lt;</span><span class="num">12</span> : ppn0<span class="op">&lt;&lt;</span><span class="num">12</span>;<br>
+pa |= ppn1 <span class="op">&lt;&lt;</span> <span class="num">22</span>;<br>
+<span class="kw">return</span> pa;
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">29 / 31</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 30 — PAGE FAULTS, PERMISSIONS & NOMMU
+     ===================================================== -->
+<section class="slide" id="s30">
+  <div class="slide-inner">
+    <p class="label reveal">rv32.cpp · mmuTranslate() · Linux rv32nommu</p>
+    <h2 class="reveal">Permissions, Page Faults &amp; nommu Linux</h2>
+    <div class="rule reveal"></div>
+    <div class="cols-2 reveal">
+      <div>
+        <div class="code-block" style="font-size:clamp(0.57rem,0.98vw,0.76rem)">
+<span class="cm">// Fast exit for bare mode</span><br>
+<span class="kw">if</span> (mmu.mode == <span class="num">MMU_MODE_OFF</span>)<br>
+&nbsp;&nbsp;<span class="kw">return</span> addr; <span class="cm">// zero overhead — always taken by nommu</span><br>
+<br>
+<span class="cm">// MPRV: M-mode load/store use MPP privilege</span><br>
+priv = ((mstatus<span class="op">&gt;&gt;</span><span class="num">17</span>)<span class="op">&amp;</span><span class="num">1</span>)<br>
+&nbsp;&nbsp;? (mstatus<span class="op">&gt;&gt;</span><span class="num">11</span>)<span class="op">&amp;</span><span class="num">3</span> : csr.privilege;<br>
+<br>
+<span class="cm">// M-mode always physical, skip walk</span><br>
+<span class="kw">if</span> (priv == PRIV_MACHINE) <span class="kw">return</span> addr;<br>
+<br>
+<span class="cm">// mstatus flags for permission check</span><br>
+sum = (mstatus<span class="op">&gt;&gt;</span><span class="num">18</span>)<span class="op">&amp;</span><span class="num">1</span>; <span class="cm">// S-mode → U pages</span><br>
+mxr = (mstatus<span class="op">&gt;&gt;</span><span class="num">19</span>)<span class="op">&amp;</span><span class="num">1</span>; <span class="cm">// exec → readable</span><br>
+<br>
+<span class="cm">// After walk: gate on privilege + access mode</span><br>
+perm = (SUPERVISOR <span class="op">&amp;&amp;</span> (!U <span class="op">||</span> sum))<br>
+&nbsp;&nbsp;&nbsp;&nbsp; <span class="op">||</span> (USER <span class="op">&amp;&amp;</span> U);<br>
+access = (FETCH<span class="op">&amp;&amp;</span>X) <span class="op">||</span> (READ<span class="op">&amp;&amp;</span>(R<span class="op">||(</span>X<span class="op">&amp;&amp;</span>mxr)))<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class="op">||</span> (WRITE<span class="op">&amp;&amp;</span>W);<br>
+<span class="kw">if</span> (!(perm<span class="op">&amp;&amp;</span>access)) MMU_FAULT;<br>
+<span class="kw">if</span> (super<span class="op">&amp;&amp;</span>ppn0!=<span class="num">0</span>) MMU_FAULT; <span class="cm">// bad superpage</span><br>
+<span class="kw">if</span> (!A<span class="op">||</span>(WRITE<span class="op">&amp;&amp;</span>!D)) MMU_FAULT; <span class="cm">// A/D not set</span>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:var(--gap-sm)">
+        <div class="card">
+          <h3>Page fault types</h3>
+          <ul style="font-size:var(--small-size)">
+            <li><span class="mono red">InstructionPageFault (12)</span> — fetch failed</li>
+            <li><span class="mono red">LoadPageFault (13)</span> — data read failed</li>
+            <li><span class="mono red">StorePageFault (15)</span> — data write failed</li>
+          </ul>
+          <p style="font-size:var(--small-size); margin-top:0.4em">All set <span class="mono">ret.trap.en</span> and propagate through <span class="mono accent">handleIrqAndTrap()</span>. Delegated to S-mode if <span class="mono">MEDELEG</span> bit is set — kernel's page fault handler runs.</p>
+        </div>
+        <div class="card">
+          <h3>A &amp; D bit requirement</h3>
+          <p style="font-size:var(--small-size)">Hardware does <strong>not</strong> auto-set A or D bits — the OS must set them before a page is accessed. Any access to A=0, or write to D=0, faults identically to a permission failure and must be handled by the kernel.</p>
+        </div>
+        <div class="card" style="border-color:rgba(0,255,136,0.35)">
+          <h3>nommu Linux — zero MMU cost</h3>
+          <p style="font-size:var(--small-size)">rv32nommu kernel never executes <span class="mono">csrw satp</span>. <span class="mono accent">mmu.mode</span> stays <span class="mono">MMU_MODE_OFF = 0</span> for the entire run. Every memory access hits the first branch and returns the physical address immediately — the full Sv32 walk code is compiled in but never reached at runtime.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">30 / 31</div>
+</section>
+
+<!-- =====================================================
+     SLIDE 31 — END
+     ===================================================== -->
+<section class="slide title-slide" id="s31">
   <div class="slide-inner">
     <p class="eyebrow reveal">That's a wrap</p>
-    <h1 class="reveal" style="font-size:clamp(1.5rem,4.5vw,4rem)">The full decode-execute-trap pipeline in ~800 lines of C++</h1>
-    <p class="subtitle reveal">Instruction decode · CSR access · privilege transitions · vectored traps</p>
+    <h1 class="reveal" style="font-size:clamp(1.5rem,4.5vw,4rem)">Decode · execute · trap · page · boot</h1>
+    <p class="subtitle reveal">Full RISC-V pipeline — from instruction bits to Linux userspace in ~1000 lines of C++</p>
     <div class="rule reveal"></div>
     <div class="cols-3 reveal">
       <div class="card">
         <h3>Key insight #1</h3>
-        <p style="font-size:var(--small-size)">Format parsers and CSR pre-reads happen unconditionally. The dispatch table is dead-simple masked switches — no decode trees, no microcode.</p>
+        <p style="font-size:var(--small-size)">Format parsers and CSR pre-reads happen unconditionally. Dispatch is dead-simple masked switches. 60 bare-metal ISA tests validate every instruction independently before running Linux.</p>
       </div>
       <div class="card">
         <h3>Key insight #2</h3>
-        <p style="font-size:var(--small-size)">Shadow registers (SSTATUS, SIE, SIP) are not stored — they're computed on-demand from M-mode CSRs with a single bitmask. One source of truth.</p>
+        <p style="font-size:var(--small-size)">Sv32 is a two-level table walk: 2× <span class="mono">memGetWord()</span> calls plus permission gates. The entire translation is ~20 lines. nommu Linux bypasses it in the very first branch — zero overhead.</p>
       </div>
       <div class="card">
         <h3>Key insight #3</h3>
-        <p style="font-size:var(--small-size)">Traps and IRQs share a single <span class="mono">handleTrap()</span>. Delegation is pure bit-shifting on MIDELEG/MEDELEG — hardware privilege routing in 3 lines.</p>
+        <p style="font-size:var(--small-size)">Linux boot needs two things: flat Image at mem[0] and <span class="mono">a1 = DTB pointer</span>. The DTB encodes the entire machine description — no firmware layer (OpenSBI/BBL) needed. Kernel runs directly in M-mode.</p>
       </div>
     </div>
   </div>
   <div class="corner-decor">ISA</div>
-  <div class="slide-num">25 / 25</div>
+  <div class="slide-num">31 / 31</div>
 </section>
 
 <script>
