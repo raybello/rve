@@ -336,7 +336,10 @@ imp(add, FormatR, { // rv32i
 
         #ifndef __EMSCRIPTEN__
         printf("ECALL EXIT = x10[%x] %d (0x%x)\n", x10, status, status);
-        exit(status);
+        // exit(status);
+        // running = false;
+        // debugMode = true;
+        // printf("MMU mode: %d, ppn: %x\n", cpu.mmu.mode, cpu.mmu.ppn);
         #else
         printf("Exit called in WebAssembly environment. Ignoring exit.\n");
         #endif
@@ -842,7 +845,7 @@ void Emulator::emulate()
         gettimeofday(&now, NULL);
         float elapsed = (float)(now.tv_sec - (time_t)cpu.start_time_ref)
                         + (float)now.tv_usec / 1000000.0f;
-        double mtime = (double)elapsed * 1000000.0 / 20.0 * 0.1;
+        double mtime = (double)elapsed * 1000000.0;
         cpu.clint.mtime_lo = (u32)fmod(mtime, 4294967296.0);
         cpu.clint.mtime_hi = (u32)(mtime / 4294967296.0);
     }

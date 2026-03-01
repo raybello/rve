@@ -138,9 +138,13 @@ linux-dl:
 	unzip $(BUILD_DIR)/linux-6.1.14-rv32nommu-cnl-1.zip -d $(BUILD_DIR)
 	
 
-linux: all linux-clean linux-dl
+linuxn: all linux-clean linux-dl
 	@echo ============ Running Linux Test ============
 	./$(BUILD_DIR)/$(EXE) -n -b $(BUILD_DIR)/Image
+
+linux: all linux-clean linux-dl
+	@echo ============ Running Linux Test ============
+	./$(BUILD_DIR)/$(EXE) -r -b $(BUILD_DIR)/Image
 
 rerun: clean
 	make run -j8

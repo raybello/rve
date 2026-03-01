@@ -16,6 +16,9 @@ isas:
 linux:
 	make -C rve linux
 
+linuxn:
+	make -C rve linuxn
+
 web:
 	make -C rve web
 
