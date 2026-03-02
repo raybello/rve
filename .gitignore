@@ -2,6 +2,8 @@
 *.o
 *.exe
 
+.vscode/
+
 build/
 build-em/
 mini-rv32ima/

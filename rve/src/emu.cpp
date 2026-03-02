@@ -335,7 +335,7 @@ imp(add, FormatR, { // rv32i
         u32 x10 = cpu.xreg[10];
 
         #ifndef __EMSCRIPTEN__
-        printf("ECALL EXIT = x10[%x] %d (0x%x)\n", x10, status, status);
+        printf("\nECALL EXIT = x10[%x] %d (0x%x)", x10, status, status);
         // exit(status);
         // running = false;
         // debugMode = true;

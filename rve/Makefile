@@ -136,7 +136,6 @@ linux-dl:
 	@echo ============ Downloading Linux Image ============ 
 	wget https://github.com/cnlohr/mini-rv32ima-images/raw/master/images/linux-6.1.14-rv32nommu-cnl-1.zip -O $(BUILD_DIR)/linux-6.1.14-rv32nommu-cnl-1.zip
 	unzip $(BUILD_DIR)/linux-6.1.14-rv32nommu-cnl-1.zip -d $(BUILD_DIR)
-	
 
 linuxn: all linux-clean linux-dl
 	@echo ============ Running Linux Test ============

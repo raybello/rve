@@ -61,5 +61,8 @@
       "cinttypes": "cpp",
       "typeinfo": "cpp",
       "termios.h": "c"
-    }
+    },
+    "terminal.integrated.fontSize": 14,
+    "terminal.integrated.fontFamily": "Fira Code",
+    "terminal.integrated.fontLigatures.enabled": true
 }
