@@ -1,4 +1,6 @@
 
+MAKEFLAGS += -j$(shell nproc 2>/dev/null || sysctl -n hw.logicalcpu)
+
 CXX = g++
 CC  = gcc
 
@@ -112,7 +114,7 @@ all: $(BUILD_DIR)/$(EXE)
 
 web: clean_web
 	@echo ============ Building for Web on $(ECHO_MESSAGE) ============
-	make -f Makefile.emscripten serve -j16
+	make -f Makefile.emscripten serve
 
 clean_web:
 	rm -rf web
@@ -146,7 +148,7 @@ linux: all linux-clean linux-dl
 	./$(BUILD_DIR)/$(EXE) -r -b $(BUILD_DIR)/Image
 
 rerun: clean
-	make run -j8
+	make run
 
 clean:
 	rm -rf $(BUILD_DIR)
