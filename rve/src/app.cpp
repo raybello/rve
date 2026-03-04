@@ -388,25 +388,41 @@ void App::createTerminal()
 {
     ImGuiIO &io = ImGui::GetIO();
     (void)io;
+
+    ImVec2 window_size = io.DisplaySize;
+    // Set window size to 50% of main viewport
+    ImGui::SetNextWindowSize(ImVec2(window_size.x * 0.5f, window_size.y * 0.5f), ImGuiCond_FirstUseEver);
+    // Set window position to the right half of the main viewport
+    ImGui::SetNextWindowPos(ImVec2(window_size.x * 0.5f, window_size.y * 0.5f), ImGuiCond_FirstUseEver);
+
     ImGui::Begin("Terminal");
-    // ImGui::ColorEdit3("BG Color", (float *)&window_bg_color);
-    ImGui::Text("Application average %.3f ms/frame %.1f fps", 1000.0f / io.Framerate, io.Framerate);
+    
+    static char input[256] = "ls -al";
+    static char output[256];
 
-    static char buf1[256] = "ls -al";
-    ImGui::InputText("Command-line", buf1, 256);
-    static std::string text;
+    ImGui::InputTextMultiline("##TerminalOutput", output, sizeof(output), ImVec2(-FLT_MIN, io.DisplaySize.y * 0.4f), ImGuiInputTextFlags_ReadOnly);
+    // ImGui::InputTextMultiline("##TerminalOutput", output, sizeof(output), ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 16), ImGuiInputTextFlags_ReadOnly);
 
-    if (ImGui::Button("Send"))
+    ImGui::InputText("##Terminal", input, 256);
+    ImGui::SameLine();
+    if (ImGui::Button("Send")) // Adds \n automatically
     {
-        printf("Command: %s\n", buf1);
+        printf("Command: %s\n", input);
     }
+    // Specific control signals buttons for testing
+    // Ctrl + C to send SIGINT
+    // Ctrl + D to send EOF
+    // Ctrl + Z to send SIGTSTP
+
     ImGui::End();
 }
 
 void App::createCpuState()
 {
-    ImVec2 window_size = ImGui::GetMainViewport()->Size;
-
+    ImGuiIO &io = ImGui::GetIO();
+    (void)io;
+    ImVec2 window_size = io.DisplaySize;
+    
     // Set window size to 50% of main viewport
     ImGui::SetNextWindowSize(ImVec2(window_size.x * 0.5f, window_size.y - 24), ImGuiCond_FirstUseEver);
     // Set window position to the right half of the main viewport
@@ -560,14 +576,16 @@ void App::createCpuState()
 void App::createDisasm()
 {
     static u32 prev_pc;
-    const int buffer_size = 30;
+    const int buffer_size = 20;
     static char buf[buffer_size][80];
     static u32 pc[buffer_size];
 
-    ImVec2 window_size = ImGui::GetMainViewport()->Size; 
+    ImGuiIO &io = ImGui::GetIO();
+    (void)io;
+    ImVec2 window_size = io.DisplaySize;
 
     // Set window size to 50% of main viewport
-    ImGui::SetNextWindowSize(ImVec2(window_size.x * 0.5f, window_size.y-24), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(window_size.x * 0.5f, (window_size.y * 0.5f)-24), ImGuiCond_FirstUseEver);
     // Set window position to the right half of the main viewport
     ImGui::SetNextWindowPos(ImVec2(window_size.x * 0.5f, 24), ImGuiCond_FirstUseEver);
 

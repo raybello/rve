@@ -36,7 +36,7 @@ struct AppSettings
     // Window settings
     bool show_demo_window = false;      // Imgui Demo
     bool show_plot_demo_window = false; // Implot Demo
-    bool show_terminal_window = false;
+    bool show_terminal_window = true;
     bool show_cpu_state = true;
     bool show_disasm = true;
 
