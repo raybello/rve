@@ -8,6 +8,4 @@
 [submodule "rve/lib/implot"]
 	path = rve/lib/implot
 	url = https://github.com/epezent/implot.git
-[submodule "buildroot"]
-	path = buildroot
-	url = https://github.com/raybello/buildroot.git
+
