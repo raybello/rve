@@ -22,7 +22,7 @@
 # ::sysinit:/etc/init.d/rcS
 
 # Put a getty on the serial port
-console::sysinit:echo "Welcome to mini-rv32ima Linux"
+console::sysinit:echo "Welcome to RVE Linux"
 console::respawn:/bin/login -f root
 #console::respawn:/bin/getty -L -n -L console 0 vt100 # GENERIC_SERIAL
 

@@ -147,6 +147,15 @@ linux: all linux-clean linux-dl
 	@echo ============ Running Linux Test ============
 	./$(BUILD_DIR)/$(EXE) -r -b $(BUILD_DIR)/Image
 
+lnx: all 
+	@echo ============ Copying Linux Image ============
+	if [ ! -f $(BUILD_DIR)/Image ]; then \
+		cp -f $(ASSETS_DIR)/linux/Image $(BUILD_DIR)/Image; \
+	fi
+# 	cp $(ASSETS_DIR)/linux/Image $(BUILD_DIR)/Image
+	@echo ============ Running Linux ============
+	./$(BUILD_DIR)/$(EXE) -r -b $(BUILD_DIR)/Image
+
 rerun: clean
 	make run
 

@@ -24,6 +24,9 @@ linux:
 linuxn:
 	make -C rve linuxn
 
+lnx:
+	make -C rve lnx
+
 web:
 	make -C rve web
 
@@ -44,6 +47,8 @@ build:
 		-w /workspace/project \
 		$(IMAGE) \
 		make -f docker/container.mk build
+	
+	make -C rve lnx
 
 shell:
 	docker run --rm -it \
