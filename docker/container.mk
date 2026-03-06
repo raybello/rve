@@ -13,6 +13,7 @@ build: toolchain linux
 toolchain:
 	cd $(WORKDIR)
 	echo "Setting up toolchain..."
+	git clone https://github.com/raybello/buildroot.git --recurse-submodules --depth 1
 	cp -a configs/custom_kernel_config buildroot/kernel_config
 	cp -a configs/buildroot_config buildroot/.config
 	cp -a configs/busybox_config buildroot/busybox_config
