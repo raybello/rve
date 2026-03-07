@@ -7,12 +7,16 @@ bintoh :
 	gcc bintoh.c -o bintoh
 
 sixtyfourmb.dtb : sixtyfourmb.dts
-	dtc -I dts -O dtb -o $@ $^ -S 1536
+	dtc -I dts -O dtb -o $@ $^ -S 2048
 
 default64mbdtc.h : sixtyfourmb.dtb bintoh
 	./bintoh default64mbdtb < $< > $@
-	# WARNING: sixtyfourmb.dtb MUST hvave at least 16 bytes of buffer room AND be 16-byte aligned.
+	# WARNING: sixtyfourmb.dtb MUST have at least 16 bytes of buffer room AND be 16-byte aligned.
 	#  dtc -I dts -O dtb -o sixtyfourmb.dtb sixtyfourmb.dts -S 1536
 
-dts: default64mbdtc.h
+dts: clean
+	make default64mbdtc.h && \
 	cp -f default64mbdtc.h $(OUTPUT_DIR)/rve/include/default64mbdtc.h
+
+clean:
+	rm -f bintoh bintoh.c sixtyfourmb.dtb default64mbdtc.h

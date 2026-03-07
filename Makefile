@@ -2,6 +2,7 @@ ROOT_DIR = $(shell pwd)
 CCACHE=$(ROOT_DIR)/.ccache
 OUTPUT_DIR = $(ROOT_DIR)/rve/assets/linux
 IMAGE=rve-linux
+CONTAINER_NAME=rve-linux-build
 
 all:
 	make -C rve
@@ -12,10 +13,10 @@ rerun:
 run:
 	make -C rve run
 
-isa: 
+isa:
 	make -C rve isa ISA_TEST=rv32ua-p-lrsc
 
-isas: 
+isas:
 	make -C rve isas
 
 linux:
@@ -33,31 +34,34 @@ web:
 clean:
 	make -C rve clean
 
-container:
+# Build the Docker image
+image:
 	docker build -t $(IMAGE) -f docker/Dockerfile docker
 
-build:
+# Start a persistent build container (keeps buildroot output between builds)
+container:
 	mkdir -p $(CCACHE)
 	mkdir -p $(OUTPUT_DIR)
-
-	docker run \
-		--name rve-linux-build --rm\
+	docker run -d \
+		--name $(CONTAINER_NAME) \
 		-v $(ROOT_DIR):/workspace/project \
 		-v $(OUTPUT_DIR):/workspace/output \
 		-v $(CCACHE):/ccache \
 		-w /workspace/project \
 		$(IMAGE) \
-		make -f docker/container.mk build
-	
+		sleep infinity
+
+# Copy configs and build inside the running container (incremental)
+build:
+	docker exec $(CONTAINER_NAME) make -f docker/container.mk build
 	make -C rve lnx
 
+# Stop and remove the container (next 'make container' starts fresh)
+stop:
+	docker stop $(CONTAINER_NAME)
+	docker rm $(CONTAINER_NAME)
+
 shell:
-	docker run --rm -it \
-		--name rve-linux-shell \
-		-v $(ROOT_DIR):/workspace/project \
-		-v $(CCACHE):/ccache \
-		-w /workspace/project \
-		$(IMAGE) \
-		bash
+	docker exec -it $(CONTAINER_NAME) bash
 
 

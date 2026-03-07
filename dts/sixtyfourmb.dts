@@ -10,9 +10,19 @@
 		bootargs = "earlycon=uart8250,mmio,0x10000000,1000000 console=ttyS0";
 	};
 
+	framebuffer0: framebuffer@84000000 {
+		compatible = "simple-framebuffer";
+		reg = <0x00 0x84000000 0x00 0x11ca40>;
+		width = <720>;
+		height = <405>;
+		stride = <0xb40>;
+		format = "a8b8g8r8";
+		status = "okay";
+	};
+
 	memory@80000000 {
 		device_type = "memory";
-		reg = <0x00 0x80000000 0x00 0x3ffc000>;
+		reg = <0x00 0x80000000 0x00 0x4000000>;
 	};
 
 	cpus {
