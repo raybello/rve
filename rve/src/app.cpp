@@ -129,6 +129,16 @@ int App::initializeUI()
     printf("INFO: GLSL Version: %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
     glEnable(GL_DEPTH_TEST);
 
+    // Create OpenGL texture for the emulated framebuffer (720x405, RGBA)
+    glGenTextures(1, &fb_texture_id);
+    glBindTexture(GL_TEXTURE_2D, fb_texture_id);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, FB_W, FB_H, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
     return 0;
 }
 
@@ -395,24 +405,16 @@ void App::createTerminal()
     // Set window position to the right half of the main viewport
     ImGui::SetNextWindowPos(ImVec2(window_size.x * 0.5f, window_size.y * 0.5f), ImGuiCond_FirstUseEver);
 
-    ImGui::Begin("Terminal");
-    
-    static char input[256] = "ls -al";
-    static char output[256];
+    ImGui::Begin("Framebuffer");
 
-    ImGui::InputTextMultiline("##TerminalOutput", output, sizeof(output), ImVec2(-FLT_MIN, io.DisplaySize.y * 0.4f), ImGuiInputTextFlags_ReadOnly);
-    // ImGui::InputTextMultiline("##TerminalOutput", output, sizeof(output), ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 16), ImGuiInputTextFlags_ReadOnly);
+    // Upload emulated framebuffer (physical 0x84000000 = host mem + 64MB) to GPU
+    glBindTexture(GL_TEXTURE_2D, fb_texture_id);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, FB_W, FB_H,
+                    GL_RGBA, GL_UNSIGNED_BYTE,
+                    emu.memory + 0x04000000u);
+    glBindTexture(GL_TEXTURE_2D, 0);
 
-    ImGui::InputText("##Terminal", input, 256);
-    ImGui::SameLine();
-    if (ImGui::Button("Send")) // Adds \n automatically
-    {
-        printf("Command: %s\n", input);
-    }
-    // Specific control signals buttons for testing
-    // Ctrl + C to send SIGINT
-    // Ctrl + D to send EOF
-    // Ctrl + Z to send SIGTSTP
+    ImGui::Image((ImTextureID)(intptr_t)fb_texture_id, ImVec2(FB_W, FB_H));
 
     ImGui::End();
 }

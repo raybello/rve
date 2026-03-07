@@ -44,8 +44,11 @@ toolchain: config
 	echo "================================" && \
 	echo "Building programs..." && \
 	echo "================================" && \
+	make -C $(BAREMETAL) -j$(JOBS) clean && \
 	make -C $(BAREMETAL) -j$(JOBS) && \
+	make -C $(HELLO_LINUX) -j$(JOBS) clean && \
 	make -C $(HELLO_LINUX) -j$(JOBS) deploy && \
+	make -C $(DTS) -j$(JOBS) clean && \
 	make -C $(DTS) -j$(JOBS) dts
 
 linux:

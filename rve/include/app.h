@@ -63,6 +63,11 @@ class App
     ImGui::FileBrowser elfFileDialog;
     ImGui::FileBrowser linuxFileDialog;
 
+    // Framebuffer texture
+    GLuint fb_texture_id = 0;
+    static constexpr int FB_W = 720;
+    static constexpr int FB_H = 405;
+
 public:
     App(/* args */);
     ~App();

@@ -32,6 +32,12 @@ static void captureKeyboardInput()
 }
 #endif
 
+void print_inst(uint64_t pc, uint32_t inst)
+{
+    char buf[80] = {0};
+    disasm_inst(buf, sizeof(buf), rv64, pc, inst);
+    printf("%016" PRIx64 ":  %s\n", pc, buf);
+}
 
 ////////////////////////////////////////////////////////////////
 // Instruction Decoding
@@ -690,6 +696,7 @@ imp(add, FormatR, { // rv32i
         run(wfi, 0x10500073, ins_FormatEmpty)
     }
 
+    print_inst(cpu.pc, ins_word);
     printf("Invalid instruction: %08x\n", ins_word);
     exit(EXIT_FAILURE);
     ret.trap.en = true;
@@ -793,12 +800,7 @@ void Emulator::initializeBin(const char *path)
     ready_to_run = true;
 }
 
-void print_inst(uint64_t pc, uint32_t inst)
-{
-    char buf[80] = {0};
-    disasm_inst(buf, sizeof(buf), rv64, pc, inst);
-    printf("%016" PRIx64 ":  %s\n", pc, buf);
-}
+
 
 void Emulator::emulate()
 {
