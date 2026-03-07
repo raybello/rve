@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y \
     build-essential git bc bison flex \
     libssl-dev libelf-dev cpio rsync unzip \
     python3 ca-certificates wget curl xz-utils \
-    file ccache ninja-build libncurses-dev \
+    file ccache ninja-build libncurses-dev device-tree-compiler \
     && rm -rf /var/lib/apt/lists/*
 
 # Create a non-root build user to avoid permission conflicts

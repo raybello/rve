@@ -40,7 +40,8 @@ build:
 	mkdir -p $(CCACHE)
 	mkdir -p $(OUTPUT_DIR)
 
-	docker run --rm \
+	docker run \
+		--name rve-linux-build --rm\
 		-v $(ROOT_DIR):/workspace/project \
 		-v $(OUTPUT_DIR):/workspace/output \
 		-v $(CCACHE):/ccache \
@@ -52,6 +53,7 @@ build:
 
 shell:
 	docker run --rm -it \
+		--name rve-linux-shell \
 		-v $(ROOT_DIR):/workspace/project \
 		-v $(CCACHE):/ccache \
 		-w /workspace/project \

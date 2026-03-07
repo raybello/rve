@@ -2,6 +2,7 @@
 BUILDROOT=/opt/buildroot
 HELLO_LINUX=hello_linux
 BAREMETAL=baremetal
+DTS=dts
 
 WORKDIR=/workspace/project
 OUTPUT=/workspace/output
@@ -44,7 +45,8 @@ toolchain: config
 	echo "Building programs..." && \
 	echo "================================" && \
 	make -C $(BAREMETAL) -j$(JOBS) && \
-	make -C $(HELLO_LINUX) -j$(JOBS) deploy
+	make -C $(HELLO_LINUX) -j$(JOBS) deploy && \
+	make -C $(DTS) -j$(JOBS) dts
 
 linux:
 	cd $(WORKDIR) && \
