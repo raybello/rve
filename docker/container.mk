@@ -1,5 +1,8 @@
-# SRC=/opt/riscv32_linux_from_scratch
-SRC=/opt/buildroot
+# BUILDROOT=/opt/riscv32_linux_from_scratch
+BUILDROOT=/opt/buildroot
+HELLO_LINUX=hello_linux
+BAREMETAL=baremetal
+
 WORKDIR=/workspace/project
 OUTPUT=/workspace/output
 JOBS=$(shell nproc)
@@ -8,19 +11,45 @@ JOBS=$(shell nproc)
 
 build: toolchain linux
 
-toolchain: 
+config:
 	cd $(WORKDIR) && \
-	echo "Setting up toolchain..." && \
-	cp -a configs/custom_kernel_config $(SRC)/kernel_config && \
-	cp -a configs/buildroot_config $(SRC)/.config && \
-	cp -a configs/busybox_config $(SRC)/busybox_config && \
-	cp -a configs/uclibc_config $(SRC)/uclibc_config && \
-	cp -a configs/uclibc_config $(SRC)/uclibc_config_extra && \
-	make -C $(SRC) -j$(JOBS)
+	echo "================================" && \
+	echo "Copying configuration files..." && \
+	echo "================================" && \
+	cp -f configs/custom_kernel_config $(BUILDROOT)/kernel_config && \
+	cp -f configs/buildroot_config $(BUILDROOT)/.config && \
+	cp -f configs/busybox_config $(BUILDROOT)/busybox_config && \
+	cp -f configs/uclibc_config $(BUILDROOT)/uclibc_config && \
+	cp -f configs/uclibc_config $(BUILDROOT)/uclibc_config_extra
+
+save-config:
+	cd $(WORKDIR) && \
+	echo "================================" && \
+	echo "Saving configuration files..." && \
+	echo "================================" && \
+	cp -f $(BUILDROOT)/kernel_config configs/custom_kernel_config && \
+	cp -f $(BUILDROOT)/.config configs/buildroot_config && \
+	cp -f $(BUILDROOT)/busybox_config configs/busybox_config && \
+	cp -f $(BUILDROOT)/uclibc_config configs/uclibc_config && \
+	cp -f $(BUILDROOT)/uclibc_config_extra configs/uclibc_config
+
+toolchain: config
+	cd $(WORKDIR) && \
+	echo "================================" && \
+	echo "Building toolchain and linux..." && \
+	echo "================================" && \
+	make -C $(BUILDROOT) -j$(JOBS) && \
+	cp -rf configs/rootfsoverlay/* $(BUILDROOT)/output/target/ && \
+	echo "================================" && \
+	echo "Building programs..." && \
+	echo "================================" && \
+	make -C $(BAREMETAL) -j$(JOBS) && \
+	make -C $(HELLO_LINUX) -j$(JOBS) deploy
 
 linux:
 	cd $(WORKDIR) && \
-	echo "Building Linux kernel..." && \
-	cp -a configs/rootfsoverlay/* $(SRC)/output/target/ && \
-	make -C $(SRC) -j$(JOBS) && \
-	cp -f $(SRC)/output/images/Image $(OUTPUT)/
+	echo "================================" && \
+	echo "Building Linux image..." && \
+	echo "================================" && \
+	make -C $(BUILDROOT) -j$(JOBS) && \
+	cp -f $(BUILDROOT)/output/images/Image $(OUTPUT)/
