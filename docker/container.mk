@@ -23,7 +23,7 @@ config:
 	cp -f configs/uclibc_config $(BUILDROOT)/uclibc_config && \
 	cp -f configs/uclibc_config $(BUILDROOT)/uclibc_config_extra
 
-save-config:
+config-save:
 	cd $(WORKDIR) && \
 	echo "================================" && \
 	echo "Saving configuration files..." && \
