@@ -64,4 +64,8 @@ stop:
 shell:
 	docker exec -it $(CONTAINER_NAME) bash
 
+qemu:
+	@which qemu-system-riscv32 > /dev/null || (echo "qemu-system-riscv32 not found. Please install QEMU with RISC-V support." && exit 1)
+	qemu-system-riscv32 -cpu rv32,mmu=false -m 128M -machine virt -nographic -kernel rve/build/Image -bios none
+
 
