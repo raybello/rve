@@ -19,6 +19,7 @@ bool RV32::init(u8 *memory, u8 *dtb, bool debug_mode, u8 *mtd, u32 mtd_size)
     for (u32 i = 0; i < 32; i++)
     {
         xreg[i] = 0;
+        freg[i] = 0xFFFFFFFF00000000ULL | 0x7FC00000ULL; // NaN-boxed canonical qNaN
     }
     xreg[0xb] = 0x1020; // For Linux / device tree pointer
     pc = 0x80000000;
@@ -72,8 +73,8 @@ void RV32::initCSRs()
     {
         csr.data[i] = 0;
     }
-    // RV32AIMSU
-    csr.data[CSR_MISA] = 0b01000000000101000001000100000001;
+    // RV32AIMSU + F(bit5) + D(bit3)
+    csr.data[CSR_MISA] = 0b01000000000101000001000100101001;
 }
 
 void RV32::dump()
@@ -120,6 +121,12 @@ u32 RV32::readCsrRaw(u32 address)
 {
     switch (address)
     {
+    case CSR_FFLAGS:
+        return csr.data[CSR_FCSR] & 0x1Fu;
+    case CSR_FRM:
+        return (csr.data[CSR_FCSR] >> 5) & 0x7u;
+    case CSR_FCSR:
+        return csr.data[CSR_FCSR] & 0xFFu;
     case CSR_SSTATUS:
         return csr.data[CSR_MSTATUS] & 0x000de162u;
     case CSR_SIE:
@@ -148,6 +155,15 @@ void RV32::writeCsrRaw(u32 address, u32 value)
 {
     switch (address)
     {
+    case CSR_FFLAGS:
+        csr.data[CSR_FCSR] = (csr.data[CSR_FCSR] & ~0x1Fu) | (value & 0x1Fu);
+        break;
+    case CSR_FRM:
+        csr.data[CSR_FCSR] = (csr.data[CSR_FCSR] & ~0xE0u) | ((value & 0x7u) << 5);
+        break;
+    case CSR_FCSR:
+        csr.data[CSR_FCSR] = value & 0xFFu;
+        break;
     case CSR_SSTATUS:
         csr.data[CSR_MSTATUS] &= ~0x000de162u;  // was !0x000de162 (bug: logical NOT → 0)
         csr.data[CSR_MSTATUS] |= value & 0x000de162u;

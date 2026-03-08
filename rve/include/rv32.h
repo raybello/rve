@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <assert.h>
 #include <math.h>
+#include <cfenv>
+#include <cmath>
 #include <time.h>
 #include <sys/time.h>
 
@@ -57,6 +59,26 @@ const u32 CSR_CYCLE = 0xc00;       // User mode cycle counter
 const u32 CSR_TIME = 0xc01;        // Timer register for user mode
 const u32 _CSR_INSERT = 0xc02;     // Insert reserved CSR (reserved)
 const u32 CSR_MHARTID = 0xf14;     // Hardware thread ID
+
+// Floating-Point CSRs (Section 11.2)
+const u32 CSR_FFLAGS = 0x001;  // FP Accrued Exceptions (bits[4:0] of FCSR)
+const u32 CSR_FRM    = 0x002;  // FP Rounding Mode     (bits[7:5] of FCSR)
+const u32 CSR_FCSR   = 0x003;  // FP Control & Status  = FRM<<5 | FFLAGS
+
+// FP Exception flag bits (within FFLAGS / FCSR[4:0])
+const u32 FFLAG_NX = (1u << 0); // Inexact
+const u32 FFLAG_UF = (1u << 1); // Underflow
+const u32 FFLAG_OF = (1u << 2); // Overflow
+const u32 FFLAG_DZ = (1u << 3); // Divide-by-zero
+const u32 FFLAG_NV = (1u << 4); // Invalid operation
+
+// FP Rounding Mode encodings (FCSR bits[7:5])
+const u32 FRM_RNE = 0; // Round to Nearest, ties to Even
+const u32 FRM_RTZ = 1; // Round toward Zero
+const u32 FRM_RDN = 2; // Round Down (toward -inf)
+const u32 FRM_RUP = 3; // Round Up   (toward +inf)
+const u32 FRM_RMM = 4; // Round to Nearest, ties to Max Magnitude
+const u32 FRM_DYN = 7; // Dynamic (use frm field from FCSR)
 
 // Custom / vendor CSRs (same layout as src_new)
 const u32 CSR_MEMOP_OP  = 0x0b0;   // Trigger DMA copy (write)
@@ -195,8 +217,10 @@ class RV32
 {
 public:
     u32 clock;
-    // Registers
+    // Integer registers
     u32 xreg[32];
+    // Floating-point registers (F/D, NaN-boxed for single-precision)
+    u64 freg[32];
     // Program counter
     u32 pc;
     u8 *mem;

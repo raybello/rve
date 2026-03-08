@@ -2,6 +2,8 @@
 #include "net.h"
 #include "default64mbdtc.h"
 #include <sys/time.h>
+#include <cfenv>
+#include <cmath>
 #ifndef __EMSCRIPTEN__
 #include <termios.h>
 #include <signal.h>
@@ -31,6 +33,133 @@ static void captureKeyboardInput()
     term_captured = true;
 }
 #endif
+
+////////////////////////////////////////////////////////////////
+// FP Helper Functions
+////////////////////////////////////////////////////////////////
+
+// Apply RISC-V rounding mode to C FP environment.
+// Returns false if rm is reserved (5 or 6) → illegal instruction.
+static bool fp_set_rm(u32 ins_word, u32 fcsr)
+{
+    u32 rm = (ins_word >> 12) & 0x7u;
+    if (rm == FRM_DYN)
+        rm = (fcsr >> 5) & 0x7u;
+    switch (rm)
+    {
+    case FRM_RNE: fesetround(FE_TONEAREST);  return true;
+    case FRM_RTZ: fesetround(FE_TOWARDZERO); return true;
+    case FRM_RDN: fesetround(FE_DOWNWARD);   return true;
+    case FRM_RUP: fesetround(FE_UPWARD);     return true;
+    case FRM_RMM: fesetround(FE_TONEAREST);  return true; // approx; no FE_TOMAXMAGNITUDE
+    default:      return false; // rm 5 or 6 = illegal
+    }
+}
+
+// Accumulate hardware FP exception flags into FCSR, then restore default rounding mode.
+static void fp_accum_flags(RV32 &cpu)
+{
+    u32 flags = 0;
+    if (fetestexcept(FE_INEXACT))   flags |= FFLAG_NX;
+    if (fetestexcept(FE_UNDERFLOW)) flags |= FFLAG_UF;
+    if (fetestexcept(FE_OVERFLOW))  flags |= FFLAG_OF;
+    if (fetestexcept(FE_DIVBYZERO)) flags |= FFLAG_DZ;
+    if (fetestexcept(FE_INVALID))   flags |= FFLAG_NV;
+    cpu.csr.data[CSR_FCSR] |= flags;
+    feclearexcept(FE_ALL_EXCEPT);
+    fesetround(FE_TONEAREST);
+}
+
+// Write single-precision float to freg with NaN-boxing (upper 32 bits = 0xFFFFFFFF).
+static inline void freg_write_s(RV32 &cpu, u32 rd, float f)
+{
+    u32 bits;
+    memcpy(&bits, &f, 4);
+    cpu.freg[rd] = 0xFFFFFFFF00000000ULL | (u64)bits;
+}
+
+// Write double-precision float to freg.
+static inline void freg_write_d(RV32 &cpu, u32 rd, double d)
+{
+    u64 bits;
+    memcpy(&bits, &d, 8);
+    cpu.freg[rd] = bits;
+}
+
+// Read single-precision float from freg. If not NaN-boxed, return canonical qNaN.
+static inline float freg_read_s(RV32 &cpu, u32 rs)
+{
+    u64 v = cpu.freg[rs];
+    if ((v >> 32) != 0xFFFFFFFFu)
+    {
+        u32 qnan_bits = 0x7FC00000u;
+        float qnan;
+        memcpy(&qnan, &qnan_bits, 4);
+        return qnan;
+    }
+    float f;
+    u32 lo = (u32)v;
+    memcpy(&f, &lo, 4);
+    return f;
+}
+
+// Read double-precision float from freg.
+static inline double freg_read_d(RV32 &cpu, u32 rs)
+{
+    double d;
+    memcpy(&d, &cpu.freg[rs], 8);
+    return d;
+}
+
+// Load 64-bit double from memory (two consecutive 32-bit words, little-endian).
+// addr must already be a translated physical address.
+static u64 mem_get_double(RV32 &cpu, u32 addr)
+{
+    return (u64)cpu.memGetWord(addr) | ((u64)cpu.memGetWord(addr + 4) << 32);
+}
+
+// Store 64-bit double to memory as two 32-bit words (little-endian).
+static void mem_set_double(RV32 &cpu, u32 addr, u64 val)
+{
+    cpu.memSetWord(addr,     (u32)(val & 0xFFFFFFFFu));
+    cpu.memSetWord(addr + 4, (u32)(val >> 32));
+}
+
+// fclass result: one-hot bit per floating-point class (Table 11.2 of RISC-V spec).
+static u32 fp_fclass_s(float f)
+{
+    bool neg = std::signbit(f);
+    int  cls = std::fpclassify(f);
+    if (cls == FP_INFINITE)  return neg ? (1u << 0) : (1u << 7);
+    if (cls == FP_NORMAL)    return neg ? (1u << 1) : (1u << 6);
+    if (cls == FP_SUBNORMAL) return neg ? (1u << 2) : (1u << 5);
+    if (cls == FP_ZERO)      return neg ? (1u << 3) : (1u << 4);
+    // NaN — bit 22 set = quiet, clear = signaling
+    u32 bits;
+    memcpy(&bits, &f, 4);
+    return (bits & (1u << 22)) ? (1u << 9) : (1u << 8);
+}
+
+static u32 fp_fclass_d(double d)
+{
+    bool neg = std::signbit(d);
+    int  cls = std::fpclassify(d);
+    if (cls == FP_INFINITE)  return neg ? (1u << 0) : (1u << 7);
+    if (cls == FP_NORMAL)    return neg ? (1u << 1) : (1u << 6);
+    if (cls == FP_SUBNORMAL) return neg ? (1u << 2) : (1u << 5);
+    if (cls == FP_ZERO)      return neg ? (1u << 3) : (1u << 4);
+    u64 bits;
+    memcpy(&bits, &d, 8);
+    return (bits & (1ULL << 51)) ? (1u << 9) : (1u << 8);
+}
+
+#define FP_ILLEGAL_RM()                                    \
+    {                                                      \
+        ret->trap.en    = true;                            \
+        ret->trap.type  = trap_IllegalInstruction;         \
+        ret->trap.value = ins_word;                        \
+        return;                                            \
+    }
 
 void print_inst(uint64_t pc, uint32_t inst)
 {
@@ -342,7 +471,7 @@ imp(add, FormatR, { // rv32i
 
         #ifndef __EMSCRIPTEN__
         printf("\nECALL EXIT = x10[%x] %d (0x%x)\n", x10, status, status);
-        // exit(status);
+        exit(status);
         // running = false;
         // debugMode = true;
         // printf("MMU mode: %d, ppn: %x\n", cpu.mmu.mode, cpu.mmu.ppn);
@@ -572,6 +701,413 @@ imp(add, FormatR, { // rv32i
                                                                          WR_RD(cpu.xreg[ins.rs1] ^ cpu.xreg[ins.rs2])}) imp(xori, FormatI, {// rv32i
                                                                                                                                             WR_RD(cpu.xreg[ins.rs1] ^ ins.imm)})
 
+////////////////////////////////////////////////////////////////
+// RV32F / RV32D Instruction Implementations
+////////////////////////////////////////////////////////////////
+
+// ---- FP Loads / Stores ----
+imp(flw, FormatI, { // rv32f
+    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_READ);
+    if (ret->trap.en) return;
+    cpu.freg[ins.rd] = 0xFFFFFFFF00000000ULL | (u64)cpu.memGetWord(addr);
+})
+imp(fld, FormatI, { // rv32d
+    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_READ);
+    if (ret->trap.en) return;
+    cpu.freg[ins.rd] = mem_get_double(cpu, addr);
+})
+imp(fsw, FormatS, { // rv32f
+    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_WRITE);
+    if (ret->trap.en) return;
+    cpu.memSetWord(addr, (u32)(cpu.freg[ins.rs2] & 0xFFFFFFFFu));
+})
+imp(fsd, FormatS, { // rv32d
+    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_WRITE);
+    if (ret->trap.en) return;
+    mem_set_double(cpu, addr, cpu.freg[ins.rs2]);
+})
+
+// ---- FP Arithmetic — Single ----
+imp(fadd_s, FormatR, { // rv32f
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    feclearexcept(FE_ALL_EXCEPT);
+    freg_write_s(cpu, ins.rd, freg_read_s(cpu, ins.rs1) + freg_read_s(cpu, ins.rs2));
+    fp_accum_flags(cpu);
+})
+imp(fsub_s, FormatR, { // rv32f
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    feclearexcept(FE_ALL_EXCEPT);
+    freg_write_s(cpu, ins.rd, freg_read_s(cpu, ins.rs1) - freg_read_s(cpu, ins.rs2));
+    fp_accum_flags(cpu);
+})
+imp(fmul_s, FormatR, { // rv32f
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    feclearexcept(FE_ALL_EXCEPT);
+    freg_write_s(cpu, ins.rd, freg_read_s(cpu, ins.rs1) * freg_read_s(cpu, ins.rs2));
+    fp_accum_flags(cpu);
+})
+imp(fdiv_s, FormatR, { // rv32f
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    feclearexcept(FE_ALL_EXCEPT);
+    freg_write_s(cpu, ins.rd, freg_read_s(cpu, ins.rs1) / freg_read_s(cpu, ins.rs2));
+    fp_accum_flags(cpu);
+})
+imp(fsqrt_s, FormatR, { // rv32f
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    feclearexcept(FE_ALL_EXCEPT);
+    freg_write_s(cpu, ins.rd, std::sqrt(freg_read_s(cpu, ins.rs1)));
+    fp_accum_flags(cpu);
+})
+
+// ---- FP Arithmetic — Double ----
+imp(fadd_d, FormatR, { // rv32d
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    feclearexcept(FE_ALL_EXCEPT);
+    freg_write_d(cpu, ins.rd, freg_read_d(cpu, ins.rs1) + freg_read_d(cpu, ins.rs2));
+    fp_accum_flags(cpu);
+})
+imp(fsub_d, FormatR, { // rv32d
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    feclearexcept(FE_ALL_EXCEPT);
+    freg_write_d(cpu, ins.rd, freg_read_d(cpu, ins.rs1) - freg_read_d(cpu, ins.rs2));
+    fp_accum_flags(cpu);
+})
+imp(fmul_d, FormatR, { // rv32d
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    feclearexcept(FE_ALL_EXCEPT);
+    freg_write_d(cpu, ins.rd, freg_read_d(cpu, ins.rs1) * freg_read_d(cpu, ins.rs2));
+    fp_accum_flags(cpu);
+})
+imp(fdiv_d, FormatR, { // rv32d
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    feclearexcept(FE_ALL_EXCEPT);
+    freg_write_d(cpu, ins.rd, freg_read_d(cpu, ins.rs1) / freg_read_d(cpu, ins.rs2));
+    fp_accum_flags(cpu);
+})
+imp(fsqrt_d, FormatR, { // rv32d
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    feclearexcept(FE_ALL_EXCEPT);
+    freg_write_d(cpu, ins.rd, std::sqrt(freg_read_d(cpu, ins.rs1)));
+    fp_accum_flags(cpu);
+})
+
+// ---- R4-type Fused Multiply-Add — Single ----
+imp(fmadd_s, FormatR, { // rv32f: rd = rs1*rs2 + rs3
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    feclearexcept(FE_ALL_EXCEPT);
+    freg_write_s(cpu, ins.rd, std::fma(freg_read_s(cpu, ins.rs1), freg_read_s(cpu, ins.rs2), freg_read_s(cpu, ins.rs3)));
+    fp_accum_flags(cpu);
+})
+imp(fmsub_s, FormatR, { // rv32f: rd = rs1*rs2 - rs3
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    feclearexcept(FE_ALL_EXCEPT);
+    freg_write_s(cpu, ins.rd, std::fma(freg_read_s(cpu, ins.rs1), freg_read_s(cpu, ins.rs2), -freg_read_s(cpu, ins.rs3)));
+    fp_accum_flags(cpu);
+})
+imp(fnmsub_s, FormatR, { // rv32f: rd = -(rs1*rs2) + rs3
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    feclearexcept(FE_ALL_EXCEPT);
+    freg_write_s(cpu, ins.rd, std::fma(-freg_read_s(cpu, ins.rs1), freg_read_s(cpu, ins.rs2), freg_read_s(cpu, ins.rs3)));
+    fp_accum_flags(cpu);
+})
+imp(fnmadd_s, FormatR, { // rv32f: rd = -(rs1*rs2) - rs3
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    feclearexcept(FE_ALL_EXCEPT);
+    freg_write_s(cpu, ins.rd, std::fma(-freg_read_s(cpu, ins.rs1), freg_read_s(cpu, ins.rs2), -freg_read_s(cpu, ins.rs3)));
+    fp_accum_flags(cpu);
+})
+
+// ---- R4-type Fused Multiply-Add — Double ----
+imp(fmadd_d, FormatR, { // rv32d: rd = rs1*rs2 + rs3
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    feclearexcept(FE_ALL_EXCEPT);
+    freg_write_d(cpu, ins.rd, std::fma(freg_read_d(cpu, ins.rs1), freg_read_d(cpu, ins.rs2), freg_read_d(cpu, ins.rs3)));
+    fp_accum_flags(cpu);
+})
+imp(fmsub_d, FormatR, { // rv32d: rd = rs1*rs2 - rs3
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    feclearexcept(FE_ALL_EXCEPT);
+    freg_write_d(cpu, ins.rd, std::fma(freg_read_d(cpu, ins.rs1), freg_read_d(cpu, ins.rs2), -freg_read_d(cpu, ins.rs3)));
+    fp_accum_flags(cpu);
+})
+imp(fnmsub_d, FormatR, { // rv32d: rd = -(rs1*rs2) + rs3
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    feclearexcept(FE_ALL_EXCEPT);
+    freg_write_d(cpu, ins.rd, std::fma(-freg_read_d(cpu, ins.rs1), freg_read_d(cpu, ins.rs2), freg_read_d(cpu, ins.rs3)));
+    fp_accum_flags(cpu);
+})
+imp(fnmadd_d, FormatR, { // rv32d: rd = -(rs1*rs2) - rs3
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    feclearexcept(FE_ALL_EXCEPT);
+    freg_write_d(cpu, ins.rd, std::fma(-freg_read_d(cpu, ins.rs1), freg_read_d(cpu, ins.rs2), -freg_read_d(cpu, ins.rs3)));
+    fp_accum_flags(cpu);
+})
+
+// ---- Sign Injection — Single ----
+imp(fsgnj_s, FormatR, { // rv32f
+    u32 a; float fa = freg_read_s(cpu, ins.rs1); memcpy(&a, &fa, 4);
+    u32 b; float fb = freg_read_s(cpu, ins.rs2); memcpy(&b, &fb, 4);
+    u32 r = (a & 0x7FFFFFFFu) | (b & 0x80000000u);
+    float rf; memcpy(&rf, &r, 4);
+    freg_write_s(cpu, ins.rd, rf);
+})
+imp(fsgnjn_s, FormatR, { // rv32f
+    u32 a; float fa = freg_read_s(cpu, ins.rs1); memcpy(&a, &fa, 4);
+    u32 b; float fb = freg_read_s(cpu, ins.rs2); memcpy(&b, &fb, 4);
+    u32 r = (a & 0x7FFFFFFFu) | (~b & 0x80000000u);
+    float rf; memcpy(&rf, &r, 4);
+    freg_write_s(cpu, ins.rd, rf);
+})
+imp(fsgnjx_s, FormatR, { // rv32f
+    u32 a; float fa = freg_read_s(cpu, ins.rs1); memcpy(&a, &fa, 4);
+    u32 b; float fb = freg_read_s(cpu, ins.rs2); memcpy(&b, &fb, 4);
+    u32 r = a ^ (b & 0x80000000u);
+    float rf; memcpy(&rf, &r, 4);
+    freg_write_s(cpu, ins.rd, rf);
+})
+
+// ---- Sign Injection — Double ----
+imp(fsgnj_d, FormatR, { // rv32d
+    u64 a = cpu.freg[ins.rs1];
+    u64 b = cpu.freg[ins.rs2];
+    cpu.freg[ins.rd] = (a & 0x7FFFFFFFFFFFFFFFull) | (b & 0x8000000000000000ull);
+})
+imp(fsgnjn_d, FormatR, { // rv32d
+    u64 a = cpu.freg[ins.rs1];
+    u64 b = cpu.freg[ins.rs2];
+    cpu.freg[ins.rd] = (a & 0x7FFFFFFFFFFFFFFFull) | (~b & 0x8000000000000000ull);
+})
+imp(fsgnjx_d, FormatR, { // rv32d
+    u64 a = cpu.freg[ins.rs1];
+    u64 b = cpu.freg[ins.rs2];
+    cpu.freg[ins.rd] = a ^ (b & 0x8000000000000000ull);
+})
+
+// ---- fmin / fmax — Single ----
+imp(fmin_s, FormatR, { // rv32f
+    float a = freg_read_s(cpu, ins.rs1);
+    float b = freg_read_s(cpu, ins.rs2);
+    u32 ab; memcpy(&ab, &a, 4);
+    u32 bb; memcpy(&bb, &b, 4);
+    if ((std::isnan(a) && !(ab & (1u << 22))) || (std::isnan(b) && !(bb & (1u << 22))))
+        cpu.csr.data[CSR_FCSR] |= FFLAG_NV;
+    float r;
+    if (std::isnan(a) && std::isnan(b)) { u32 qn = 0x7FC00000u; memcpy(&r, &qn, 4); }
+    else if (std::isnan(a)) r = b;
+    else if (std::isnan(b)) r = a;
+    else if (a == 0.0f && b == 0.0f) r = std::signbit(a) ? a : b; // -0 < +0
+    else r = a < b ? a : b;
+    freg_write_s(cpu, ins.rd, r);
+})
+imp(fmax_s, FormatR, { // rv32f
+    float a = freg_read_s(cpu, ins.rs1);
+    float b = freg_read_s(cpu, ins.rs2);
+    u32 ab; memcpy(&ab, &a, 4);
+    u32 bb; memcpy(&bb, &b, 4);
+    if ((std::isnan(a) && !(ab & (1u << 22))) || (std::isnan(b) && !(bb & (1u << 22))))
+        cpu.csr.data[CSR_FCSR] |= FFLAG_NV;
+    float r;
+    if (std::isnan(a) && std::isnan(b)) { u32 qn = 0x7FC00000u; memcpy(&r, &qn, 4); }
+    else if (std::isnan(a)) r = b;
+    else if (std::isnan(b)) r = a;
+    else if (a == 0.0f && b == 0.0f) r = std::signbit(b) ? a : b; // +0 > -0
+    else r = a > b ? a : b;
+    freg_write_s(cpu, ins.rd, r);
+})
+
+// ---- fmin / fmax — Double ----
+imp(fmin_d, FormatR, { // rv32d
+    double a = freg_read_d(cpu, ins.rs1);
+    double b = freg_read_d(cpu, ins.rs2);
+    u64 ab; memcpy(&ab, &a, 8);
+    u64 bb; memcpy(&bb, &b, 8);
+    if ((std::isnan(a) && !(ab & (1ULL << 51))) || (std::isnan(b) && !(bb & (1ULL << 51))))
+        cpu.csr.data[CSR_FCSR] |= FFLAG_NV;
+    double r;
+    if (std::isnan(a) && std::isnan(b)) { u64 qn = 0x7FF8000000000000ULL; memcpy(&r, &qn, 8); }
+    else if (std::isnan(a)) r = b;
+    else if (std::isnan(b)) r = a;
+    else if (a == 0.0 && b == 0.0) r = std::signbit(a) ? a : b;
+    else r = a < b ? a : b;
+    freg_write_d(cpu, ins.rd, r);
+})
+imp(fmax_d, FormatR, { // rv32d
+    double a = freg_read_d(cpu, ins.rs1);
+    double b = freg_read_d(cpu, ins.rs2);
+    u64 ab; memcpy(&ab, &a, 8);
+    u64 bb; memcpy(&bb, &b, 8);
+    if ((std::isnan(a) && !(ab & (1ULL << 51))) || (std::isnan(b) && !(bb & (1ULL << 51))))
+        cpu.csr.data[CSR_FCSR] |= FFLAG_NV;
+    double r;
+    if (std::isnan(a) && std::isnan(b)) { u64 qn = 0x7FF8000000000000ULL; memcpy(&r, &qn, 8); }
+    else if (std::isnan(a)) r = b;
+    else if (std::isnan(b)) r = a;
+    else if (a == 0.0 && b == 0.0) r = std::signbit(b) ? a : b;
+    else r = a > b ? a : b;
+    freg_write_d(cpu, ins.rd, r);
+})
+
+// ---- Comparisons — Single (result → integer reg) ----
+imp(feq_s, FormatR, { // rv32f
+    float a = freg_read_s(cpu, ins.rs1);
+    float b = freg_read_s(cpu, ins.rs2);
+    if (std::isnan(a) || std::isnan(b))
+    {
+        u32 ab; memcpy(&ab, &a, 4);
+        u32 bb; memcpy(&bb, &b, 4);
+        if ((std::isnan(a) && !(ab & (1u << 22))) || (std::isnan(b) && !(bb & (1u << 22))))
+            cpu.csr.data[CSR_FCSR] |= FFLAG_NV;
+        WR_RD(ZERO)
+    }
+    else { WR_RD(a == b ? ONE : ZERO) }
+})
+imp(flt_s, FormatR, { // rv32f
+    float a = freg_read_s(cpu, ins.rs1);
+    float b = freg_read_s(cpu, ins.rs2);
+    if (std::isnan(a) || std::isnan(b)) { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; WR_RD(ZERO) }
+    else { WR_RD(a < b ? ONE : ZERO) }
+})
+imp(fle_s, FormatR, { // rv32f
+    float a = freg_read_s(cpu, ins.rs1);
+    float b = freg_read_s(cpu, ins.rs2);
+    if (std::isnan(a) || std::isnan(b)) { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; WR_RD(ZERO) }
+    else { WR_RD(a <= b ? ONE : ZERO) }
+})
+
+// ---- Comparisons — Double ----
+imp(feq_d, FormatR, { // rv32d
+    double a = freg_read_d(cpu, ins.rs1);
+    double b = freg_read_d(cpu, ins.rs2);
+    if (std::isnan(a) || std::isnan(b))
+    {
+        u64 ab; memcpy(&ab, &a, 8);
+        u64 bb; memcpy(&bb, &b, 8);
+        if ((std::isnan(a) && !(ab & (1ULL << 51))) || (std::isnan(b) && !(bb & (1ULL << 51))))
+            cpu.csr.data[CSR_FCSR] |= FFLAG_NV;
+        WR_RD(ZERO)
+    }
+    else { WR_RD(a == b ? ONE : ZERO) }
+})
+imp(flt_d, FormatR, { // rv32d
+    double a = freg_read_d(cpu, ins.rs1);
+    double b = freg_read_d(cpu, ins.rs2);
+    if (std::isnan(a) || std::isnan(b)) { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; WR_RD(ZERO) }
+    else { WR_RD(a < b ? ONE : ZERO) }
+})
+imp(fle_d, FormatR, { // rv32d
+    double a = freg_read_d(cpu, ins.rs1);
+    double b = freg_read_d(cpu, ins.rs2);
+    if (std::isnan(a) || std::isnan(b)) { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; WR_RD(ZERO) }
+    else { WR_RD(a <= b ? ONE : ZERO) }
+})
+
+// ---- fclass ----
+imp(fclass_s, FormatR, { // rv32f
+    u32 _cls = fp_fclass_s(freg_read_s(cpu, ins.rs1));
+    WR_RD(_cls)
+})
+imp(fclass_d, FormatR, { // rv32d
+    u32 _cls = fp_fclass_d(freg_read_d(cpu, ins.rs1));
+    WR_RD(_cls)
+})
+
+// ---- Integer ↔ FP Move (raw bits) ----
+imp(fmv_x_w, FormatR, { // rv32f: rd(int) = lower 32 bits of freg[rs1]
+    u32 _bits = (u32)(cpu.freg[ins.rs1] & 0xFFFFFFFFu);
+    WR_RD(_bits)
+})
+imp(fmv_w_x, FormatR, { // rv32f: freg[rd] = NaN-box(xreg[rs1])
+    cpu.freg[ins.rd] = 0xFFFFFFFF00000000ULL | (u64)cpu.xreg[ins.rs1];
+})
+
+// ---- FP → Integer Conversions (single) ----
+imp(fcvt_w_s, FormatR, { // rv32f: float → signed int32 (saturating)
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    float a = freg_read_s(cpu, ins.rs1);
+    u32 result;
+    if (std::isnan(a) || a >= 2147483648.0f)
+        { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0x7FFFFFFFu; }
+    else if (a < -2147483648.0f)
+        { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0x80000000u; }
+    else
+        { feclearexcept(FE_ALL_EXCEPT); result = (u32)(int32_t)a; fp_accum_flags(cpu); }
+    WR_RD(result)
+})
+imp(fcvt_wu_s, FormatR, { // rv32f: float → unsigned int32 (saturating)
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    float a = freg_read_s(cpu, ins.rs1);
+    u32 result;
+    if (std::isnan(a) || a >= 4294967296.0f)
+        { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0xFFFFFFFFu; }
+    else if (a < 0.0f)
+        { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0; }
+    else
+        { feclearexcept(FE_ALL_EXCEPT); result = (u32)a; fp_accum_flags(cpu); }
+    WR_RD(result)
+})
+
+// ---- Integer → FP Conversions (single) ----
+imp(fcvt_s_w, FormatR, { // rv32f: signed int32 → float
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    feclearexcept(FE_ALL_EXCEPT);
+    freg_write_s(cpu, ins.rd, (float)(int32_t)cpu.xreg[ins.rs1]);
+    fp_accum_flags(cpu);
+})
+imp(fcvt_s_wu, FormatR, { // rv32f: unsigned int32 → float
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    feclearexcept(FE_ALL_EXCEPT);
+    freg_write_s(cpu, ins.rd, (float)(u32)cpu.xreg[ins.rs1]);
+    fp_accum_flags(cpu);
+})
+
+// ---- FP → Integer Conversions (double) ----
+imp(fcvt_w_d, FormatR, { // rv32d: double → signed int32 (saturating)
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    double a = freg_read_d(cpu, ins.rs1);
+    u32 result;
+    if (std::isnan(a) || a >= 2147483648.0)
+        { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0x7FFFFFFFu; }
+    else if (a < -2147483648.0)
+        { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0x80000000u; }
+    else
+        { feclearexcept(FE_ALL_EXCEPT); result = (u32)(int32_t)a; fp_accum_flags(cpu); }
+    WR_RD(result)
+})
+imp(fcvt_wu_d, FormatR, { // rv32d: double → unsigned int32 (saturating)
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    double a = freg_read_d(cpu, ins.rs1);
+    u32 result;
+    if (std::isnan(a) || a >= 4294967296.0)
+        { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0xFFFFFFFFu; }
+    else if (a < 0.0)
+        { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0; }
+    else
+        { feclearexcept(FE_ALL_EXCEPT); result = (u32)a; fp_accum_flags(cpu); }
+    WR_RD(result)
+})
+
+// ---- Integer → FP Conversions (double) ----
+imp(fcvt_d_w, FormatR, { // rv32d: signed int32 → double (always exact)
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    freg_write_d(cpu, ins.rd, (double)(int32_t)cpu.xreg[ins.rs1]);
+})
+imp(fcvt_d_wu, FormatR, { // rv32d: unsigned int32 → double (always exact)
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    freg_write_d(cpu, ins.rd, (double)(u32)cpu.xreg[ins.rs1]);
+})
+
+// ---- Cross-precision Conversions ----
+imp(fcvt_s_d, FormatR, { // rv32d: double → single (may lose precision)
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    feclearexcept(FE_ALL_EXCEPT);
+    freg_write_s(cpu, ins.rd, (float)freg_read_d(cpu, ins.rs1));
+    fp_accum_flags(cpu);
+})
+imp(fcvt_d_s, FormatR, { // rv32d: single → double (always exact)
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    freg_write_d(cpu, ins.rd, (double)freg_read_s(cpu, ins.rs1));
+})
+
     ins_ret Emulator::insSelect(u32 ins_word)
 {
     u32 ins_masked;
@@ -624,9 +1160,13 @@ imp(add, FormatR, { // rv32i
         run(lh, 0x00001003, ins_FormatI)
         run(lhu, 0x00005003, ins_FormatI)
         run(lw, 0x00002003, ins_FormatI)
+        run(flw, 0x00002007, ins_FormatI) // rv32f
+        run(fld, 0x00003007, ins_FormatI) // rv32d
         run(ori, 0x00006013, ins_FormatI)
         run(sb, 0x00000023, ins_FormatS)
         run(sh, 0x00001023, ins_FormatS)
+        run(fsw, 0x00002027, ins_FormatS) // rv32f
+        run(fsd, 0x00003027, ins_FormatS) // rv32d
         run(slti, 0x00002013, ins_FormatI)
         run(sltiu, 0x00003013, ins_FormatI)
         run(sw, 0x00002023, ins_FormatS)
@@ -685,6 +1225,82 @@ imp(add, FormatR, { // rv32i
     {
         run(sfence_vma, 0x12000073, ins_FormatEmpty)
     }
+    // ---- RV32F / RV32D new switch blocks ----
+
+    // R4-type fused: match opcode + fmt bits[26:25] (00=S, 01=D)
+    ins_masked = ins_word & 0x0600007f;
+    switch (ins_masked)
+    {
+        run(fmadd_s,  0x00000043, ins_FormatR)
+        run(fmsub_s,  0x00000047, ins_FormatR)
+        run(fnmsub_s, 0x0000004b, ins_FormatR)
+        run(fnmadd_s, 0x0000004f, ins_FormatR)
+        run(fmadd_d,  0x02000043, ins_FormatR)
+        run(fmsub_d,  0x02000047, ins_FormatR)
+        run(fnmsub_d, 0x0200004b, ins_FormatR)
+        run(fnmadd_d, 0x0200004f, ins_FormatR)
+    }
+    // fmv.x.w, fclass — match funct7 + rs2 + funct3
+    ins_masked = ins_word & 0xfff0707f;
+    switch (ins_masked)
+    {
+        run(fmv_x_w,  0xe0000053, ins_FormatR)
+        run(fclass_s, 0xe0001053, ins_FormatR)
+        run(fclass_d, 0xe2001053, ins_FormatR)
+    }
+    // fsqrt, fcvt, fmv.w.x — match funct7 + rs2 (no funct3)
+    ins_masked = ins_word & 0xfff0007f;
+    switch (ins_masked)
+    {
+        run(fsqrt_s,   0x58000053, ins_FormatR)
+        run(fsqrt_d,   0x5a000053, ins_FormatR)
+        run(fcvt_w_s,  0xc0000053, ins_FormatR)
+        run(fcvt_wu_s, 0xc0100053, ins_FormatR)
+        run(fcvt_s_w,  0xd0000053, ins_FormatR)
+        run(fcvt_s_wu, 0xd0100053, ins_FormatR)
+        run(fmv_w_x,   0xf0000053, ins_FormatR)
+        run(fcvt_s_d,  0x40100053, ins_FormatR)
+        run(fcvt_d_s,  0x42000053, ins_FormatR)
+        run(fcvt_w_d,  0xc2000053, ins_FormatR)
+        run(fcvt_wu_d, 0xc2100053, ins_FormatR)
+        run(fcvt_d_w,  0xd2000053, ins_FormatR)
+        run(fcvt_d_wu, 0xd2100053, ins_FormatR)
+    }
+    // fsgnj, fmin/max, feq/flt/fle — match funct7 + funct3
+    ins_masked = ins_word & 0xfe00707f;
+    switch (ins_masked)
+    {
+        run(fsgnj_s,  0x20000053, ins_FormatR)
+        run(fsgnjn_s, 0x20001053, ins_FormatR)
+        run(fsgnjx_s, 0x20002053, ins_FormatR)
+        run(fmin_s,   0x28000053, ins_FormatR)
+        run(fmax_s,   0x28001053, ins_FormatR)
+        run(feq_s,    0xa0002053, ins_FormatR)
+        run(flt_s,    0xa0001053, ins_FormatR)
+        run(fle_s,    0xa0000053, ins_FormatR)
+        run(fsgnj_d,  0x22000053, ins_FormatR)
+        run(fsgnjn_d, 0x22001053, ins_FormatR)
+        run(fsgnjx_d, 0x22002053, ins_FormatR)
+        run(fmin_d,   0x2a000053, ins_FormatR)
+        run(fmax_d,   0x2a001053, ins_FormatR)
+        run(feq_d,    0xa2002053, ins_FormatR)
+        run(flt_d,    0xa2001053, ins_FormatR)
+        run(fle_d,    0xa2000053, ins_FormatR)
+    }
+    // fadd/fsub/fmul/fdiv — match funct7 only
+    ins_masked = ins_word & 0xfe00007f;
+    switch (ins_masked)
+    {
+        run(fadd_s, 0x00000053, ins_FormatR)
+        run(fsub_s, 0x08000053, ins_FormatR)
+        run(fmul_s, 0x10000053, ins_FormatR)
+        run(fdiv_s, 0x18000053, ins_FormatR)
+        run(fadd_d, 0x02000053, ins_FormatR)
+        run(fsub_d, 0x0a000053, ins_FormatR)
+        run(fmul_d, 0x12000053, ins_FormatR)
+        run(fdiv_d, 0x1a000053, ins_FormatR)
+    }
+
     ins_masked = ins_word & 0xffffffff;
     switch (ins_masked)
     {

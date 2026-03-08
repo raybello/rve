@@ -204,6 +204,62 @@ public:
     def(wfi, FormatEmpty); // system
     def(xor, FormatR); // rv32i
     def(xori, FormatI); // rv32i
+
+    // ---- RV32F (single-precision) ----
+    def(flw, FormatI);           // fp load word
+    def(fsw, FormatS);           // fp store word
+    def(fadd_s, FormatR);
+    def(fsub_s, FormatR);
+    def(fmul_s, FormatR);
+    def(fdiv_s, FormatR);
+    def(fsqrt_s, FormatR);
+    def(fmadd_s, FormatR);       // rd = rs1*rs2 + rs3
+    def(fmsub_s, FormatR);       // rd = rs1*rs2 - rs3
+    def(fnmsub_s, FormatR);      // rd = -(rs1*rs2) + rs3
+    def(fnmadd_s, FormatR);      // rd = -(rs1*rs2) - rs3
+    def(fsgnj_s, FormatR);
+    def(fsgnjn_s, FormatR);
+    def(fsgnjx_s, FormatR);
+    def(fmin_s, FormatR);
+    def(fmax_s, FormatR);
+    def(feq_s, FormatR);
+    def(flt_s, FormatR);
+    def(fle_s, FormatR);
+    def(fclass_s, FormatR);
+    def(fcvt_w_s, FormatR);      // float → signed int32
+    def(fcvt_wu_s, FormatR);     // float → unsigned int32
+    def(fcvt_s_w, FormatR);      // signed int32 → float
+    def(fcvt_s_wu, FormatR);     // unsigned int32 → float
+    def(fmv_x_w, FormatR);       // move float bits to integer reg
+    def(fmv_w_x, FormatR);       // move integer bits to float reg
+
+    // ---- RV32D (double-precision) ----
+    def(fld, FormatI);           // fp load double
+    def(fsd, FormatS);           // fp store double
+    def(fadd_d, FormatR);
+    def(fsub_d, FormatR);
+    def(fmul_d, FormatR);
+    def(fdiv_d, FormatR);
+    def(fsqrt_d, FormatR);
+    def(fmadd_d, FormatR);
+    def(fmsub_d, FormatR);
+    def(fnmsub_d, FormatR);
+    def(fnmadd_d, FormatR);
+    def(fsgnj_d, FormatR);
+    def(fsgnjn_d, FormatR);
+    def(fsgnjx_d, FormatR);
+    def(fmin_d, FormatR);
+    def(fmax_d, FormatR);
+    def(feq_d, FormatR);
+    def(flt_d, FormatR);
+    def(fle_d, FormatR);
+    def(fclass_d, FormatR);
+    def(fcvt_w_d, FormatR);      // double → signed int32
+    def(fcvt_wu_d, FormatR);     // double → unsigned int32
+    def(fcvt_d_w, FormatR);      // signed int32 → double
+    def(fcvt_d_wu, FormatR);     // unsigned int32 → double
+    def(fcvt_s_d, FormatR);      // double → single
+    def(fcvt_d_s, FormatR);      // single → double
 };
 
 #endif
