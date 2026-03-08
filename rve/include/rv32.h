@@ -215,8 +215,10 @@ public:
     u32 rtc0, rtc1;
     // SYSCON (poweroff/reboot): set when 0x11100000 is written
     u32 syscon_cmd;
-    // Wall-clock reference for CLINT mtime
-    float start_time_ref;
+    // Wall-clock reference for CLINT mtime (seconds and microseconds, stored as integers
+    // to avoid float precision loss that would make mtime negative → UB on u32 cast)
+    int64_t start_time_sec;
+    int32_t start_time_usec;
 
     bool reservation_en;
     u32 reservation_addr;

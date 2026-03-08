@@ -845,11 +845,11 @@ void Emulator::emulate()
     {
         struct timeval now;
         gettimeofday(&now, NULL);
-        float elapsed = (float)(now.tv_sec - (time_t)cpu.start_time_ref)
-                        + (float)now.tv_usec / 1000000.0f;
-        double mtime = (double)elapsed * 1000000.0;
-        cpu.clint.mtime_lo = (u32)fmod(mtime, 4294967296.0);
-        cpu.clint.mtime_hi = (u32)(mtime / 4294967296.0);
+        int64_t elapsed_usec = ((int64_t)now.tv_sec  - cpu.start_time_sec)  * 1000000LL
+                             + ((int64_t)now.tv_usec - cpu.start_time_usec);
+        uint64_t mtime = (uint64_t)elapsed_usec;
+        cpu.clint.mtime_lo = (u32)(mtime & 0xFFFFFFFFu);
+        cpu.clint.mtime_hi = (u32)(mtime >> 32);
     }
 
     // Set MTIP when mtime >= mtimecmp (guard: don't fire when mtimecmp == 0)

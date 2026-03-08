@@ -29,7 +29,10 @@ brew install sdl2
 
 On Linux:
 ```sh
-apt install libsdl2-dev libgl-dev
+apt install libsdl2-dev libgl1-mesa-dev libglu1-mesa-dev build-essential \
+    git bc bison flex libssl-dev libelf-dev cpio rsync unzip \
+    python3 ca-certificates wget curl xz-utils \
+    file ccache ninja-build libncurses-dev device-tree-compiler
 ```
 
 **Build and run:**
@@ -43,6 +46,13 @@ make rerun        # clean, build, and run
 ```sh
 make isas         # run all rv32u{i,m,a} ISA tests
 make isa ISA_TEST=rv32ui-p-add   # run a single test
+```
+
+**Build toolchain and compile linux**
+- Note: Ensure you're using wget1 instead of wget2['passive-ftp' is not supported]
+```sh
+sudo git clone https://github.com/raybello/buildroot.git --recurse-submodules --depth 1 /opt/buildroot
+make -f docker/container.mk WORKDIR=. OUTPUT=rve/assets/linux build
 ```
 
 ---

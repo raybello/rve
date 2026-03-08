@@ -59,7 +59,8 @@ bool RV32::init(u8 *memory, u8 *dtb, bool debug_mode, u8 *mtd, u32 mtd_size)
     // Record wall-clock start time for CLINT mtime
     struct timeval tv;
     gettimeofday(&tv, NULL);
-    start_time_ref = (float)tv.tv_sec;
+    start_time_sec  = (int64_t)tv.tv_sec;
+    start_time_usec = (int32_t)tv.tv_usec;
 
     return true;
 }
