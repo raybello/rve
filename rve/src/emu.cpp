@@ -4,6 +4,24 @@
 #include <sys/time.h>
 #include <cfenv>
 #include <cmath>
+#ifdef __EMSCRIPTEN__
+// WebAssembly has no hardware FP exception reporting; define missing fenv constants as 0.
+#ifndef FE_INEXACT
+#define FE_INEXACT    0
+#endif
+#ifndef FE_UNDERFLOW
+#define FE_UNDERFLOW  0
+#endif
+#ifndef FE_OVERFLOW
+#define FE_OVERFLOW   0
+#endif
+#ifndef FE_DIVBYZERO
+#define FE_DIVBYZERO  0
+#endif
+#ifndef FE_INVALID
+#define FE_INVALID    0
+#endif
+#endif
 #ifndef __EMSCRIPTEN__
 #include <termios.h>
 #include <signal.h>
@@ -476,7 +494,7 @@ imp(add, FormatR, { // rv32i
 
         #ifndef __EMSCRIPTEN__
         printf("\nECALL EXIT = x10[%x] %d (0x%x)\n", x10, status, status);
-        exit(status);
+        // exit(status);
         // running = false;
         // debugMode = true;
         // printf("MMU mode: %d, ppn: %x\n", cpu.mmu.mode, cpu.mmu.ppn);
