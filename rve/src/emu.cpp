@@ -957,21 +957,21 @@ imp(feq_s, FormatR, { // rv32f
         u32 bb; memcpy(&bb, &b, 4);
         if ((std::isnan(a) && !(ab & (1u << 22))) || (std::isnan(b) && !(bb & (1u << 22))))
             cpu.csr.data[CSR_FCSR] |= FFLAG_NV;
-        WR_RD(ZERO)
+        u32 r = 0; WR_RD(r)
     }
-    else { WR_RD(a == b ? ONE : ZERO) }
+    else { u32 r = (a == b) ? 1u : 0u; WR_RD(r) }
 })
 imp(flt_s, FormatR, { // rv32f
     float a = freg_read_s(cpu, ins.rs1);
     float b = freg_read_s(cpu, ins.rs2);
-    if (std::isnan(a) || std::isnan(b)) { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; WR_RD(ZERO) }
-    else { WR_RD(a < b ? ONE : ZERO) }
+    if (std::isnan(a) || std::isnan(b)) { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; u32 r = 0; WR_RD(r) }
+    else { u32 r = (a < b) ? 1u : 0u; WR_RD(r) }
 })
 imp(fle_s, FormatR, { // rv32f
     float a = freg_read_s(cpu, ins.rs1);
     float b = freg_read_s(cpu, ins.rs2);
-    if (std::isnan(a) || std::isnan(b)) { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; WR_RD(ZERO) }
-    else { WR_RD(a <= b ? ONE : ZERO) }
+    if (std::isnan(a) || std::isnan(b)) { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; u32 r = 0; WR_RD(r) }
+    else { u32 r = (a <= b) ? 1u : 0u; WR_RD(r) }
 })
 
 // ---- Comparisons — Double ----
@@ -984,21 +984,21 @@ imp(feq_d, FormatR, { // rv32d
         u64 bb; memcpy(&bb, &b, 8);
         if ((std::isnan(a) && !(ab & (1ULL << 51))) || (std::isnan(b) && !(bb & (1ULL << 51))))
             cpu.csr.data[CSR_FCSR] |= FFLAG_NV;
-        WR_RD(ZERO)
+        u32 r = 0; WR_RD(r)
     }
-    else { WR_RD(a == b ? ONE : ZERO) }
+    else { u32 r = (a == b) ? 1u : 0u; WR_RD(r) }
 })
 imp(flt_d, FormatR, { // rv32d
     double a = freg_read_d(cpu, ins.rs1);
     double b = freg_read_d(cpu, ins.rs2);
-    if (std::isnan(a) || std::isnan(b)) { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; WR_RD(ZERO) }
-    else { WR_RD(a < b ? ONE : ZERO) }
+    if (std::isnan(a) || std::isnan(b)) { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; u32 r = 0; WR_RD(r) }
+    else { u32 r = (a < b) ? 1u : 0u; WR_RD(r) }
 })
 imp(fle_d, FormatR, { // rv32d
     double a = freg_read_d(cpu, ins.rs1);
     double b = freg_read_d(cpu, ins.rs2);
-    if (std::isnan(a) || std::isnan(b)) { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; WR_RD(ZERO) }
-    else { WR_RD(a <= b ? ONE : ZERO) }
+    if (std::isnan(a) || std::isnan(b)) { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; u32 r = 0; WR_RD(r) }
+    else { u32 r = (a <= b) ? 1u : 0u; WR_RD(r) }
 })
 
 // ---- fclass ----
@@ -1039,9 +1039,12 @@ imp(fcvt_wu_s, FormatR, { // rv32f: float → unsigned int32 (saturating)
     u32 result;
     if (std::isnan(a) || a >= 4294967296.0f)
         { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0xFFFFFFFFu; }
-    else if (a < 0.0f)
-        { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0; }
-    else
+    else if (a < 0.0f) {
+        // Negative: round with selected mode; if it rounds up to 0 it's inexact (NX), else invalid (NV)
+        float rounded = std::rint(a);
+        if (rounded >= 0.0f) { cpu.csr.data[CSR_FCSR] |= FFLAG_NX; result = (u32)rounded; }
+        else                 { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0; }
+    } else
         { feclearexcept(FE_ALL_EXCEPT); result = (u32)a; fp_accum_flags(cpu); }
     WR_RD(result)
 })
@@ -1079,9 +1082,12 @@ imp(fcvt_wu_d, FormatR, { // rv32d: double → unsigned int32 (saturating)
     u32 result;
     if (std::isnan(a) || a >= 4294967296.0)
         { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0xFFFFFFFFu; }
-    else if (a < 0.0)
-        { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0; }
-    else
+    else if (a < 0.0) {
+        // Negative: round with selected mode; if it rounds up to 0 it's inexact (NX), else invalid (NV)
+        double rounded = std::rint(a);
+        if (rounded >= 0.0) { cpu.csr.data[CSR_FCSR] |= FFLAG_NX; result = (u32)rounded; }
+        else                { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0; }
+    } else
         { feclearexcept(FE_ALL_EXCEPT); result = (u32)a; fp_accum_flags(cpu); }
     WR_RD(result)
 })
@@ -1099,13 +1105,31 @@ imp(fcvt_d_wu, FormatR, { // rv32d: unsigned int32 → double (always exact)
 // ---- Cross-precision Conversions ----
 imp(fcvt_s_d, FormatR, { // rv32d: double → single (may lose precision)
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
-    feclearexcept(FE_ALL_EXCEPT);
-    freg_write_s(cpu, ins.rd, (float)freg_read_d(cpu, ins.rs1));
-    fp_accum_flags(cpu);
+    double d = freg_read_d(cpu, ins.rs1);
+    if (std::isnan(d)) {
+        // RISC-V: any NaN input → canonical NaN output; sNaN (quiet bit clear) also sets NV
+        u64 dbits; memcpy(&dbits, &d, 8);
+        if (!(dbits & (1ULL << 51))) cpu.csr.data[CSR_FCSR] |= FFLAG_NV;
+        u32 qnan = 0x7FC00000u; float qnan_f; memcpy(&qnan_f, &qnan, 4);
+        freg_write_s(cpu, ins.rd, qnan_f);
+    } else {
+        feclearexcept(FE_ALL_EXCEPT);
+        freg_write_s(cpu, ins.rd, (float)d);
+        fp_accum_flags(cpu);
+    }
 })
 imp(fcvt_d_s, FormatR, { // rv32d: single → double (always exact)
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
-    freg_write_d(cpu, ins.rd, (double)freg_read_s(cpu, ins.rs1));
+    float f = freg_read_s(cpu, ins.rs1);
+    if (std::isnan(f)) {
+        // RISC-V: any NaN input → canonical NaN output; sNaN (quiet bit clear) also sets NV
+        u32 fbits; memcpy(&fbits, &f, 4);
+        if (!(fbits & (1u << 22))) cpu.csr.data[CSR_FCSR] |= FFLAG_NV;
+        u64 qnan = 0x7FF8000000000000ULL; double qnan_d; memcpy(&qnan_d, &qnan, 8);
+        freg_write_d(cpu, ins.rd, qnan_d);
+    } else {
+        freg_write_d(cpu, ins.rd, (double)f);
+    }
 })
 
     ins_ret Emulator::insSelect(u32 ins_word)

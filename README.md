@@ -44,8 +44,23 @@ make rerun        # clean, build, and run
 
 **Run ISA tests:**
 ```sh
-make isas         # run all rv32u{i,m,a} ISA tests
+make isas         # run all ISA tests (rv32ui/m/a/f/d)
 make isa ISA_TEST=rv32ui-p-add   # run a single test
+```
+
+**Compile rv32imafd ISA tests from source** (optional — pre-built binaries included):
+
+On macOS, install the RISC-V toolchain:
+```sh
+brew install riscv64-elf-gcc
+```
+
+Then build and install the tests:
+```sh
+cd riscv-tests
+./configure --with-xlen=32
+make isa
+cp isa/rv32u{i,m,a,f,d}-p-* ../rve/assets/isa-test/
 ```
 
 **Build toolchain and compile linux**
