@@ -12,10 +12,10 @@
 
 	framebuffer0: framebuffer@84000000 {
 		compatible = "simple-framebuffer";
-		reg = <0x00 0x84000000 0x00 0x11ca40>;
-		width = <720>;
-		height = <405>;
-		stride = <0xb40>;
+		reg = <0x00 0x84000000 0x00 0x18cc18>;
+		width = <850>;
+		height = <478>;
+		stride = <0xd48>;
 		format = "a8b8g8r8";
 		status = "okay";
 	};

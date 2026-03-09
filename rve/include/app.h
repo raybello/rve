@@ -65,8 +65,8 @@ class App
 
     // Framebuffer texture
     GLuint fb_texture_id = 0;
-    static constexpr int FB_W = 720;
-    static constexpr int FB_H = 405;
+    static constexpr int FB_W = 850;
+    static constexpr int FB_H = 478;
 
 public:
     App(/* args */);
