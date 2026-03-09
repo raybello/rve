@@ -1,6 +1,7 @@
 # RVE - RISC-V Emulator
 Cross platform RISC-V simulator
 
+- Web demo: https://raybello.github.io/rve/demo/
 ## Setup
 
 ```sh
