@@ -161,6 +161,11 @@ static u32 fp_fclass_d(double d)
         return;                                            \
     }
 
+// Raise illegal instruction if mstatus.FS == Off (bits [14:13] == 00)
+#define FP_CHECK_FS()                                      \
+    if (((cpu.csr.data[CSR_MSTATUS] >> 13) & 3) == 0)     \
+        FP_ILLEGAL_RM()
+
 void print_inst(uint64_t pc, uint32_t inst)
 {
     char buf[80] = {0};
@@ -707,21 +712,25 @@ imp(add, FormatR, { // rv32i
 
 // ---- FP Loads / Stores ----
 imp(flw, FormatI, { // rv32f
+    FP_CHECK_FS()
     u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_READ);
     if (ret->trap.en) return;
     cpu.freg[ins.rd] = 0xFFFFFFFF00000000ULL | (u64)cpu.memGetWord(addr);
 })
 imp(fld, FormatI, { // rv32d
+    FP_CHECK_FS()
     u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_READ);
     if (ret->trap.en) return;
     cpu.freg[ins.rd] = mem_get_double(cpu, addr);
 })
 imp(fsw, FormatS, { // rv32f
+    FP_CHECK_FS()
     u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_WRITE);
     if (ret->trap.en) return;
     cpu.memSetWord(addr, (u32)(cpu.freg[ins.rs2] & 0xFFFFFFFFu));
 })
 imp(fsd, FormatS, { // rv32d
+    FP_CHECK_FS()
     u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_WRITE);
     if (ret->trap.en) return;
     mem_set_double(cpu, addr, cpu.freg[ins.rs2]);
@@ -1250,6 +1259,20 @@ imp(fcvt_d_s, FormatR, { // rv32d: single → double (always exact)
         run(sfence_vma, 0x12000073, ins_FormatEmpty)
     }
     // ---- RV32F / RV32D new switch blocks ----
+    // All FP compute instructions trap if mstatus.FS == Off
+    {
+        u32 op7 = ins_word & 0x7f;
+        if (op7 == 0x43 || op7 == 0x47 || op7 == 0x4b || op7 == 0x4f || op7 == 0x53)
+        {
+            if (((cpu.csr.data[CSR_MSTATUS] >> 13) & 3) == 0)
+            {
+                ret.trap.en    = true;
+                ret.trap.type  = trap_IllegalInstruction;
+                ret.trap.value = ins_word;
+                return ret;
+            }
+        }
+    }
 
     // R4-type fused: match opcode + fmt bits[26:25] (00=S, 01=D)
     ins_masked = ins_word & 0x0600007f;
