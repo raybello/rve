@@ -95,5 +95,11 @@
 			reg = <0x00 0x11000000 0x00 0x10000>;
 			compatible = "sifive,clint0\0riscv,clint0";
 		};
+
+		keyboard@10001000 {
+			compatible = "rve-kbd";
+			reg = <0x00 0x10001000 0x00 0x10>;
+			status = "okay";
+		};
 	};
 };

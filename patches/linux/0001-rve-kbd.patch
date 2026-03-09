@@ -1,0 +1,110 @@
+diff --git a/drivers/input/keyboard/rve_kbd.c b/drivers/input/keyboard/rve_kbd.c
+new file mode 100644
+--- /dev/null
++++ b/drivers/input/keyboard/rve_kbd.c
+@@ -0,0 +1,84 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * RVE emulator MMIO keyboard driver
++ *
++ * Simple polling driver for the minimal MMIO keyboard device built into the
++ * RVE RISC-V emulator.  Two byte-wide registers at KBD_MMIO_BASE:
++ *   offset 0x00  KBDSTAT  bit0=data available, bit1=release(1)/press(0)
++ *   offset 0x01  KBDDATA  Linux keycode; reading it clears KBDSTAT.bit0
++ */
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/input.h>
++#include <linux/io.h>
++
++#define KBDSTAT 0x00
++#define KBDDATA 0x01
++
++struct rve_kbd {
++	void __iomem *base;
++	struct input_dev *input;
++};
++
++static void rve_kbd_poll(struct input_dev *dev)
++{
++	struct rve_kbd *kbd = input_get_drvdata(dev);
++	u8 stat;
++
++	while ((stat = readb(kbd->base + KBDSTAT)) & 1) {
++		u8 key = readb(kbd->base + KBDDATA);
++		bool released = stat & 2;
++
++		input_report_key(dev, key, !released);
++		input_sync(dev);
++	}
++}
++
++static int rve_kbd_probe(struct platform_device *pdev)
++{
++	struct rve_kbd *kbd;
++	struct resource *res;
++	int i, ret;
++
++	kbd = devm_kzalloc(&pdev->dev, sizeof(*kbd), GFP_KERNEL);
++	if (!kbd)
++		return -ENOMEM;
++
++	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++	kbd->base = devm_ioremap_resource(&pdev->dev, res);
++	if (IS_ERR(kbd->base))
++		return PTR_ERR(kbd->base);
++
++	kbd->input = devm_input_allocate_device(&pdev->dev);
++	if (!kbd->input)
++		return -ENOMEM;
++
++	kbd->input->name = "rve-kbd";
++	kbd->input->id.bustype = BUS_HOST;
++	__set_bit(EV_KEY, kbd->input->evbit);
++	for (i = 1; i < 256; i++)
++		__set_bit(i, kbd->input->keybit);
++
++	input_set_drvdata(kbd->input, kbd);
++	ret = input_setup_polling(kbd->input, rve_kbd_poll);
++	if (ret)
++		return ret;
++	input_set_poll_interval(kbd->input, 10);
++
++	return input_register_device(kbd->input);
++}
++
++static const struct of_device_id rve_kbd_ids[] = {
++	{ .compatible = "rve-kbd" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, rve_kbd_ids);
++
++static struct platform_driver rve_kbd_driver = {
++	.probe  = rve_kbd_probe,
++	.driver = {
++		.name           = "rve-kbd",
++		.of_match_table = rve_kbd_ids,
++	},
++};
++builtin_platform_driver(rve_kbd_driver);
+diff --git a/drivers/input/keyboard/Kconfig b/drivers/input/keyboard/Kconfig
+--- a/drivers/input/keyboard/Kconfig
++++ b/drivers/input/keyboard/Kconfig
+@@ -810,4 +810,11 @@ config KEYBOARD_CYPRESS_SF
+ 	  To compile this driver as a module, choose M here: the
+ 	  module will be called cypress-sf.
+
++config KEYBOARD_RVE
++	bool "RVE emulator keyboard"
++	depends on INPUT
++	help
++	  Say Y here to enable the simple MMIO keyboard device for the
++	  RVE RISC-V emulator.  Polls KBDSTAT/KBDDATA registers at 0x10001000.
++
+ endif
+diff --git a/drivers/input/keyboard/Makefile b/drivers/input/keyboard/Makefile
+--- a/drivers/input/keyboard/Makefile
++++ b/drivers/input/keyboard/Makefile
+@@ -67,3 +67,4 @@ obj-$(CONFIG_KEYBOARD_TWL4030)		+= twl4030_keypad.o
+ obj-$(CONFIG_KEYBOARD_XTKBD)		+= xtkbd.o
++obj-$(CONFIG_KEYBOARD_RVE)		+= rve_kbd.o

@@ -26,6 +26,7 @@ bool RV32::init(u8 *memory, u8 *dtb, bool debug_mode, u8 *mtd, u32 mtd_size)
     mem = memory;
     reservation_en = false;
     reservation_addr = 0;
+    kbd_head = kbd_tail = 0;
 
     initCSRs();
 
@@ -506,6 +507,18 @@ u32 RV32::memGetByte(u32 addr)
         case 0x10000004u: return UART_GET2(MCR);
         case 0x10000005u: return UART_GET2(LSR);
         case 0x10000007u: return UART_GET2(SCR);
+
+        // MMIO keyboard: KBDSTAT
+        case 0x10001000u:
+            if (kbd_head == kbd_tail) return 0;
+            return 1u | (kbd_buf[kbd_head].release ? 2u : 0u);
+        // MMIO keyboard: KBDDATA (reading clears KBDSTAT.bit0 by consuming entry)
+        case 0x10001001u: {
+            if (kbd_head == kbd_tail) return 0;
+            u8 k = kbd_buf[kbd_head].keycode;
+            kbd_head = (kbd_head + 1) % 64;
+            return k;
+        }
         }
 
         return 0; // unmapped MMIO
@@ -772,6 +785,14 @@ void RV32::uartTick()
     {
         uart.interrupting = false;
     }
+}
+
+void RV32::kbdPush(u8 keycode, bool release)
+{
+    int next = (kbd_tail + 1) % 64;
+    if (next == kbd_head) return; // drop if buffer full
+    kbd_buf[kbd_tail] = {keycode, release};
+    kbd_tail = next;
 }
 
 ///////////////////////////////////////

@@ -104,6 +104,9 @@ static const int RV32_MEM_SIZE = 1024 * 1024 * 128; // 128 MiB
 #define MMU_ACCESS_READ  1
 #define MMU_ACCESS_WRITE 2
 
+// MMIO keyboard device (SDL key events → Linux input subsystem)
+#define KBD_MMIO_BASE 0x10001000u
+
 // RTC base address offset within its MMIO window (ds1742 compatible)
 #define RTC_MMIO_BASE 0x03000000u
 #define RTC_MMIO_SIZE 0x800u
@@ -246,6 +249,12 @@ public:
 
     bool reservation_en;
     u32 reservation_addr;
+
+    // MMIO keyboard ring buffer
+    struct KbdEvent { u8 keycode; bool release; };
+    KbdEvent kbd_buf[64];
+    int kbd_head, kbd_tail;
+    void kbdPush(u8 keycode, bool release);
 
     bool debug_single_step;
 

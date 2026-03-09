@@ -264,6 +264,144 @@ void App::endRender()
     SDL_GL_SwapWindow(window);
 }
 
+// SDL scancode → Linux key code lookup table (index = SDL_Scancode, value = Linux KEY_*)
+// 0 means "no mapping". Values from linux/input-event-codes.h.
+static const u8 sdl_to_linux_key[512] = {
+    // 0-3 unused
+    0, 0, 0, 0,
+    // 4-29: SDL_SCANCODE_A(4)..SDL_SCANCODE_Z(29) → KEY_A(30)..KEY_Z(44)
+    // (SDL uses A-Z alphabetical order; Linux also does — but not the same offsets)
+    30,  // A
+    48,  // B
+    46,  // C
+    32,  // D
+    18,  // E
+    33,  // F
+    34,  // G
+    35,  // H
+    23,  // I
+    36,  // J
+    37,  // K
+    38,  // L
+    50,  // M
+    49,  // N
+    24,  // O
+    25,  // P
+    16,  // Q
+    19,  // R
+    31,  // S
+    20,  // T
+    22,  // U
+    47,  // V
+    17,  // W
+    45,  // X
+    21,  // Y
+    44,  // Z
+    // 30-38: SDL_SCANCODE_1(30)..SDL_SCANCODE_9(38) → KEY_1(2)..KEY_9(10)
+    2, 3, 4, 5, 6, 7, 8, 9, 10,
+    // 39: SDL_SCANCODE_0 → KEY_0(11)
+    11,
+    // 40: RETURN → KEY_ENTER(28)
+    28,
+    // 41: ESCAPE → KEY_ESC(1)
+    1,
+    // 42: BACKSPACE → KEY_BACKSPACE(14)
+    14,
+    // 43: TAB → KEY_TAB(15)
+    15,
+    // 44: SPACE → KEY_SPACE(57)
+    57,
+    // 45: MINUS → KEY_MINUS(12)
+    12,
+    // 46: EQUALS → KEY_EQUAL(13)
+    13,
+    // 47: LEFTBRACKET → KEY_LEFTBRACE(26)
+    26,
+    // 48: RIGHTBRACKET → KEY_RIGHTBRACE(27)
+    27,
+    // 49: BACKSLASH → KEY_BACKSLASH(43)
+    43,
+    // 50: NONUSHASH → KEY_BACKSLASH(43)
+    43,
+    // 51: SEMICOLON → KEY_SEMICOLON(39)
+    39,
+    // 52: APOSTROPHE → KEY_APOSTROPHE(40)
+    40,
+    // 53: GRAVE → KEY_GRAVE(41)
+    41,
+    // 54: COMMA → KEY_COMMA(51)
+    51,
+    // 55: PERIOD → KEY_DOT(52)
+    52,
+    // 56: SLASH → KEY_SLASH(53)
+    53,
+    // 57: CAPSLOCK → KEY_CAPSLOCK(58)
+    58,
+    // 58-69: F1-F12 → KEY_F1(59)..KEY_F12(88)
+    59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 87, 88,
+    // 70: PRINTSCREEN → KEY_SYSRQ(99)
+    99,
+    // 71: SCROLLLOCK → KEY_SCROLLLOCK(70)
+    70,
+    // 72: PAUSE → KEY_PAUSE(119)
+    119,
+    // 73: INSERT → KEY_INSERT(110)
+    110,
+    // 74: HOME → KEY_HOME(102)
+    102,
+    // 75: PAGEUP → KEY_PAGEUP(104)
+    104,
+    // 76: DELETE → KEY_DELETE(111)
+    111,
+    // 77: END → KEY_END(107)
+    107,
+    // 78: PAGEDOWN → KEY_PAGEDOWN(109)
+    109,
+    // 79: RIGHT → KEY_RIGHT(106)
+    106,
+    // 80: LEFT → KEY_LEFT(105)
+    105,
+    // 81: DOWN → KEY_DOWN(108)
+    108,
+    // 82: UP → KEY_UP(103)
+    103,
+    // 83-223: mostly unmapped, fill with zeros
+    0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, // 83-102
+    0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, // 103-122
+    0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, // 123-142
+    0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, // 143-162
+    0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, // 163-182
+    0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, // 183-202
+    0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, // 203-222
+    0,                                             // 223
+    // 224: SDL_SCANCODE_LCTRL → KEY_LEFTCTRL(29)
+    29,
+    // 225: SDL_SCANCODE_LSHIFT → KEY_LEFTSHIFT(42)
+    42,
+    // 226: SDL_SCANCODE_LALT → KEY_LEFTALT(56)
+    56,
+    // 227: SDL_SCANCODE_LGUI → KEY_LEFTMETA(125)
+    125,
+    // 228: SDL_SCANCODE_RCTRL → KEY_RIGHTCTRL(97)
+    97,
+    // 229: SDL_SCANCODE_RSHIFT → KEY_RIGHTSHIFT(54)
+    54,
+    // 230: SDL_SCANCODE_RALT → KEY_RIGHTALT(100)
+    100,
+    // 231: SDL_SCANCODE_RGUI → KEY_RIGHTMETA(126)
+    126,
+    // 232-511: unused
+    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, // 232-263
+    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, // 264-295
+    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, // 296-327
+    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, // 328-359
+    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, // 360-391
+    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, // 392-423
+    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, // 424-455
+    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, // 456-487
+    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,                  // 488-511
+};
+
 void App::handleEvents()
 {
     while (SDL_PollEvent(&window_event))
@@ -276,6 +414,16 @@ void App::handleEvents()
         if (window_event.type == SDL_WINDOWEVENT && window_event.window.event == SDL_WINDOWEVENT_CLOSE && window_event.window.windowID == SDL_GetWindowID(window))
         {
             running = false;
+        }
+        if (window_event.type == SDL_KEYDOWN || window_event.type == SDL_KEYUP)
+        {
+            SDL_Scancode sc = window_event.key.keysym.scancode;
+            if (sc < 512)
+            {
+                u8 lk = sdl_to_linux_key[sc];
+                if (lk)
+                    emu.cpu.kbdPush(lk, window_event.type == SDL_KEYUP);
+            }
         }
     }
     if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED)
