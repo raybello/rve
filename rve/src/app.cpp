@@ -225,6 +225,18 @@ int App::initializeEmu(int argc, char *argv[])
         printf("INFO: DTB File: %s\n", dtb_file_name);
     }
 
+#ifdef __EMSCRIPTEN__
+    // In the WebAssembly build there are no command-line arguments.
+    // Auto-boot Linux from the preloaded image so the user doesn't need
+    // to click Load manually.
+    if (!bin_file_name && !elf_file_name)
+    {
+        printf("INFO: EMSCRIPTEN auto-boot: /assets/linux/Image\n");
+        emu.initializeBin("/assets/linux/Image");
+        emu.running = true;
+    }
+#endif
+
     return 0;
 }
 
