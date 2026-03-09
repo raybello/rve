@@ -23,7 +23,10 @@
 
 # Put a getty on the serial port
 console::sysinit:echo "Welcome to RVE Linux"
-console::respawn:/bin/login -f root
+# console::respawn:/bin/login -f root
+
+tty1::sysinit:echo "Welcome to RVE Linux"
+tty1::respawn:/bin/login -f root
 #console::respawn:/bin/getty -L -n -L console 0 vt100 # GENERIC_SERIAL
 
 # Stuff to do for the 3-finger salute
