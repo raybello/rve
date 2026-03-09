@@ -217,9 +217,9 @@ static void pat_plasma(void)
 }
 
 /* ================================================================== */
-/* Pattern 5 – 3-D wireframe cube                                      */
+/* Pattern 5 – 3-D wireframe cube (single frame at given angles)       */
 /* ================================================================== */
-static void pat_cube(void)
+static void pat_cube(float ay, float ax)
 {
     static const float vraw[8][3] = {
         {-1,-1,-1},{1,-1,-1},{1,1,-1},{-1,1,-1},
@@ -238,7 +238,6 @@ static void pat_cube(void)
 
     clear();
 
-    float ay = 35.0f*PI/180.0f, ax = 20.0f*PI/180.0f;
     float cy = cosf(ay), sy = sinf(ay);
     float cx = cosf(ax), sx = sinf(ax);
     float fov = 400.0f, dist = 3.0f;
@@ -260,6 +259,22 @@ static void pat_cube(void)
         draw_line(px[a],   py[a],   px[b],   py[b],   ecol[i][0],ecol[i][1],ecol[i][2]);
         draw_line(px[a]+1, py[a],   px[b]+1, py[b],   ecol[i][0],ecol[i][1],ecol[i][2]);
         draw_line(px[a],   py[a]+1, px[b],   py[b]+1, ecol[i][0],ecol[i][1],ecol[i][2]);
+    }
+}
+
+/* ================================================================== */
+/* Pattern 5 – animation loop: rotate cube for 10000 frames           */
+/* ================================================================== */
+static void pat_cube_anim(int fd, int size)
+{
+    float ay = 0.0f, ax = 0.35f;
+    int frame;
+    for (frame = 0; frame < 100; frame++) {
+        pat_cube(ay, ax);
+        lseek(fd, 0, SEEK_SET);
+        write(fd, g_buf, size);
+        ay += 0.04f;
+        ax += 0.013f;
     }
 }
 
@@ -437,7 +452,7 @@ int main(int argc, char *argv[])
     case  2: pat_gradient();   break;
     case  3: pat_mandelbrot(); break;
     case  4: pat_plasma();     break;
-    case  5: pat_cube();       break;
+    case  5: pat_cube_anim(fd, size); break;
     case  6: pat_rings();      break;
     case  7: pat_wheel();      break;
     case  8: pat_sierpinski(); break;
