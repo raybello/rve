@@ -13,7 +13,7 @@ BR2_HOST_GCC_AT_LEAST_9=y
 #
 # Target options
 #
-BR2_SOFT_FLOAT=y
+# BR2_SOFT_FLOAT is not set
 # BR2_arcle is not set
 # BR2_arceb is not set
 # BR2_arm is not set
@@ -49,7 +49,7 @@ BR2_ARCH_NEEDS_GCC_AT_LEAST_7=y
 BR2_ARCH="riscv32"
 BR2_NORMALIZED_ARCH="riscv"
 BR2_ENDIAN="LITTLE"
-BR2_GCC_TARGET_ABI="ilp32"
+BR2_GCC_TARGET_ABI="ilp32d"
 BR2_READELF_ARCH_NAME="RISC-V"
 # BR2_riscv_g is not set
 BR2_riscv_custom=y
@@ -59,14 +59,15 @@ BR2_riscv_custom=y
 #
 BR2_RISCV_ISA_RVI=y
 BR2_RISCV_ISA_RVM=y
-# BR2_RISCV_ISA_RVA is not set
-# BR2_RISCV_ISA_RVF is not set
+BR2_RISCV_ISA_RVA=y
+BR2_RISCV_ISA_RVF=y
+BR2_RISCV_ISA_RVD=y
 # BR2_RISCV_ISA_RVC is not set
 # BR2_RISCV_ISA_RVV is not set
 BR2_RISCV_32=y
 # BR2_RISCV_64 is not set
 # BR2_RISCV_USE_MMU is not set
-BR2_RISCV_ABI_ILP32=y
+BR2_RISCV_ABI_ILP32D=y
 BR2_BINFMT_FLAT=y
 BR2_BINFMT_FLAT_ONE=y
 

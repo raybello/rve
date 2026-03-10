@@ -36,7 +36,7 @@
 			reg = <0x00>;
 			status = "okay";
 			compatible = "riscv";
-			riscv,isa = "rv32ima";
+			riscv,isa = "rv32imafd";
 			mmu-type = "riscv,none";
 
 			interrupt-controller {
