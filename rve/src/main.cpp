@@ -5,7 +5,7 @@
 #include <sys/time.h>
 
 
-// Headless emulation loop — mirrors mini-rv32ima's main loop but without SDL/OpenGL.
+// Headless emulation loop 
 // The emulator's captureKeyboardInput() (called from Emulator::initialize()) puts the
 // terminal into raw mode so every keystroke is immediately visible to the guest OS.
 static int runHeadless(int argc, char *argv[])
@@ -34,7 +34,7 @@ static int runHeadless(int argc, char *argv[])
 
     emu.running = true;
 
-    // Run as fast as possible — identical to mini-rv32ima's tight loop.
+    // Run as fast as possible
     // UART output goes to stdout, UART input comes from stdin (raw mode).
     while (emu.running)
         emu.emulate();
@@ -45,7 +45,7 @@ static int runHeadless(int argc, char *argv[])
 
 int main(int argc, char *argv[])
 {
-    // -n  : headless / no-GUI mode (like mini-rv32ima)
+    // -n  : headless / no-GUI mode 
     for (int i = 1; i < argc; i++)
     {
         if (strcmp(argv[i], "-n") == 0)

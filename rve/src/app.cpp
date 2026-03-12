@@ -809,7 +809,6 @@ void App::stepEmu()
         else
         {
             // Run as many instructions as possible within a ~10ms budget per frame,
-            // matching mini-rv32ima's "run at full speed" behaviour while keeping
             // the GUI alive.  Time is sampled every 1024 instructions to avoid the
             // overhead of a syscall on every step.
             struct timeval t0, t1;

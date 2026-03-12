@@ -466,7 +466,7 @@ u32 RV32::memGetByte(u32 addr)
         case 0x0200bffeu: return (clint.mtime_hi >> 16) & 0xFF;
         case 0x0200bfffu: return (clint.mtime_hi >> 24) & 0xFF;
 
-        // CLINT (mini-rv32ima 0x11000000 base — matches default DTB)
+        // CLINT ( 0x11000000 base — matches default DTB)
         case 0x11000000u: return clint.msip ? 1 : 0;
         case 0x11000001u: return 0;
         case 0x11000002u: return 0;
@@ -567,7 +567,7 @@ void RV32::memSetByte(u32 addr, u32 val)
     {
         // ---- Low-address MMIO ----
 
-        // CLINT (mini-rv32ima 0x11000000 base) msip — must precede network TX buffer
+        // CLINT ( 0x11000000 base) msip — must precede network TX buffer
         if (addr >= 0x11000000u && addr < 0x11000004u)
         {
             if (addr == 0x11000000u) clint.msip = (val & 1) != 0;
@@ -622,7 +622,7 @@ void RV32::memSetByte(u32 addr, u32 val)
         case 0x0200bffeu: clint.mtime_hi = (clint.mtime_hi & ~(0xffu << 16)) | ((val & 0xff) << 16); return;
         case 0x0200bfffu: clint.mtime_hi = (clint.mtime_hi & ~(0xffu << 24)) | ((val & 0xff) << 24); return;
 
-        // CLINT (mini-rv32ima 0x11000000 base — matches default DTB)
+        // CLINT ( 0x11000000 base — matches default DTB)
         case 0x11004000u: clint.mtimecmp_lo = (clint.mtimecmp_lo & ~(0xffu << 0))  | ((val & 0xff) << 0);  return;
         case 0x11004001u: clint.mtimecmp_lo = (clint.mtimecmp_lo & ~(0xffu << 8))  | ((val & 0xff) << 8);  return;
         case 0x11004002u: clint.mtimecmp_lo = (clint.mtimecmp_lo & ~(0xffu << 16)) | ((val & 0xff) << 16); return;

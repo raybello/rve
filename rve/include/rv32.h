@@ -187,7 +187,7 @@ const u32 IIR_NO_INTERRUPT = 0x7;     // Indicates no pending interrupts
 const u32 LSR_DATA_AVAILABLE = 0x1;   // Data available in receiver buffer
 // 0x20 = THRE (Transmitter Holding Register Empty)
 // 0x40 = TEMT (Transmitter Empty — shift register also empty)
-// Linux wait_for_xmitr() waits for both; mini-rv32ima always returns 0x60.
+// Linux wait_for_xmitr() waits for both; rve always returns 0x60.
 const u32 LSR_THR_EMPTY = 0x60;       // THRE | TEMT — transmitter fully idle
 
 
