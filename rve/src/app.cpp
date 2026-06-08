@@ -1,4 +1,5 @@
 #include "app.h"
+#include "net.h"
 
 static void HelpMarker(const char *desc)
 {
@@ -157,8 +158,25 @@ int App::initializeEmu(int argc, char *argv[])
     const char *bin_file_name = 0;
     const char *dtb_file_name = 0;
 
+    // First pass: standalone flags that consume the next argument.
+    // -N <path>  open a Unix socket as server (player 0)
+    // -M <path>  connect to a Unix socket as client (player 1)
     for (i = 1; i < argc; i++)
     {
+        if (strcmp(argv[i], "-N") == 0 && i + 1 < argc)
+            net_init(argv[++i], /*server=*/true);
+        else if (strcmp(argv[i], "-M") == 0 && i + 1 < argc)
+            net_init(argv[++i], /*server=*/false);
+    }
+
+    for (i = 1; i < argc; i++)
+    {
+        // Skip flags already consumed in the first pass.
+        if ((strcmp(argv[i], "-N") == 0 || strcmp(argv[i], "-M") == 0) && i + 1 < argc) {
+            i++;
+            continue;
+        }
+
         const char *param = argv[i];
         int param_continue = 0;
 
@@ -184,6 +202,8 @@ int App::initializeEmu(int argc, char *argv[])
                 case 'r':
                     param_continue = 1;
                     emu.running = true;
+                    break;
+                case 'n': // consumed by main.cpp; ignore here
                     break;
                 default:
                     if (param_continue)
