@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y libsdl2-dev
+
+      - name: Net pair test
+        working-directory: rve
+        run: make net-test
+
+      - name: ISA tests
+        working-directory: rve
+        run: make isas
