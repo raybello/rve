@@ -2,6 +2,7 @@
 #include "net.h"
 #include <sys/ioctl.h>
 #include <unistd.h>
+#include <stdlib.h>
 
 
 RV32::RV32(/* args */)
@@ -147,6 +148,10 @@ u32 RV32::readCsrRaw(u32 address)
         return 0x11000000u;
     case CSR_NET_RX_BUF_ADDR:
         return 0x11001000u;
+    case CSR_PLAYER_ID:
+        return net_is_server() ? 0u : 1u;
+    case CSR_RNG:
+        return (u32)rand();
     default:
         return csr.data[address & 0xffff];
     }

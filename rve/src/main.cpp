@@ -1,22 +1,32 @@
 
 #include "stdio.h"
 #include "app.h"
+#include "net.h"
 #include <cstring>
 #include <sys/time.h>
 
 
-// Headless emulation loop 
-// The emulator's captureKeyboardInput() (called from Emulator::initialize()) puts the
-// terminal into raw mode so every keystroke is immediately visible to the guest OS.
+// Headless emulation loop.
+// Flags:
+//   -b <image>   raw binary image to boot
+//   -s <path>    Unix socket, act as server (player 0)
+//   -S <path>    Unix socket, connect as client (player 1)
 static int runHeadless(int argc, char *argv[])
 {
     Emulator emu;
 
-    const char *bin_file = nullptr;
+    const char *bin_file   = nullptr;
+    const char *net_server = nullptr;
+    const char *net_client = nullptr;
+
     for (int i = 1; i < argc; i++)
     {
         if (strcmp(argv[i], "-b") == 0 && i + 1 < argc)
             bin_file = argv[++i];
+        else if (strcmp(argv[i], "-s") == 0 && i + 1 < argc)
+            net_server = argv[++i];
+        else if (strcmp(argv[i], "-S") == 0 && i + 1 < argc)
+            net_client = argv[++i];
     }
 
     if (!bin_file)
@@ -24,6 +34,11 @@ static int runHeadless(int argc, char *argv[])
         fprintf(stderr, "ERRO: headless mode requires -b <image>\n");
         return 1;
     }
+
+    if (net_server)
+        net_init(net_server, /*server=*/true);
+    else if (net_client)
+        net_init(net_client, /*server=*/false);
 
     emu.initializeBin(bin_file);
     if (!emu.ready_to_run)
@@ -34,8 +49,6 @@ static int runHeadless(int argc, char *argv[])
 
     emu.running = true;
 
-    // Run as fast as possible
-    // UART output goes to stdout, UART input comes from stdin (raw mode).
     while (emu.running)
         emu.emulate();
 
@@ -45,7 +58,7 @@ static int runHeadless(int argc, char *argv[])
 
 int main(int argc, char *argv[])
 {
-    // -n  : headless / no-GUI mode 
+    // -n  : headless / no-GUI mode
     for (int i = 1; i < argc; i++)
     {
         if (strcmp(argv[i], "-n") == 0)

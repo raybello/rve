@@ -488,19 +488,17 @@ imp(add, FormatR, { // rv32i
                             }) imp(ecall, FormatEmpty, { // system
     if (cpu.xreg[17] == 93)
     {
-        // EXIT CALL
+        // EXIT CALL (syscall 93)
         u32 status = cpu.xreg[10] >> 1;
-        u32 x10 = cpu.xreg[10];
-
-        #ifndef __EMSCRIPTEN__
-        printf("\nECALL EXIT = x10[%x] %d (0x%x)\n", x10, status, status);
-        // exit(status);
-        // running = false;
-        // debugMode = true;
-        // printf("MMU mode: %d, ppn: %x\n", cpu.mmu.mode, cpu.mmu.ppn);
-        #else
-        printf("Exit called in WebAssembly environment. Ignoring exit.\n");
-        #endif
+#ifdef RVE_ISA_TEST
+        printf("ECALL EXIT = %d\n", status);
+        exit((int)status);
+#elif !defined(__EMSCRIPTEN__)
+        printf("\nECALL EXIT = x10[%x] status=%d\n", cpu.xreg[10], status);
+#else
+        (void)status;
+        printf("Exit called in WebAssembly environment. Ignoring.\n");
+#endif
     }
 
     ret->trap.en = true;
