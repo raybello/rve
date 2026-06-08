@@ -25,8 +25,8 @@ ISA_TEST_FILES = $(filter-out %.dump, $(notdir $(wildcard $(ISA_TEST_DIR)/*)))
 $(shell mkdir -p $(BUILD_DIR))
 
 # Source Files
-SOURCES =  $(SOURCE_DIR)/main.cpp 
-SOURCES += $(SOURCE_DIR)/rv32.cpp $(SOURCE_DIR)/emu.cpp $(SOURCE_DIR)/loader.cpp $(SOURCE_DIR)/app.cpp
+SOURCES =  $(SOURCE_DIR)/main.cpp
+SOURCES += $(SOURCE_DIR)/rv32.cpp $(SOURCE_DIR)/emu.cpp $(SOURCE_DIR)/loader.cpp $(SOURCE_DIR)/app.cpp $(SOURCE_DIR)/net.cpp
 # ImGui Files
 SOURCES += $(IMGUI_DIR)/imgui.cpp $(IMGUI_DIR)/imgui_demo.cpp $(IMGUI_DIR)/imgui_draw.cpp $(IMGUI_DIR)/imgui_tables.cpp $(IMGUI_DIR)/imgui_widgets.cpp
 SOURCES += $(IMGUI_DIR)/backends/imgui_impl_sdl2.cpp $(IMGUI_DIR)/backends/imgui_impl_opengl3.cpp
@@ -122,13 +122,23 @@ clean_web:
 run: all
 	./$(BUILD_DIR)/$(EXE)
 
-isa: all
+# ISA test targets rebuild with -DRVE_ISA_TEST so ecall exit terminates the
+# emulator cleanly after each test completes.
+# Two sequential $(MAKE) calls ensure clean finishes before the rebuild starts.
+isa:
+	$(MAKE) clean
+	$(MAKE) CXXFLAGS="$(CXXFLAGS) -DRVE_ISA_TEST" $(BUILD_DIR)/$(EXE)
 	@echo ============ $(ISA_TEST) ============
 	./$(BUILD_DIR)/$(EXE) $(ISAFLAGS) $(ISA_TEST_DIR)/$(ISA_TEST)
 	@echo =====================================
 
-isas: all
-	@$(foreach test, $(ISA_TEST_FILES), ./$(BUILD_DIR)/$(EXE) $(ISAFLAGS) $(ISA_TEST_DIR)/$(test);)
+isas:
+	$(MAKE) clean
+	$(MAKE) CXXFLAGS="$(CXXFLAGS) -DRVE_ISA_TEST" $(BUILD_DIR)/$(EXE)
+	@$(foreach test, $(ISA_TEST_FILES), \
+	  echo "=== $(test) ==="; \
+	  ./$(BUILD_DIR)/$(EXE) $(ISAFLAGS) $(ISA_TEST_DIR)/$(test); \
+	)
 
 linux-clean:
 	@echo ============ Cleaning Linux Test ============
