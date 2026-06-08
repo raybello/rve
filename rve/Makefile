@@ -164,5 +164,10 @@ lnx: clean
 rerun: clean
 	make run
 
+net-test:
+	$(CXX) $(CXXFLAGS) -o $(BUILD_DIR)/net_pair_test \
+		$(SOURCE_DIR)/net.cpp tests/net_pair_test.cpp
+	./$(BUILD_DIR)/net_pair_test
+
 clean:
 	rm -rf $(BUILD_DIR)/*
