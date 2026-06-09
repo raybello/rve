@@ -1,5 +1,12 @@
 # Changelog
 
+## [v2026.06.09.2] - 2026-06-09
+
+- Merge pull request #9 from raybello/feature/add-todo-fp-linux
+- Add CI status badge to README
+- Update web build
+
+
 ## [v2026.06.09.1] - 2026-06-09
 
 - Merge pull request #8 from raybello/feature/add-todo-fp-linux
