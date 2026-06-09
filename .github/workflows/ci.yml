@@ -1,16 +1,18 @@
 name: CI / Release
 
 on:
+  push:
+    branches: [master]
   pull_request:
     types: [opened, synchronize, reopened, closed]
     branches: [master]
 
 jobs:
-  # ── Tests — run on PR open / update, skip on merge ──────────────────────────
+  # ── Tests — run on push and PR open / update, skip on PR merge ──────────────
 
   test-isa:
     name: ISA Tests
-    if: github.event.action != 'closed'
+    if: github.event_name == 'push' || github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,7 +28,7 @@ jobs:
 
   test-net:
     name: Net Pair Test
-    if: github.event.action != 'closed'
+    if: github.event_name == 'push' || github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -258,7 +260,7 @@ jobs:
           git config user.name "raybello"
           git config user.email "raymondbello11@gmail.com"
           git add CHANGELOG.md
-          git diff --cached --quiet || git commit -m "chore: update CHANGELOG for ${{ steps.tag.outputs.tag }}"
+          git diff --cached --quiet || git commit -m "chore: update CHANGELOG for ${{ steps.tag.outputs.tag }} [skip ci]"
           git push origin master
 
       - name: Create GitHub release
