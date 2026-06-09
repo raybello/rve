@@ -138,6 +138,10 @@ make lnx      # use local assets/linux/Image and run with GUI
 
 ---
 
+## TODO
+
+- [ ] Enable floating point in the Linux kernel (`CONFIG_FPU`) so userspace programs can use FP instructions without trapping to a software emulation handler
+
 ## ISA Test Status
 
 81/81 tests pass (`make isas`).
