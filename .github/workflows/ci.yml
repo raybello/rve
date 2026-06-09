@@ -138,21 +138,40 @@ jobs:
             binary: rve/build/rve
             artifact: rve-macos-arm64
 
-          - os: macos-13
-            name: macos-x86_64
-            install: brew install sdl2
-            binary: rve/build/rve
-            artifact: rve-macos-x86_64
+          - os: windows-latest
+            name: windows-x86_64
+            binary: rve/build/rve.exe
+            artifact: rve-windows-x86_64
 
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Install dependencies
+      - name: Install dependencies (Linux / macOS)
+        if: runner.os != 'Windows'
         run: ${{ matrix.install }}
 
-      - name: Build rve
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-SDL2
+            mingw-w64-x86_64-pkg-config
+            make
+
+      - name: Build rve (Linux / macOS)
+        if: runner.os != 'Windows'
+        working-directory: rve
+        run: make all
+
+      - name: Build rve (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
         working-directory: rve
         run: make all
 
@@ -257,4 +276,4 @@ jobs:
             dist/sixtyfourmb.dtb
             dist/rve/rve-linux-x86_64
             dist/rve/rve-macos-arm64
-            dist/rve/rve-macos-x86_64
+            dist/rve/rve-windows-x86_64
