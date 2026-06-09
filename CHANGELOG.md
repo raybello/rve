@@ -1,5 +1,12 @@
 # Changelog
 
+## [v2026.06.09.1] - 2026-06-09
+
+- Merge pull request #8 from raybello/feature/add-todo-fp-linux
+- Add TODO: enable floating point in Linux kernel
+- Fix rve binaries missing from release uploads
+
+
 ## [v2026.06.09] - 2026-06-09
 
 - Merge pull request #7 from raybello/feature/initial-release
