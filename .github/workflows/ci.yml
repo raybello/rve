@@ -1,27 +1,207 @@
-name: CI
+name: CI / Release
 
 on:
   push:
+    branches: [master]
   pull_request:
 
 jobs:
-  build-and-test:
-    runs-on: ubuntu-latest
+  # ── Tests (run on every push and PR) ────────────────────────────────────────
 
+  test-isa:
+    name: ISA Tests
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
       - name: Install dependencies
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y libsdl2-dev
+        run: sudo apt-get update -y && sudo apt-get install -y libsdl2-dev
 
-      - name: Net pair test
+      - name: Run ISA tests
+        working-directory: rve
+        run: make isas
+
+  test-net:
+    name: Net Pair Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: sudo apt-get update -y && sudo apt-get install -y libsdl2-dev
+
+      - name: Run net pair test
         working-directory: rve
         run: make net-test
 
-      - name: ISA tests
-        working-directory: rve
-        run: make isas
+  # ── Docker build (master only, after tests pass) ─────────────────────────────
+
+  docker-build:
+    name: Build Linux Image
+    runs-on: ubuntu-latest
+    needs: [test-isa, test-net]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: docker
+          file: docker/Dockerfile
+          load: true
+          tags: rve-linux:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ github.sha }}
+          restore-keys: ccache-
+
+      - name: Cache Buildroot downloads
+        uses: actions/cache@v4
+        with:
+          path: .buildroot-dl
+          key: buildroot-dl-${{ hashFiles('configs/buildroot_config') }}
+          restore-keys: buildroot-dl-
+
+      - name: Prepare build directories
+        run: |
+          mkdir -p rve/assets/linux .ccache .buildroot-dl
+          chmod 777 .ccache .buildroot-dl
+
+      - name: Run Buildroot build
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace/project \
+            -v ${{ github.workspace }}/rve/assets/linux:/workspace/output \
+            -v ${{ github.workspace }}/.ccache:/ccache \
+            -v ${{ github.workspace }}/.buildroot-dl:/opt/buildroot/dl \
+            -w /workspace/project \
+            rve-linux:latest \
+            bash -c "mkdir -p /ccache/tmp && chmod -R 777 /ccache && make -f docker/container.mk build"
+
+      - name: Fix artifact ownership
+        run: sudo chown -R $USER:$USER rve/assets/linux baremetal hello_linux dts || true
+
+      - name: Build rve emulator
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y libsdl2-dev
+          make -C rve all
+
+      - name: Stage release artifacts
+        run: |
+          mkdir -p dist
+          cp rve/assets/linux/Image          dist/Image
+          cp baremetal/baremetal.elf         dist/baremetal.elf
+          cp baremetal/baremetal.bin         dist/baremetal.bin
+          cp hello_linux/hello_linux         dist/hello_linux
+          cp hello_linux/pi                  dist/pi
+          cp hello_linux/framebuff           dist/framebuff
+          cp dts/sixtyfourmb.dtb             dist/sixtyfourmb.dtb
+          cp rve/build/rve                   dist/rve-linux-x86_64
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: dist/
+          retention-days: 7
+
+  # ── Release (master only, after build passes) ────────────────────────────────
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [docker-build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+          path: dist/
+
+      - name: Generate release tag
+        id: tag
+        run: |
+          DATE=$(date -u +%Y.%m.%d)
+          COUNT=$(git tag -l "v${DATE}*" | wc -l | tr -d ' ')
+          if [ "$COUNT" -eq 0 ]; then
+            TAG="v${DATE}"
+          else
+            TAG="v${DATE}.${COUNT}"
+          fi
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog entry
+        id: changelog
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          DATE=$(date -u +%Y-%m-%d)
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          if [ -z "$LAST_TAG" ]; then
+            COMMITS=$(git log --pretty=format:"- %s" | head -50)
+          else
+            COMMITS=$(git log "${LAST_TAG}..HEAD" --pretty=format:"- %s")
+          fi
+
+          # Write this release's notes for the GitHub release body
+          printf '%s\n' "$COMMITS" > release_notes.txt
+
+          # Prepend entry to CHANGELOG.md
+          ENTRY="## [${TAG}] - ${DATE}\n\n${COMMITS}\n"
+          if [ -f CHANGELOG.md ]; then
+            # Insert after the first line (the # Changelog header)
+            HEAD=$(head -1 CHANGELOG.md)
+            TAIL=$(tail -n +2 CHANGELOG.md)
+            printf '%s\n\n%b\n%s\n' "$HEAD" "$ENTRY" "$TAIL" > CHANGELOG.md
+          else
+            printf '# Changelog\n\n%b\n' "$ENTRY" > CHANGELOG.md
+          fi
+
+      - name: Commit and push CHANGELOG
+        run: |
+          git config user.name "raybello"
+          git config user.email "raymondbello11@gmail.com"
+          git add CHANGELOG.md
+          git diff --cached --quiet || git commit -m "chore: update CHANGELOG for ${{ steps.tag.outputs.tag }}"
+          git push origin master
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Release ${{ steps.tag.outputs.tag }}
+          body_path: release_notes.txt
+          files: |
+            dist/Image
+            dist/baremetal.elf
+            dist/baremetal.bin
+            dist/hello_linux
+            dist/pi
+            dist/framebuff
+            dist/sixtyfourmb.dtb
+            dist/rve-linux-x86_64
