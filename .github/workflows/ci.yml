@@ -152,11 +152,15 @@ jobs:
         working-directory: rve
         run: make all
 
+      - name: Stage binary
+        shell: bash
+        run: cp ${{ matrix.binary }} ${{ matrix.artifact }}
+
       - name: Upload rve binary
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.binary }}
+          path: ${{ matrix.artifact }}
           retention-days: 7
 
   # ── Release — create tag, changelog, and upload all artifacts ───────────────
@@ -184,16 +188,8 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           pattern: rve-*
-          merge-multiple: false
+          merge-multiple: true
           path: dist/rve/
-
-      - name: Flatten rve binaries
-        run: |
-          for dir in dist/rve/*/; do
-            name=$(basename "$dir")
-            mv "${dir}"rve "dist/rve/${name}" 2>/dev/null || true
-            rmdir "$dir" 2>/dev/null || true
-          done
 
       - name: Generate release tag
         id: tag
