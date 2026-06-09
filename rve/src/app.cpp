@@ -18,10 +18,98 @@ static void showHelp()
     printf("./rve [parameters]\n\t-e [elf binary]\n\t-m [ram amount]\n\t-f [running image]\n\t-k [kernel command line]\n\t-b [dtb file, or 'disable']\n\t-c instruction count\n\t-s single step with full processor state\n\t-t time division base\n\t-l lock time base to instruction count\n\t-p disable sleep when wfi\n\t-d fail out immediately on all faults\n");
 }
 
+static void applyTheme()
+{
+    ImGuiStyle &s = ImGui::GetStyle();
+
+    // Rounding
+    s.WindowRounding    = 8.0f;
+    s.ChildRounding     = 6.0f;
+    s.FrameRounding     = 6.0f;
+    s.PopupRounding     = 8.0f;
+    s.ScrollbarRounding = 6.0f;
+    s.GrabRounding      = 6.0f;
+    s.TabRounding       = 6.0f;
+
+    // Sizing & spacing
+    s.WindowPadding     = ImVec2(12.0f, 10.0f);
+    s.FramePadding      = ImVec2(8.0f,  4.0f);
+    s.ItemSpacing       = ImVec2(8.0f,  6.0f);
+    s.ItemInnerSpacing  = ImVec2(6.0f,  4.0f);
+    s.IndentSpacing     = 20.0f;
+    s.ScrollbarSize     = 12.0f;
+    s.GrabMinSize       = 10.0f;
+
+    // Borders — windows and popups get a thin border, frames are borderless
+    s.WindowBorderSize  = 1.0f;
+    s.ChildBorderSize   = 1.0f;
+    s.PopupBorderSize   = 1.0f;
+    s.FrameBorderSize   = 0.0f;
+    s.TabBarBorderSize  = 0.0f;
+
+    // Palette — dark navy base with a soft blue accent
+    ImVec4 *c = s.Colors;
+    c[ImGuiCol_Text]                  = ImVec4(0.92f, 0.92f, 0.95f, 1.00f);
+    c[ImGuiCol_TextDisabled]          = ImVec4(0.40f, 0.40f, 0.52f, 1.00f);
+    c[ImGuiCol_WindowBg]              = ImVec4(0.10f, 0.10f, 0.14f, 1.00f);
+    c[ImGuiCol_ChildBg]               = ImVec4(0.07f, 0.07f, 0.10f, 1.00f);
+    c[ImGuiCol_PopupBg]               = ImVec4(0.12f, 0.12f, 0.17f, 1.00f);
+    c[ImGuiCol_Border]                = ImVec4(0.20f, 0.20f, 0.30f, 1.00f);
+    c[ImGuiCol_BorderShadow]          = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    c[ImGuiCol_FrameBg]               = ImVec4(0.16f, 0.16f, 0.22f, 1.00f);
+    c[ImGuiCol_FrameBgHovered]        = ImVec4(0.20f, 0.20f, 0.30f, 1.00f);
+    c[ImGuiCol_FrameBgActive]         = ImVec4(0.24f, 0.24f, 0.38f, 1.00f);
+    c[ImGuiCol_TitleBg]               = ImVec4(0.08f, 0.08f, 0.12f, 1.00f);
+    c[ImGuiCol_TitleBgActive]         = ImVec4(0.13f, 0.13f, 0.22f, 1.00f);
+    c[ImGuiCol_TitleBgCollapsed]      = ImVec4(0.08f, 0.08f, 0.12f, 0.80f);
+    c[ImGuiCol_MenuBarBg]             = ImVec4(0.07f, 0.07f, 0.10f, 1.00f);
+    c[ImGuiCol_ScrollbarBg]           = ImVec4(0.07f, 0.07f, 0.10f, 1.00f);
+    c[ImGuiCol_ScrollbarGrab]         = ImVec4(0.24f, 0.24f, 0.36f, 1.00f);
+    c[ImGuiCol_ScrollbarGrabHovered]  = ImVec4(0.32f, 0.32f, 0.48f, 1.00f);
+    c[ImGuiCol_ScrollbarGrabActive]   = ImVec4(0.40f, 0.40f, 0.62f, 1.00f);
+    c[ImGuiCol_CheckMark]             = ImVec4(0.45f, 0.60f, 1.00f, 1.00f);
+    c[ImGuiCol_SliderGrab]            = ImVec4(0.35f, 0.50f, 0.90f, 1.00f);
+    c[ImGuiCol_SliderGrabActive]      = ImVec4(0.45f, 0.60f, 1.00f, 1.00f);
+    c[ImGuiCol_Button]                = ImVec4(0.18f, 0.22f, 0.38f, 1.00f);
+    c[ImGuiCol_ButtonHovered]         = ImVec4(0.26f, 0.32f, 0.55f, 1.00f);
+    c[ImGuiCol_ButtonActive]          = ImVec4(0.33f, 0.42f, 0.70f, 1.00f);
+    c[ImGuiCol_Header]                = ImVec4(0.18f, 0.22f, 0.38f, 1.00f);
+    c[ImGuiCol_HeaderHovered]         = ImVec4(0.26f, 0.32f, 0.55f, 1.00f);
+    c[ImGuiCol_HeaderActive]          = ImVec4(0.33f, 0.42f, 0.70f, 1.00f);
+    c[ImGuiCol_Separator]             = ImVec4(0.20f, 0.20f, 0.30f, 1.00f);
+    c[ImGuiCol_SeparatorHovered]      = ImVec4(0.35f, 0.50f, 0.90f, 1.00f);
+    c[ImGuiCol_SeparatorActive]       = ImVec4(0.45f, 0.60f, 1.00f, 1.00f);
+    c[ImGuiCol_ResizeGrip]            = ImVec4(0.18f, 0.22f, 0.38f, 0.60f);
+    c[ImGuiCol_ResizeGripHovered]     = ImVec4(0.35f, 0.50f, 0.90f, 0.80f);
+    c[ImGuiCol_ResizeGripActive]      = ImVec4(0.45f, 0.60f, 1.00f, 1.00f);
+    c[ImGuiCol_Tab]                   = ImVec4(0.12f, 0.12f, 0.18f, 1.00f);
+    c[ImGuiCol_TabHovered]            = ImVec4(0.26f, 0.32f, 0.55f, 1.00f);
+    c[ImGuiCol_TabActive]             = ImVec4(0.18f, 0.22f, 0.40f, 1.00f);
+    c[ImGuiCol_TabUnfocused]          = ImVec4(0.10f, 0.10f, 0.14f, 1.00f);
+    c[ImGuiCol_TabUnfocusedActive]    = ImVec4(0.14f, 0.14f, 0.22f, 1.00f);
+    c[ImGuiCol_DockingPreview]        = ImVec4(0.35f, 0.50f, 0.90f, 0.70f);
+    c[ImGuiCol_DockingEmptyBg]        = ImVec4(0.07f, 0.07f, 0.10f, 1.00f);
+    c[ImGuiCol_PlotLines]             = ImVec4(0.45f, 0.60f, 1.00f, 1.00f);
+    c[ImGuiCol_PlotLinesHovered]      = ImVec4(0.60f, 0.75f, 1.00f, 1.00f);
+    c[ImGuiCol_PlotHistogram]         = ImVec4(0.35f, 0.50f, 0.90f, 1.00f);
+    c[ImGuiCol_PlotHistogramHovered]  = ImVec4(0.45f, 0.62f, 1.00f, 1.00f);
+    c[ImGuiCol_TableHeaderBg]         = ImVec4(0.10f, 0.10f, 0.16f, 1.00f);
+    c[ImGuiCol_TableBorderStrong]     = ImVec4(0.20f, 0.20f, 0.32f, 1.00f);
+    c[ImGuiCol_TableBorderLight]      = ImVec4(0.14f, 0.14f, 0.22f, 1.00f);
+    c[ImGuiCol_TableRowBg]            = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    c[ImGuiCol_TableRowBgAlt]         = ImVec4(1.00f, 1.00f, 1.00f, 0.03f);
+    c[ImGuiCol_TextSelectedBg]        = ImVec4(0.35f, 0.50f, 0.90f, 0.35f);
+    c[ImGuiCol_DragDropTarget]        = ImVec4(0.45f, 0.60f, 1.00f, 0.90f);
+    c[ImGuiCol_NavHighlight]          = ImVec4(0.45f, 0.60f, 1.00f, 1.00f);
+    c[ImGuiCol_NavWindowingHighlight] = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
+    c[ImGuiCol_NavWindowingDimBg]     = ImVec4(0.00f, 0.00f, 0.00f, 0.50f);
+    c[ImGuiCol_ModalWindowDimBg]      = ImVec4(0.00f, 0.00f, 0.00f, 0.50f);
+}
+
 App::App(/* args */)
 {
     printf("INFO: Starting %s\n", settings.name.c_str());
-    window_bg_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
+    window_bg_color = ImVec4(0.06f, 0.06f, 0.09f, 1.00f);
     running = true;
 }
 
@@ -113,16 +201,10 @@ int App::initializeUI()
     // Setup fonts
     io.Fonts->AddFontFromFileTTF(settings.font.c_str(), settings.font_size);
     // Setup Theme
-    ImGui::StyleColorsDark();
-    // Setup Style
-    ImGuiStyle &style = ImGui::GetStyle();
+    applyTheme();
+    // Keep multi-viewport window backgrounds opaque so the theme reads correctly
     if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
-    {
-        style.WindowRounding = 5.0f;
-        style.FrameRounding = 5.0f;
-        style.PopupRounding = 5.0f;
-        style.Colors[ImGuiCol_WindowBg].w = 0.5f;
-    }
+        ImGui::GetStyle().Colors[ImGuiCol_WindowBg].w = 1.0f;
     // Setup backend
     ImGui_ImplSDL2_InitForOpenGL(window, window_context);
     ImGui_ImplOpenGL3_Init(glsl_version);
