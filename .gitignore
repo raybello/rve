@@ -7,3 +7,10 @@
 .ccache/
 build/
 build-em/
+
+baremetal/baremetal.elf
+dts/bintoh
+dts/sixtyfourmb.dtb
+hello_linux/framebuff
+hello_linux/hello_linux
+hello_linux/pi
