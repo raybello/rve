@@ -1,15 +1,16 @@
 name: CI / Release
 
 on:
-  push:
-    branches: [master]
   pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches: [master]
 
 jobs:
-  # ── Tests (run on every push and PR) ────────────────────────────────────────
+  # ── Tests — run on PR open / update, skip on merge ──────────────────────────
 
   test-isa:
     name: ISA Tests
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,6 +26,7 @@ jobs:
 
   test-net:
     name: Net Pair Test
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,19 +40,17 @@ jobs:
         working-directory: rve
         run: make net-test
 
-  # ── Docker build (master only, after tests pass) ─────────────────────────────
+  # ── Linux image build — PR merge only ───────────────────────────────────────
 
   docker-build:
     name: Build Linux Image
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
-    needs: [test-isa, test-net]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
 
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-          fetch-depth: 0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -96,39 +96,80 @@ jobs:
             bash -c "mkdir -p /ccache/tmp && chmod -R 777 /ccache && make -f docker/container.mk build"
 
       - name: Fix artifact ownership
-        run: sudo chown -R $USER:$USER rve/assets/linux baremetal hello_linux dts || true
+        run: sudo chown -R "$USER:$USER" rve/assets/linux baremetal hello_linux dts || true
 
-      - name: Build rve emulator
-        run: |
-          sudo apt-get update -y && sudo apt-get install -y libsdl2-dev
-          make -C rve all
-
-      - name: Stage release artifacts
+      - name: Stage Linux artifacts
         run: |
           mkdir -p dist
-          cp rve/assets/linux/Image          dist/Image
-          cp baremetal/baremetal.elf         dist/baremetal.elf
-          cp baremetal/baremetal.bin         dist/baremetal.bin
-          cp hello_linux/hello_linux         dist/hello_linux
-          cp hello_linux/pi                  dist/pi
-          cp hello_linux/framebuff           dist/framebuff
-          cp dts/sixtyfourmb.dtb             dist/sixtyfourmb.dtb
-          cp rve/build/rve                   dist/rve-linux-x86_64
+          cp rve/assets/linux/Image   dist/Image
+          cp baremetal/baremetal.elf  dist/baremetal.elf
+          cp hello_linux/hello_linux  dist/hello_linux
+          cp hello_linux/pi           dist/pi
+          cp hello_linux/framebuff    dist/framebuff
+          cp dts/sixtyfourmb.dtb      dist/sixtyfourmb.dtb
 
-      - name: Upload artifacts
+      - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: build-artifacts
+          name: linux-image-artifacts
           path: dist/
           retention-days: 7
 
-  # ── Release (master only, after build passes) ────────────────────────────────
+  # ── rve emulator — build for all platforms on PR merge ───────────────────────
+
+  build-rve:
+    name: Build rve (${{ matrix.name }})
+    if: github.event.pull_request.merged == true
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-x86_64
+            install: sudo apt-get update -y && sudo apt-get install -y libsdl2-dev
+            binary: rve/build/rve
+            artifact: rve-linux-x86_64
+
+          - os: macos-latest
+            name: macos-arm64
+            install: brew install sdl2
+            binary: rve/build/rve
+            artifact: rve-macos-arm64
+
+          - os: macos-13
+            name: macos-x86_64
+            install: brew install sdl2
+            binary: rve/build/rve
+            artifact: rve-macos-x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: ${{ matrix.install }}
+
+      - name: Build rve
+        working-directory: rve
+        run: make all
+
+      - name: Upload rve binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.binary }}
+          retention-days: 7
+
+  # ── Release — create tag, changelog, and upload all artifacts ───────────────
 
   release:
     name: Create Release
+    if: github.event.pull_request.merged == true
+    needs: [docker-build, build-rve]
     runs-on: ubuntu-latest
-    needs: [docker-build]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     permissions:
       contents: write
 
@@ -137,11 +178,26 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download build artifacts
+      - name: Download Linux image artifacts
         uses: actions/download-artifact@v4
         with:
-          name: build-artifacts
+          name: linux-image-artifacts
           path: dist/
+
+      - name: Download rve binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: rve-*
+          merge-multiple: false
+          path: dist/rve/
+
+      - name: Flatten rve binaries
+        run: |
+          for dir in dist/rve/*/; do
+            name=$(basename "$dir")
+            mv "${dir}"rve "dist/rve/${name}" 2>/dev/null || true
+            rmdir "$dir" 2>/dev/null || true
+          done
 
       - name: Generate release tag
         id: tag
@@ -156,7 +212,6 @@ jobs:
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
 
       - name: Generate changelog entry
-        id: changelog
         run: |
           TAG="${{ steps.tag.outputs.tag }}"
           DATE=$(date -u +%Y-%m-%d)
@@ -168,13 +223,10 @@ jobs:
             COMMITS=$(git log "${LAST_TAG}..HEAD" --pretty=format:"- %s")
           fi
 
-          # Write this release's notes for the GitHub release body
           printf '%s\n' "$COMMITS" > release_notes.txt
 
-          # Prepend entry to CHANGELOG.md
           ENTRY="## [${TAG}] - ${DATE}\n\n${COMMITS}\n"
           if [ -f CHANGELOG.md ]; then
-            # Insert after the first line (the # Changelog header)
             HEAD=$(head -1 CHANGELOG.md)
             TAIL=$(tail -n +2 CHANGELOG.md)
             printf '%s\n\n%b\n%s\n' "$HEAD" "$ENTRY" "$TAIL" > CHANGELOG.md
@@ -199,9 +251,10 @@ jobs:
           files: |
             dist/Image
             dist/baremetal.elf
-            dist/baremetal.bin
             dist/hello_linux
             dist/pi
             dist/framebuff
             dist/sixtyfourmb.dtb
-            dist/rve-linux-x86_64
+            dist/rve/rve-linux-x86_64
+            dist/rve/rve-macos-arm64
+            dist/rve/rve-macos-x86_64
