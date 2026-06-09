@@ -42,6 +42,7 @@ image:
 container:
 	mkdir -p $(CCACHE)
 	mkdir -p $(OUTPUT_DIR)
+	chmod 777 $(CCACHE)
 	docker run -d \
 		--name $(CONTAINER_NAME) \
 		-v $(ROOT_DIR):/workspace/project \
@@ -53,6 +54,7 @@ container:
 
 # Copy configs and build inside the running container (incremental)
 build:
+	docker exec -u root $(CONTAINER_NAME) bash -c "mkdir -p /ccache/tmp && chmod -R 777 /ccache"
 	docker exec $(CONTAINER_NAME) make -f docker/container.mk build
 	make -C rve lnx
 

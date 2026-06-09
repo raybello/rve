@@ -6,7 +6,7 @@ DTS=dts
 
 WORKDIR=/workspace/project
 OUTPUT=/workspace/output
-JOBS=$(shell nproc)
+JOBS ?= $(shell nproc)
 
 .PHONY: build toolchain linux
 
