@@ -1,4 +1,7 @@
 # RVE - RISC-V Emulator
+
+[![CI](https://github.com/raybello/rve/actions/workflows/ci.yml/badge.svg)](https://github.com/raybello/rve/actions/workflows/ci.yml)
+
 Cross platform RISC-V simulator
 
 - Web demo: https://raybello.github.io/rve/demo/
