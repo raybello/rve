@@ -103,8 +103,8 @@
 		};
 	};
 
-	rvcnet {
-		compatible = "pi,rvcnet";
+	rvenet {
+		compatible = "pi,rvenet";
 		status = "okay";
 	};
 };

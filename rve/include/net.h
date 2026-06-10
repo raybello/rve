@@ -1,7 +1,7 @@
 #pragma once
 // Unix-socket network device for rve.
 // Implements a simple framing protocol: 4-byte little-endian length header
-// followed by payload bytes. Compatible with the rvc-networking guest driver.
+// followed by payload bytes. Compatible with the rve-networking guest driver.
 //
 // net_fd_conn == -1 means no active connection; all operations are no-ops.
 

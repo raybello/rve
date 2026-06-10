@@ -1,11 +1,11 @@
-diff --git a/drivers/net/rvcnet.c b/drivers/net/rvcnet.c
+diff --git a/drivers/net/rvenet.c b/drivers/net/rvenet.c
 new file mode 100644
 --- /dev/null
-+++ b/drivers/net/rvcnet.c
++++ b/drivers/net/rvenet.c
 @@ -0,0 +1,282 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
-+ * rvcnet — platform Ethernet driver for the RVE RISC-V emulator.
++ * rvenet — platform Ethernet driver for the RVE RISC-V emulator.
 + *
 + * TX DMA buffer:  0x11000000  (4 KiB)
 + * RX DMA buffer:  0x11001000  (4 KiB)
@@ -19,7 +19,7 @@ new file mode 100644
 + *   0x0c3  CSR_NET_RX_BUF_READY         (W)  write 1 -> arms RX path, sets rx_ready
 + *
 + * The driver maps IRQ_S_EXT (9) through the riscv,cpu-intc domain; the DTS
-+ * rvcnet node needs only "compatible = pi,rvcnet" -- no reg or interrupts.
++ * rvenet node needs only "compatible = pi,rvenet" -- no reg or interrupts.
 + */
 +
 +#include <linux/etherdevice.h>
@@ -35,17 +35,17 @@ new file mode 100644
 +#include <asm/irq.h>
 +
 +/* Custom CSR numbers (rve-specific) */
-+#define RVC_CSR_NET_TX_BUF_ADDR          0x0c0
-+#define RVC_CSR_NET_TX_BUF_SIZE_AND_SEND 0x0c1
-+#define RVC_CSR_NET_RX_BUF_ADDR          0x0c2
-+#define RVC_CSR_NET_RX_BUF_READY         0x0c3
++#define RVE_CSR_NET_TX_BUF_ADDR          0x0c0
++#define RVE_CSR_NET_TX_BUF_SIZE_AND_SEND 0x0c1
++#define RVE_CSR_NET_RX_BUF_ADDR          0x0c2
++#define RVE_CSR_NET_RX_BUF_READY         0x0c3
 +
-+#define rvc_csr_read(csr)  ({						\
++#define rve_csr_read(csr)  ({						\
 +	unsigned long __v;						\
 +	asm volatile("csrr %0, " __stringify(csr) : "=r"(__v) :: "memory"); \
 +	(u32)__v; })
 +
-+#define rvc_csr_write(csr, val) ({					\
++#define rve_csr_write(csr, val) ({					\
 +	unsigned long __v = (unsigned long)(val);			\
 +	asm volatile("csrw " __stringify(csr) ", %0" :: "rK"(__v) : "memory"); })
 +
@@ -54,7 +54,7 @@ new file mode 100644
 +/* IRQ_S_EXT = 9 (supervisor external interrupt) */
 +#define RV_IRQ_EXT    9
 +
-+struct rvcnet_priv {
++struct rvenet_priv {
 +	void __iomem *tx_buf;
 +	void __iomem *rx_buf_raw;  /* RX DMA base: [0..3]=len, [4..N]=frame */
 +	unsigned int  irq;
@@ -62,15 +62,15 @@ new file mode 100644
 +};
 +
 +/* Per-CPU slot used by request_percpu_irq */
-+static struct rvcnet_priv * __percpu *rvcnet_percpu;
++static struct rvenet_priv * __percpu *rvenet_percpu;
 +
 +/* ------------------------------------------------------------------ */
 +/*  Interrupt handler                                                   */
 +/* ------------------------------------------------------------------ */
 +
-+static irqreturn_t rvcnet_interrupt(int irq, void *dev_id)
++static irqreturn_t rvenet_interrupt(int irq, void *dev_id)
 +{
-+	struct rvcnet_priv *priv = *(struct rvcnet_priv **)dev_id;
++	struct rvenet_priv *priv = *(struct rvenet_priv **)dev_id;
 +	struct net_device  *dev  = priv->dev;
 +	u32 rx_len = readl(priv->rx_buf_raw);
 +	struct sk_buff *skb;
@@ -91,7 +91,7 @@ new file mode 100644
 +	netif_rx(skb);
 +
 +rearm:
-+	rvc_csr_write(RVC_CSR_NET_RX_BUF_READY, 1);
++	rve_csr_write(RVE_CSR_NET_RX_BUF_READY, 1);
 +	return IRQ_HANDLED;
 +}
 +
@@ -99,21 +99,21 @@ new file mode 100644
 +/*  net_device_ops                                                      */
 +/* ------------------------------------------------------------------ */
 +
-+static int rvcnet_open(struct net_device *dev)
++static int rvenet_open(struct net_device *dev)
 +{
 +	netif_start_queue(dev);
 +	return 0;
 +}
 +
-+static int rvcnet_stop(struct net_device *dev)
++static int rvenet_stop(struct net_device *dev)
 +{
 +	netif_stop_queue(dev);
 +	return 0;
 +}
 +
-+static netdev_tx_t rvcnet_xmit(struct sk_buff *skb, struct net_device *dev)
++static netdev_tx_t rvenet_xmit(struct sk_buff *skb, struct net_device *dev)
 +{
-+	struct rvcnet_priv *priv = netdev_priv(dev);
++	struct rvenet_priv *priv = netdev_priv(dev);
 +	u32 len = skb->len;
 +
 +	if (len > MAX_BUF_SIZE - sizeof(u32)) {
@@ -124,7 +124,7 @@ new file mode 100644
 +
 +	memcpy_toio(priv->tx_buf, skb->data, len);
 +	/* csrw writes the exact value; csrs would OR into the old length (Bug 3 fix) */
-+	rvc_csr_write(RVC_CSR_NET_TX_BUF_SIZE_AND_SEND, len);
++	rve_csr_write(RVE_CSR_NET_TX_BUF_SIZE_AND_SEND, len);
 +
 +	dev->stats.tx_packets++;
 +	dev->stats.tx_bytes += len;
@@ -132,36 +132,36 @@ new file mode 100644
 +	return NETDEV_TX_OK;
 +}
 +
-+static const struct net_device_ops rvcnet_ops = {
-+	.ndo_open       = rvcnet_open,
-+	.ndo_stop       = rvcnet_stop,
-+	.ndo_start_xmit = rvcnet_xmit,
++static const struct net_device_ops rvenet_ops = {
++	.ndo_open       = rvenet_open,
++	.ndo_stop       = rvenet_stop,
++	.ndo_start_xmit = rvenet_xmit,
 +};
 +
 +/* ------------------------------------------------------------------ */
 +/*  Setup / probe / remove                                              */
 +/* ------------------------------------------------------------------ */
 +
-+static void rvcnet_setup(struct net_device *dev)
++static void rvenet_setup(struct net_device *dev)
 +{
 +	ether_setup(dev);
 +	dev->mtu        = 1500;   /* Bug 4 fix: standard Ethernet MTU */
-+	dev->netdev_ops = &rvcnet_ops;
++	dev->netdev_ops = &rvenet_ops;
 +	eth_hw_addr_random(dev);
 +}
 +
-+static int rvcnet_probe(struct platform_device *pdev)
++static int rvenet_probe(struct platform_device *pdev)
 +{
 +	struct net_device  *dev;
-+	struct rvcnet_priv *priv;
++	struct rvenet_priv *priv;
 +	struct device_node *dn;
 +	struct irq_domain  *domain;
 +	unsigned int        irq;
 +	phys_addr_t         tx_phys, rx_phys;
 +	int ret;
 +
-+	dev = alloc_netdev(sizeof(*priv), "rvcnet", NET_NAME_PREDICTABLE,
-+			   rvcnet_setup);
++	dev = alloc_netdev(sizeof(*priv), "rvenet", NET_NAME_PREDICTABLE,
++			   rvenet_setup);
 +	if (!dev)
 +		return -ENOMEM;
 +
@@ -170,8 +170,8 @@ new file mode 100644
 +	priv->dev = dev;
 +
 +	/* Read buffer physical addresses from emulator CSRs */
-+	tx_phys = rvc_csr_read(RVC_CSR_NET_TX_BUF_ADDR);
-+	rx_phys = rvc_csr_read(RVC_CSR_NET_RX_BUF_ADDR);
++	tx_phys = rve_csr_read(RVE_CSR_NET_TX_BUF_ADDR);
++	rx_phys = rve_csr_read(RVE_CSR_NET_RX_BUF_ADDR);
 +
 +	priv->tx_buf     = ioremap(tx_phys, MAX_BUF_SIZE);
 +	priv->rx_buf_raw = ioremap(rx_phys, MAX_BUF_SIZE);
@@ -211,14 +211,14 @@ new file mode 100644
 +	priv->irq = irq;
 +
 +	/* Allocate per-CPU slot so request_percpu_irq can retrieve priv */
-+	rvcnet_percpu = alloc_percpu(struct rvcnet_priv *);
-+	if (!rvcnet_percpu) {
++	rvenet_percpu = alloc_percpu(struct rvenet_priv *);
++	if (!rvenet_percpu) {
 +		ret = -ENOMEM;
 +		goto err_iounmap;
 +	}
-+	*this_cpu_ptr(rvcnet_percpu) = priv;
++	*this_cpu_ptr(rvenet_percpu) = priv;
 +
-+	ret = request_percpu_irq(irq, rvcnet_interrupt, "rvcnet", rvcnet_percpu);
++	ret = request_percpu_irq(irq, rvenet_interrupt, "rvenet", rvenet_percpu);
 +	if (ret) {
 +		dev_err(&pdev->dev, "request_percpu_irq failed: %d\n", ret);
 +		goto err_free_percpu;
@@ -234,17 +234,17 @@ new file mode 100644
 +	platform_set_drvdata(pdev, dev);
 +
 +	/* Arm the RX path so the emulator can deliver the first packet */
-+	rvc_csr_write(RVC_CSR_NET_RX_BUF_READY, 1);
++	rve_csr_write(RVE_CSR_NET_RX_BUF_READY, 1);
 +
 +	dev_info(&pdev->dev, "registered netdevice '%s', IRQ %u\n", dev->name, irq);
 +	return 0;
 +
 +err_free_irq:
 +	disable_percpu_irq(irq);
-+	free_percpu_irq(irq, rvcnet_percpu);
++	free_percpu_irq(irq, rvenet_percpu);
 +err_free_percpu:
-+	free_percpu(rvcnet_percpu);
-+	rvcnet_percpu = NULL;
++	free_percpu(rvenet_percpu);
++	rvenet_percpu = NULL;
 +err_iounmap:
 +	if (priv->tx_buf)     iounmap(priv->tx_buf);
 +	if (priv->rx_buf_raw) iounmap(priv->rx_buf_raw);
@@ -253,38 +253,38 @@ new file mode 100644
 +	return ret;
 +}
 +
-+static int rvcnet_remove(struct platform_device *pdev)
++static int rvenet_remove(struct platform_device *pdev)
 +{
 +	struct net_device  *dev  = platform_get_drvdata(pdev);
-+	struct rvcnet_priv *priv = netdev_priv(dev);
++	struct rvenet_priv *priv = netdev_priv(dev);
 +
 +	unregister_netdev(dev);
 +	disable_percpu_irq(priv->irq);
-+	free_percpu_irq(priv->irq, rvcnet_percpu);
-+	free_percpu(rvcnet_percpu);
-+	rvcnet_percpu = NULL;
++	free_percpu_irq(priv->irq, rvenet_percpu);
++	free_percpu(rvenet_percpu);
++	rvenet_percpu = NULL;
 +	iounmap(priv->tx_buf);
 +	iounmap(priv->rx_buf_raw);
 +	free_netdev(dev);
 +	return 0;
 +}
 +
-+static const struct of_device_id rvcnet_of_match[] = {
-+	{ .compatible = "pi,rvcnet" },
++static const struct of_device_id rvenet_of_match[] = {
++	{ .compatible = "pi,rvenet" },
 +	{ }
 +};
-+MODULE_DEVICE_TABLE(of, rvcnet_of_match);
++MODULE_DEVICE_TABLE(of, rvenet_of_match);
 +
 +/* Bug-1 fix: wire of_match_table into the platform_driver */
-+static struct platform_driver rvcnet_driver = {
-+	.probe  = rvcnet_probe,
-+	.remove = rvcnet_remove,
++static struct platform_driver rvenet_driver = {
++	.probe  = rvenet_probe,
++	.remove = rvenet_remove,
 +	.driver = {
-+		.name           = "rvcnet",
-+		.of_match_table = rvcnet_of_match,
++		.name           = "rvenet",
++		.of_match_table = rvenet_of_match,
 +	},
 +};
-+builtin_platform_driver(rvcnet_driver);
++builtin_platform_driver(rvenet_driver);
 diff --git a/drivers/net/Kconfig b/drivers/net/Kconfig
 --- a/drivers/net/Kconfig
 +++ b/drivers/net/Kconfig
@@ -293,8 +293,8 @@ diff --git a/drivers/net/Kconfig b/drivers/net/Kconfig
  config MII
  	tristate
 
-+config RVCNET
-+	bool "RVE emulator network device (rvcnet)"
++config RVENET
++	bool "RVE emulator network device (rvenet)"
 +	depends on NET && NETDEVICES && OF
 +	help
 +	  Platform Ethernet driver for the RVE RISC-V emulator. Exchanges
@@ -311,21 +311,21 @@ diff --git a/drivers/net/Makefile b/drivers/net/Makefile
  #
  # Networking Core Drivers
  #
-+obj-$(CONFIG_RVCNET)		+= rvcnet.o
++obj-$(CONFIG_RVENET)		+= rvenet.o
 +
  obj-$(CONFIG_BONDING) += bonding/
  obj-$(CONFIG_IPVLAN) += ipvlan/
  obj-$(CONFIG_IPVTAP) += ipvlan/
-diff --git a/drivers/misc/rvc.c b/drivers/misc/rvc.c
+diff --git a/drivers/misc/rve.c b/drivers/misc/rve.c
 new file mode 100644
 --- /dev/null
-+++ b/drivers/misc/rvc.c
++++ b/drivers/misc/rve.c
 @@ -0,0 +1,82 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
-+ * rvc -- sysfs interface for RVE emulator guest services.
++ * rve -- sysfs interface for RVE emulator guest services.
 + *
-+ * Exposes two read-only files under /sys/kernel/rvc/:
++ * Exposes two read-only files under /sys/kernel/rve/:
 + *   player_id   CSR 0x0be -- 2 (server) or 1 (client)
 + *   sync_rng    CSR 0x0bf -- hardware RNG seed
 + */
@@ -336,14 +336,14 @@ new file mode 100644
 +#include <linux/module.h>
 +#include <linux/sysfs.h>
 +
-+static inline u32 rvc_read_player_id(void)
++static inline u32 rve_read_player_id(void)
 +{
 +	u32 val;
 +	asm volatile("csrr %0, 0x0be" : "=r"(val) :: "memory");
 +	return val;
 +}
 +
-+static inline u32 rvc_read_rng(void)
++static inline u32 rve_read_rng(void)
 +{
 +	u32 val;
 +	asm volatile("csrr %0, 0x0bf" : "=r"(val) :: "memory");
@@ -353,55 +353,55 @@ new file mode 100644
 +static ssize_t player_id_show(struct kobject *kobj,
 +			      struct kobj_attribute *attr, char *buf)
 +{
-+	return sysfs_emit(buf, "%u\n", rvc_read_player_id());
++	return sysfs_emit(buf, "%u\n", rve_read_player_id());
 +}
 +
 +static ssize_t sync_rng_show(struct kobject *kobj,
 +			     struct kobj_attribute *attr, char *buf)
 +{
-+	return sysfs_emit(buf, "%u\n", rvc_read_rng());
++	return sysfs_emit(buf, "%u\n", rve_read_rng());
 +}
 +
 +static struct kobj_attribute player_id_attr = __ATTR_RO(player_id);
 +static struct kobj_attribute sync_rng_attr  = __ATTR_RO(sync_rng);
 +
-+static struct attribute *rvc_attrs[] = {
++static struct attribute *rve_attrs[] = {
 +	&player_id_attr.attr,
 +	&sync_rng_attr.attr,
 +	NULL,
 +};
 +
-+static struct attribute_group rvc_attr_group = {
-+	.attrs = rvc_attrs,
++static struct attribute_group rve_attr_group = {
++	.attrs = rve_attrs,
 +};
 +
-+static struct kobject *rvc_kobj;
++static struct kobject *rve_kobj;
 +
-+static int __init rvc_init(void)
++static int __init rve_init(void)
 +{
 +	int ret;
 +
-+	rvc_kobj = kobject_create_and_add("rvc", kernel_kobj);
-+	if (!rvc_kobj)
++	rve_kobj = kobject_create_and_add("rve", kernel_kobj);
++	if (!rve_kobj)
 +		return -ENOMEM;
 +
-+	ret = sysfs_create_group(rvc_kobj, &rvc_attr_group);
++	ret = sysfs_create_group(rve_kobj, &rve_attr_group);
 +	if (ret) {
-+		kobject_put(rvc_kobj);
++		kobject_put(rve_kobj);
 +		return ret;
 +	}
 +
 +	return 0;
 +}
 +
-+static void __exit rvc_exit(void)
++static void __exit rve_exit(void)
 +{
-+	sysfs_remove_group(rvc_kobj, &rvc_attr_group);
-+	kobject_put(rvc_kobj);
++	sysfs_remove_group(rve_kobj, &rve_attr_group);
++	kobject_put(rve_kobj);
 +}
 +
-+module_init(rvc_init);
-+module_exit(rvc_exit);
++module_init(rve_init);
++module_exit(rve_exit);
 +MODULE_LICENSE("GPL");
 diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
 --- a/drivers/misc/Kconfig
@@ -409,10 +409,10 @@ diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
 @@ -6,5 +6,13 @@ menu "Misc devices"
  menu "Misc devices"
 
-+config RVC_SYSFS
-+	bool "RVE emulator sysfs interface (rvc)"
++config RVE_SYSFS
++	bool "RVE emulator sysfs interface (rve)"
 +	help
-+	  Exposes /sys/kernel/rvc/player_id and /sys/kernel/rvc/sync_rng
++	  Exposes /sys/kernel/rve/player_id and /sys/kernel/rve/sync_rng
 +	  for the RVE RISC-V emulator guest. player_id is read by the
 +	  network-setup script to assign the correct IP address.
 +	  Say Y when building a Linux image for rve.
@@ -426,7 +426,7 @@ diff --git a/drivers/misc/Makefile b/drivers/misc/Makefile
 @@ -4,4 +4,6 @@
  #
 
-+obj-$(CONFIG_RVC_SYSFS)		+= rvc.o
++obj-$(CONFIG_RVE_SYSFS)		+= rve.o
 +
  obj-$(CONFIG_IBM_ASM)		+= ibmasm/
  obj-$(CONFIG_IBMVMC)		+= ibmvmc.o
