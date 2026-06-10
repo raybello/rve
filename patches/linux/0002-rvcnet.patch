@@ -2,7 +2,7 @@ diff --git a/drivers/net/rvcnet.c b/drivers/net/rvcnet.c
 new file mode 100644
 --- /dev/null
 +++ b/drivers/net/rvcnet.c
-@@ -0,0 +1,310 @@
+@@ -0,0 +1,282 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * rvcnet — platform Ethernet driver for the RVE RISC-V emulator.
@@ -14,12 +14,12 @@ new file mode 100644
 + *
 + * Control CSRs:
 + *   0x0c0  CSR_NET_TX_BUF_ADDR          (R)  returns 0x11000000
-+ *   0x0c1  CSR_NET_TX_BUF_SIZE_AND_SEND (W)  write N → emulator calls net_send(nettx, N)
++ *   0x0c1  CSR_NET_TX_BUF_SIZE_AND_SEND (W)  write N -> emulator calls net_send(nettx, N)
 + *   0x0c2  CSR_NET_RX_BUF_ADDR          (R)  returns 0x11001000
-+ *   0x0c3  CSR_NET_RX_BUF_READY         (W)  write 1 → arms RX path, sets rx_ready
++ *   0x0c3  CSR_NET_RX_BUF_READY         (W)  write 1 -> arms RX path, sets rx_ready
 + *
 + * The driver maps IRQ_S_EXT (9) through the riscv,cpu-intc domain; the DTS
-+ * rvcnet node needs only "compatible = pi,rvcnet" — no reg or interrupts.
++ * rvcnet node needs only "compatible = pi,rvcnet" -- no reg or interrupts.
 + */
 +
 +#include <linux/etherdevice.h>
@@ -40,7 +40,6 @@ new file mode 100644
 +#define RVC_CSR_NET_RX_BUF_ADDR          0x0c2
 +#define RVC_CSR_NET_RX_BUF_READY         0x0c3
 +
-+/* Inline CSR accessors — csr number must be a compile-time literal */
 +#define rvc_csr_read(csr)  ({						\
 +	unsigned long __v;						\
 +	asm volatile("csrr %0, " __stringify(csr) : "=r"(__v) :: "memory"); \
@@ -124,7 +123,7 @@ new file mode 100644
 +	}
 +
 +	memcpy_toio(priv->tx_buf, skb->data, len);
-+	/* Bug-3 fix: csr_write (csrw) not csr_set (csrs) — must write exact length */
++	/* csrw writes the exact value; csrs would OR into the old length (Bug 3 fix) */
 +	rvc_csr_write(RVC_CSR_NET_TX_BUF_SIZE_AND_SEND, len);
 +
 +	dev->stats.tx_packets++;
@@ -146,7 +145,7 @@ new file mode 100644
 +static void rvcnet_setup(struct net_device *dev)
 +{
 +	ether_setup(dev);
-+	dev->mtu        = 1500;   /* Bug-4 fix: standard Ethernet MTU */
++	dev->mtu        = 1500;   /* Bug 4 fix: standard Ethernet MTU */
 +	dev->netdev_ops = &rvcnet_ops;
 +	eth_hw_addr_random(dev);
 +}
@@ -289,44 +288,46 @@ new file mode 100644
 diff --git a/drivers/net/Kconfig b/drivers/net/Kconfig
 --- a/drivers/net/Kconfig
 +++ b/drivers/net/Kconfig
-@@ -6,6 +6,13 @@ menuconfig NETDEVICES
+@@ -28,7 +28,15 @@ if NETDEVICES
 
- if NETDEVICES
+ config MII
+ 	tristate
 
 +config RVCNET
 +	bool "RVE emulator network device (rvcnet)"
 +	depends on NET && NETDEVICES && OF
 +	help
-+	  Platform Ethernet driver for the RVE RISC-V emulator.  Exchanges
++	  Platform Ethernet driver for the RVE RISC-V emulator. Exchanges
 +	  raw Ethernet frames with a peer emulator over a Unix socket.
 +	  Say Y when building a Linux image for rve.
 +
  config NET_CORE
- 	bool "Network core driver support"
  	default y
+ 	bool "Network core driver support"
 diff --git a/drivers/net/Makefile b/drivers/net/Makefile
 --- a/drivers/net/Makefile
 +++ b/drivers/net/Makefile
-@@ -1,6 +1,8 @@
- # SPDX-License-Identifier: GPL-2.0
- # Makefile for the Linux network (ethercard) device drivers.
-
+@@ -6,6 +6,8 @@
+ #
+ # Networking Core Drivers
+ #
 +obj-$(CONFIG_RVCNET)		+= rvcnet.o
 +
  obj-$(CONFIG_BONDING) += bonding/
- obj-$(CONFIG_DUMMY) += dummy.o
+ obj-$(CONFIG_IPVLAN) += ipvlan/
+ obj-$(CONFIG_IPVTAP) += ipvlan/
 diff --git a/drivers/misc/rvc.c b/drivers/misc/rvc.c
 new file mode 100644
 --- /dev/null
 +++ b/drivers/misc/rvc.c
-@@ -0,0 +1,83 @@
+@@ -0,0 +1,82 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
-+ * rvc — sysfs interface for RVE emulator guest services.
++ * rvc -- sysfs interface for RVE emulator guest services.
 + *
 + * Exposes two read-only files under /sys/kernel/rvc/:
-+ *   player_id   CSR 0x0be — 2 (server) or 1 (client)
-+ *   sync_rng    CSR 0x0bf — hardware RNG seed
++ *   player_id   CSR 0x0be -- 2 (server) or 1 (client)
++ *   sync_rng    CSR 0x0bf -- hardware RNG seed
 + */
 +
 +#include <linux/init.h>
@@ -334,9 +335,6 @@ new file mode 100644
 +#include <linux/kobject.h>
 +#include <linux/module.h>
 +#include <linux/sysfs.h>
-+
-+#define RVC_CSR_PLAYER_ID  0x0be
-+#define RVC_CSR_RNG        0x0bf
 +
 +static inline u32 rvc_read_player_id(void)
 +{
@@ -364,11 +362,8 @@ new file mode 100644
 +	return sysfs_emit(buf, "%u\n", rvc_read_rng());
 +}
 +
-+static struct kobj_attribute player_id_attr =
-+	__ATTR_RO(player_id);
-+
-+static struct kobj_attribute sync_rng_attr =
-+	__ATTR_RO(sync_rng);
++static struct kobj_attribute player_id_attr = __ATTR_RO(player_id);
++static struct kobj_attribute sync_rng_attr  = __ATTR_RO(sync_rng);
 +
 +static struct attribute *rvc_attrs[] = {
 +	&player_id_attr.attr,
@@ -411,15 +406,14 @@ new file mode 100644
 diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
 --- a/drivers/misc/Kconfig
 +++ b/drivers/misc/Kconfig
-@@ -1,6 +1,13 @@
- # SPDX-License-Identifier: GPL-2.0
+@@ -6,5 +6,13 @@ menu "Misc devices"
  menu "Misc devices"
 
 +config RVC_SYSFS
 +	bool "RVE emulator sysfs interface (rvc)"
 +	help
 +	  Exposes /sys/kernel/rvc/player_id and /sys/kernel/rvc/sync_rng
-+	  for the RVE RISC-V emulator guest.  player_id is read by the
++	  for the RVE RISC-V emulator guest. player_id is read by the
 +	  network-setup script to assign the correct IP address.
 +	  Say Y when building a Linux image for rve.
 +
@@ -429,11 +423,11 @@ diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
 diff --git a/drivers/misc/Makefile b/drivers/misc/Makefile
 --- a/drivers/misc/Makefile
 +++ b/drivers/misc/Makefile
-@@ -1,6 +1,8 @@
- # SPDX-License-Identifier: GPL-2.0
- # Makefile for misc devices that really don't fit anywhere else.
+@@ -4,4 +4,6 @@
+ #
 
 +obj-$(CONFIG_RVC_SYSFS)		+= rvc.o
 +
+ obj-$(CONFIG_IBM_ASM)		+= ibmasm/
+ obj-$(CONFIG_IBMVMC)		+= ibmvmc.o
  obj-$(CONFIG_AD525X_DPOT)	+= ad525x_dpot.o
- obj-$(CONFIG_AD525X_DPOT_I2C)	+= ad525x_dpot-i2c.o
