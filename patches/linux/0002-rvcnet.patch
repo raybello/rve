@@ -1,0 +1,439 @@
+diff --git a/drivers/net/rvcnet.c b/drivers/net/rvcnet.c
+new file mode 100644
+--- /dev/null
++++ b/drivers/net/rvcnet.c
+@@ -0,0 +1,310 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * rvcnet — platform Ethernet driver for the RVE RISC-V emulator.
++ *
++ * TX DMA buffer:  0x11000000  (4 KiB)
++ * RX DMA buffer:  0x11001000  (4 KiB)
++ *   [0..3]  = uint32_t frame length (little-endian)
++ *   [4..N]  = raw Ethernet frame bytes
++ *
++ * Control CSRs:
++ *   0x0c0  CSR_NET_TX_BUF_ADDR          (R)  returns 0x11000000
++ *   0x0c1  CSR_NET_TX_BUF_SIZE_AND_SEND (W)  write N → emulator calls net_send(nettx, N)
++ *   0x0c2  CSR_NET_RX_BUF_ADDR          (R)  returns 0x11001000
++ *   0x0c3  CSR_NET_RX_BUF_READY         (W)  write 1 → arms RX path, sets rx_ready
++ *
++ * The driver maps IRQ_S_EXT (9) through the riscv,cpu-intc domain; the DTS
++ * rvcnet node needs only "compatible = pi,rvcnet" — no reg or interrupts.
++ */
++
++#include <linux/etherdevice.h>
++#include <linux/interrupt.h>
++#include <linux/io.h>
++#include <linux/irqdomain.h>
++#include <linux/module.h>
++#include <linux/netdevice.h>
++#include <linux/of.h>
++#include <linux/of_irq.h>
++#include <linux/percpu.h>
++#include <linux/platform_device.h>
++#include <asm/irq.h>
++
++/* Custom CSR numbers (rve-specific) */
++#define RVC_CSR_NET_TX_BUF_ADDR          0x0c0
++#define RVC_CSR_NET_TX_BUF_SIZE_AND_SEND 0x0c1
++#define RVC_CSR_NET_RX_BUF_ADDR          0x0c2
++#define RVC_CSR_NET_RX_BUF_READY         0x0c3
++
++/* Inline CSR accessors — csr number must be a compile-time literal */
++#define rvc_csr_read(csr)  ({						\
++	unsigned long __v;						\
++	asm volatile("csrr %0, " __stringify(csr) : "=r"(__v) :: "memory"); \
++	(u32)__v; })
++
++#define rvc_csr_write(csr, val) ({					\
++	unsigned long __v = (unsigned long)(val);			\
++	asm volatile("csrw " __stringify(csr) ", %0" :: "rK"(__v) : "memory"); })
++
++#define MAX_BUF_SIZE  4096u
++
++/* IRQ_S_EXT = 9 (supervisor external interrupt) */
++#define RV_IRQ_EXT    9
++
++struct rvcnet_priv {
++	void __iomem *tx_buf;
++	void __iomem *rx_buf_raw;  /* RX DMA base: [0..3]=len, [4..N]=frame */
++	unsigned int  irq;
++	struct net_device *dev;
++};
++
++/* Per-CPU slot used by request_percpu_irq */
++static struct rvcnet_priv * __percpu *rvcnet_percpu;
++
++/* ------------------------------------------------------------------ */
++/*  Interrupt handler                                                   */
++/* ------------------------------------------------------------------ */
++
++static irqreturn_t rvcnet_interrupt(int irq, void *dev_id)
++{
++	struct rvcnet_priv *priv = *(struct rvcnet_priv **)dev_id;
++	struct net_device  *dev  = priv->dev;
++	u32 rx_len = readl(priv->rx_buf_raw);
++	struct sk_buff *skb;
++
++	if (rx_len == 0 || rx_len > MAX_BUF_SIZE - sizeof(u32))
++		goto rearm;
++
++	skb = netdev_alloc_skb_ip_align(dev, rx_len);
++	if (!skb) {
++		dev->stats.rx_dropped++;
++		goto rearm;
++	}
++
++	memcpy_fromio(skb_put(skb, rx_len), priv->rx_buf_raw + sizeof(u32), rx_len);
++	skb->protocol = eth_type_trans(skb, dev);
++	dev->stats.rx_packets++;
++	dev->stats.rx_bytes += rx_len;
++	netif_rx(skb);
++
++rearm:
++	rvc_csr_write(RVC_CSR_NET_RX_BUF_READY, 1);
++	return IRQ_HANDLED;
++}
++
++/* ------------------------------------------------------------------ */
++/*  net_device_ops                                                      */
++/* ------------------------------------------------------------------ */
++
++static int rvcnet_open(struct net_device *dev)
++{
++	netif_start_queue(dev);
++	return 0;
++}
++
++static int rvcnet_stop(struct net_device *dev)
++{
++	netif_stop_queue(dev);
++	return 0;
++}
++
++static netdev_tx_t rvcnet_xmit(struct sk_buff *skb, struct net_device *dev)
++{
++	struct rvcnet_priv *priv = netdev_priv(dev);
++	u32 len = skb->len;
++
++	if (len > MAX_BUF_SIZE - sizeof(u32)) {
++		dev->stats.tx_dropped++;
++		dev_kfree_skb(skb);
++		return NETDEV_TX_OK;
++	}
++
++	memcpy_toio(priv->tx_buf, skb->data, len);
++	/* Bug-3 fix: csr_write (csrw) not csr_set (csrs) — must write exact length */
++	rvc_csr_write(RVC_CSR_NET_TX_BUF_SIZE_AND_SEND, len);
++
++	dev->stats.tx_packets++;
++	dev->stats.tx_bytes += len;
++	dev_kfree_skb(skb);
++	return NETDEV_TX_OK;
++}
++
++static const struct net_device_ops rvcnet_ops = {
++	.ndo_open       = rvcnet_open,
++	.ndo_stop       = rvcnet_stop,
++	.ndo_start_xmit = rvcnet_xmit,
++};
++
++/* ------------------------------------------------------------------ */
++/*  Setup / probe / remove                                              */
++/* ------------------------------------------------------------------ */
++
++static void rvcnet_setup(struct net_device *dev)
++{
++	ether_setup(dev);
++	dev->mtu        = 1500;   /* Bug-4 fix: standard Ethernet MTU */
++	dev->netdev_ops = &rvcnet_ops;
++	eth_hw_addr_random(dev);
++}
++
++static int rvcnet_probe(struct platform_device *pdev)
++{
++	struct net_device  *dev;
++	struct rvcnet_priv *priv;
++	struct device_node *dn;
++	struct irq_domain  *domain;
++	unsigned int        irq;
++	phys_addr_t         tx_phys, rx_phys;
++	int ret;
++
++	dev = alloc_netdev(sizeof(*priv), "rvcnet", NET_NAME_PREDICTABLE,
++			   rvcnet_setup);
++	if (!dev)
++		return -ENOMEM;
++
++	SET_NETDEV_DEV(dev, &pdev->dev);
++	priv      = netdev_priv(dev);
++	priv->dev = dev;
++
++	/* Read buffer physical addresses from emulator CSRs */
++	tx_phys = rvc_csr_read(RVC_CSR_NET_TX_BUF_ADDR);
++	rx_phys = rvc_csr_read(RVC_CSR_NET_RX_BUF_ADDR);
++
++	priv->tx_buf     = ioremap(tx_phys, MAX_BUF_SIZE);
++	priv->rx_buf_raw = ioremap(rx_phys, MAX_BUF_SIZE);
++	if (!priv->tx_buf || !priv->rx_buf_raw) {
++		dev_err(&pdev->dev, "ioremap failed\n");
++		ret = -ENOMEM;
++		goto err_free_netdev;
++	}
++
++	/* Map IRQ_S_EXT through the riscv,cpu-intc domain */
++	dn = of_cpu_device_node_get(0);
++	if (!dn) {
++		dev_err(&pdev->dev, "no cpu@0 node\n");
++		ret = -ENODEV;
++		goto err_iounmap;
++	}
++	dn = of_get_compatible_child(dn, "riscv,cpu-intc");
++	if (!dn) {
++		dev_err(&pdev->dev, "no riscv,cpu-intc child\n");
++		ret = -ENODEV;
++		goto err_iounmap;
++	}
++	domain = irq_find_host(dn);
++	of_node_put(dn);
++	if (!domain) {
++		dev_err(&pdev->dev, "irq domain not found\n");
++		ret = -ENODEV;
++		goto err_iounmap;
++	}
++
++	irq = irq_create_mapping(domain, RV_IRQ_EXT);
++	if (!irq) {
++		dev_err(&pdev->dev, "irq_create_mapping failed\n");
++		ret = -ENXIO;
++		goto err_iounmap;
++	}
++	priv->irq = irq;
++
++	/* Allocate per-CPU slot so request_percpu_irq can retrieve priv */
++	rvcnet_percpu = alloc_percpu(struct rvcnet_priv *);
++	if (!rvcnet_percpu) {
++		ret = -ENOMEM;
++		goto err_iounmap;
++	}
++	*this_cpu_ptr(rvcnet_percpu) = priv;
++
++	ret = request_percpu_irq(irq, rvcnet_interrupt, "rvcnet", rvcnet_percpu);
++	if (ret) {
++		dev_err(&pdev->dev, "request_percpu_irq failed: %d\n", ret);
++		goto err_free_percpu;
++	}
++	enable_percpu_irq(irq, irq_get_trigger_type(irq));
++
++	ret = register_netdev(dev);
++	if (ret) {
++		dev_err(&pdev->dev, "register_netdev failed: %d\n", ret);
++		goto err_free_irq;
++	}
++
++	platform_set_drvdata(pdev, dev);
++
++	/* Arm the RX path so the emulator can deliver the first packet */
++	rvc_csr_write(RVC_CSR_NET_RX_BUF_READY, 1);
++
++	dev_info(&pdev->dev, "registered netdevice '%s', IRQ %u\n", dev->name, irq);
++	return 0;
++
++err_free_irq:
++	disable_percpu_irq(irq);
++	free_percpu_irq(irq, rvcnet_percpu);
++err_free_percpu:
++	free_percpu(rvcnet_percpu);
++	rvcnet_percpu = NULL;
++err_iounmap:
++	if (priv->tx_buf)     iounmap(priv->tx_buf);
++	if (priv->rx_buf_raw) iounmap(priv->rx_buf_raw);
++err_free_netdev:
++	free_netdev(dev);
++	return ret;
++}
++
++static int rvcnet_remove(struct platform_device *pdev)
++{
++	struct net_device  *dev  = platform_get_drvdata(pdev);
++	struct rvcnet_priv *priv = netdev_priv(dev);
++
++	unregister_netdev(dev);
++	disable_percpu_irq(priv->irq);
++	free_percpu_irq(priv->irq, rvcnet_percpu);
++	free_percpu(rvcnet_percpu);
++	rvcnet_percpu = NULL;
++	iounmap(priv->tx_buf);
++	iounmap(priv->rx_buf_raw);
++	free_netdev(dev);
++	return 0;
++}
++
++static const struct of_device_id rvcnet_of_match[] = {
++	{ .compatible = "pi,rvcnet" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, rvcnet_of_match);
++
++/* Bug-1 fix: wire of_match_table into the platform_driver */
++static struct platform_driver rvcnet_driver = {
++	.probe  = rvcnet_probe,
++	.remove = rvcnet_remove,
++	.driver = {
++		.name           = "rvcnet",
++		.of_match_table = rvcnet_of_match,
++	},
++};
++builtin_platform_driver(rvcnet_driver);
+diff --git a/drivers/net/Kconfig b/drivers/net/Kconfig
+--- a/drivers/net/Kconfig
++++ b/drivers/net/Kconfig
+@@ -6,6 +6,13 @@ menuconfig NETDEVICES
+
+ if NETDEVICES
+
++config RVCNET
++	bool "RVE emulator network device (rvcnet)"
++	depends on NET && NETDEVICES && OF
++	help
++	  Platform Ethernet driver for the RVE RISC-V emulator.  Exchanges
++	  raw Ethernet frames with a peer emulator over a Unix socket.
++	  Say Y when building a Linux image for rve.
++
+ config NET_CORE
+ 	bool "Network core driver support"
+ 	default y
+diff --git a/drivers/net/Makefile b/drivers/net/Makefile
+--- a/drivers/net/Makefile
++++ b/drivers/net/Makefile
+@@ -1,6 +1,8 @@
+ # SPDX-License-Identifier: GPL-2.0
+ # Makefile for the Linux network (ethercard) device drivers.
+
++obj-$(CONFIG_RVCNET)		+= rvcnet.o
++
+ obj-$(CONFIG_BONDING) += bonding/
+ obj-$(CONFIG_DUMMY) += dummy.o
+diff --git a/drivers/misc/rvc.c b/drivers/misc/rvc.c
+new file mode 100644
+--- /dev/null
++++ b/drivers/misc/rvc.c
+@@ -0,0 +1,83 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * rvc — sysfs interface for RVE emulator guest services.
++ *
++ * Exposes two read-only files under /sys/kernel/rvc/:
++ *   player_id   CSR 0x0be — 2 (server) or 1 (client)
++ *   sync_rng    CSR 0x0bf — hardware RNG seed
++ */
++
++#include <linux/init.h>
++#include <linux/kernel.h>
++#include <linux/kobject.h>
++#include <linux/module.h>
++#include <linux/sysfs.h>
++
++#define RVC_CSR_PLAYER_ID  0x0be
++#define RVC_CSR_RNG        0x0bf
++
++static inline u32 rvc_read_player_id(void)
++{
++	u32 val;
++	asm volatile("csrr %0, 0x0be" : "=r"(val) :: "memory");
++	return val;
++}
++
++static inline u32 rvc_read_rng(void)
++{
++	u32 val;
++	asm volatile("csrr %0, 0x0bf" : "=r"(val) :: "memory");
++	return val;
++}
++
++static ssize_t player_id_show(struct kobject *kobj,
++			      struct kobj_attribute *attr, char *buf)
++{
++	return sysfs_emit(buf, "%u\n", rvc_read_player_id());
++}
++
++static ssize_t sync_rng_show(struct kobject *kobj,
++			     struct kobj_attribute *attr, char *buf)
++{
++	return sysfs_emit(buf, "%u\n", rvc_read_rng());
++}
++
++static struct kobj_attribute player_id_attr =
++	__ATTR_RO(player_id);
++
++static struct kobj_attribute sync_rng_attr =
++	__ATTR_RO(sync_rng);
++
++static struct attribute *rvc_attrs[] = {
++	&player_id_attr.attr,
++	&sync_rng_attr.attr,
++	NULL,
++};
++
++static struct attribute_group rvc_attr_group = {
++	.attrs = rvc_attrs,
++};
++
++static struct kobject *rvc_kobj;
++
++static int __init rvc_init(void)
++{
++	int ret;
++
++	rvc_kobj = kobject_create_and_add("rvc", kernel_kobj);
++	if (!rvc_kobj)
++		return -ENOMEM;
++
++	ret = sysfs_create_group(rvc_kobj, &rvc_attr_group);
++	if (ret) {
++		kobject_put(rvc_kobj);
++		return ret;
++	}
++
++	return 0;
++}
++
++static void __exit rvc_exit(void)
++{
++	sysfs_remove_group(rvc_kobj, &rvc_attr_group);
++	kobject_put(rvc_kobj);
++}
++
++module_init(rvc_init);
++module_exit(rvc_exit);
++MODULE_LICENSE("GPL");
+diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
+--- a/drivers/misc/Kconfig
++++ b/drivers/misc/Kconfig
+@@ -1,6 +1,13 @@
+ # SPDX-License-Identifier: GPL-2.0
+ menu "Misc devices"
+
++config RVC_SYSFS
++	bool "RVE emulator sysfs interface (rvc)"
++	help
++	  Exposes /sys/kernel/rvc/player_id and /sys/kernel/rvc/sync_rng
++	  for the RVE RISC-V emulator guest.  player_id is read by the
++	  network-setup script to assign the correct IP address.
++	  Say Y when building a Linux image for rve.
++
+ config SENSORS_LIS3LV02D
+ 	tristate
+ 	depends on INPUT
+diff --git a/drivers/misc/Makefile b/drivers/misc/Makefile
+--- a/drivers/misc/Makefile
++++ b/drivers/misc/Makefile
+@@ -1,6 +1,8 @@
+ # SPDX-License-Identifier: GPL-2.0
+ # Makefile for misc devices that really don't fit anywhere else.
+
++obj-$(CONFIG_RVC_SYSFS)		+= rvc.o
++
+ obj-$(CONFIG_AD525X_DPOT)	+= ad525x_dpot.o
+ obj-$(CONFIG_AD525X_DPOT_I2C)	+= ad525x_dpot-i2c.o

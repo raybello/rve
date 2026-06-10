@@ -17,6 +17,7 @@
 ::sysinit:/bin/mkdir -p /run/lock/subsys /dev/shm /dev/pts
 ::sysinit:/bin/mount -a
 ::sysinit:/bin/hostname -F /etc/hostname
+::sysinit:/bin/sh /network-setup.sh
 # now run any rc scripts
 # Not using rc scripts.
 # ::sysinit:/etc/init.d/rcS

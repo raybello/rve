@@ -1540,32 +1540,33 @@ void Emulator::emulate()
         cpu.csr.data[CSR_MIP] |= MIP_MTIP;
     }
 
-    // UART tick + external interrupt
+    // UART tick + external interrupt — sources are independent; both can raise MIP_SEIP
     cpu.uartTick();
     u32 cur_mip = cpu.readCsrRaw(CSR_MIP);
-    if (!(cur_mip & MIP_SEIP))
+    u32 new_mip = cur_mip;
+
+    if (cpu.uart.interrupting)
+        new_mip |= MIP_SEIP;
+
+    if (cpu.net.rx_ready)
     {
-        if (cpu.uart.interrupting)
+        // Network RX interrupt (no-op when net not connected)
+        uint8_t *net_data = nullptr;
+        uint32_t net_data_len = 0;
+        if (net_recv(&net_data, &net_data_len))
         {
-            cpu.writeCsrRaw(CSR_MIP, cur_mip | MIP_SEIP);
-        }
-        else if (cpu.net.rx_ready)
-        {
-            // Network RX interrupt (no-op when net not connected)
-            uint8_t *net_data = nullptr;
-            uint32_t net_data_len = 0;
-            if (net_recv(&net_data, &net_data_len))
-            {
-                cpu.writeCsrRaw(CSR_MIP, cur_mip | MIP_SEIP);
-                if (net_data_len > 4096u - sizeof(u32))
-                    net_data_len = 4096u - sizeof(u32);
-                *((u32 *)cpu.net.netrx) = net_data_len;
-                memcpy(cpu.net.netrx + sizeof(u32), net_data, net_data_len);
-                cpu.net.rx_ready = 0;
-                free(net_data);
-            }
+            if (net_data_len > 4096u - sizeof(u32))
+                net_data_len = 4096u - sizeof(u32);
+            *((u32 *)cpu.net.netrx) = net_data_len;
+            memcpy(cpu.net.netrx + sizeof(u32), net_data, net_data_len);
+            cpu.net.rx_ready = 0;
+            new_mip |= MIP_SEIP;
+            free(net_data);
         }
     }
+
+    if (new_mip != cur_mip)
+        cpu.writeCsrRaw(CSR_MIP, new_mip);
 
     cpu.handleIrqAndTrap(&ret);
 

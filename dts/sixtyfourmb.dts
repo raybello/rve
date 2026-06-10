@@ -102,4 +102,9 @@
 			status = "okay";
 		};
 	};
+
+	rvcnet {
+		compatible = "pi,rvcnet";
+		status = "okay";
+	};
 };
