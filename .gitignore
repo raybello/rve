@@ -17,3 +17,7 @@ hello_linux/pi
 build64/
 # rv64 Linux image (~30 MB): produced by `make build ARCH=rv64`
 rve/assets/linux64/
+
+# emscripten build outputs (docs/demo holds the published copy)
+web64/
+.DS_Store
