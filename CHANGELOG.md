@@ -1,5 +1,23 @@
 # Changelog
 
+## [v2026.09.25] - 2026-09-25
+
+- Merge pull request #11 from raybello/fix/ci-gha-cache-reserve
+- CI: don't fail Build Linux Image when the GHA layer-cache export can't reserve a slot
+- Merge pull request #10 from raybello/rv64-port
+- README: add RV64 ISA test detail table
+- Make fcvt.w/wu conversions independent of host cast lowering (fixes x86 rv64 fcvt_w ISA failures)
+- Canonicalize NaN results of FP arithmetic (fixes x86 fadd/fdiv ISA failures)
+- Merge origin/master into rv64-port
+- rv64 Linux image: OpenSBI without C, busybox/tc fix, custom apps, web/git excludes
+- Fix emulator bugs found booting OpenSBI + RV64 Linux
+- RV64 Linux option: Buildroot defconfig, Sv39 kernel config, OpenSBI, ARCH=rv64 docker build
+- Emscripten: RV64 web build, wasm ISA runner, larger wasm stack
+- Phase 7: RV64 test suites, Sv39 -v- variants, directed CSR tests, CI
+- Phases 1-6: xlen_t refactor and RV64IMAFD core (Sv39 included)
+- Phase 0: headless ISA test runner, ELF64 loader, rv64 test corpus
+
+
 ## [v2026.06.09.2] - 2026-06-09
 
 - Merge pull request #9 from raybello/feature/add-todo-fp-linux
