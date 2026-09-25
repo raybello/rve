@@ -110,6 +110,12 @@ To build without serving:
 cd rve && make -f Makefile.emscripten
 ```
 
+The hosted demo (`docs/demo/`) is the RV64 build: it boots the OpenSBI + Sv39 Linux image (`rve/assets/linux64/Image`, build it first with `make build ARCH=rv64`). To rebuild it:
+```sh
+cd rve && make -f Makefile.emscripten XLEN=64   # writes rve/web64/
+cp web64/index.{html,js,wasm,data} ../docs/demo/
+```
+
 ---
 
 ## Building Linux with Docker

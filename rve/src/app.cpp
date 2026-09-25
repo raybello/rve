@@ -333,8 +333,13 @@ int App::initializeEmu(int argc, char *argv[])
     // to click Load manually.
     if (!bin_file_name && !elf_file_name)
     {
-        printf("INFO: EMSCRIPTEN auto-boot: /assets/linux/Image\n");
-        emu.initializeBin("/assets/linux/Image");
+#if XLEN == 64
+        const char *web_image = "/assets/linux64/Image"; // OpenSBI + Sv39 kernel
+#else
+        const char *web_image = "/assets/linux/Image";
+#endif
+        printf("INFO: EMSCRIPTEN auto-boot: %s\n", web_image);
+        emu.initializeBin(web_image);
         emu.running = true;
     }
 #endif

@@ -81,7 +81,13 @@ LDFLAGS += -s NO_FILESYSTEM=1
 CPPFLAGS += -DIMGUI_DISABLE_FILE_FUNCTIONS
 endif
 ifeq ($(USE_FILE_SYSTEM), 1)
-LDFLAGS += --no-heap-copy --preload-file $(ASSETS_DIR)@/assets --exclude-file "*/isa-test-rv64*" --exclude-file "*/linux64*"
+LDFLAGS += --no-heap-copy --preload-file $(ASSETS_DIR)@/assets --exclude-file "*/isa-test-rv64*"
+# Ship only the Linux image for the selected XLEN (rv64 = OpenSBI + Sv39 kernel, ~30 MB)
+ifeq ($(XLEN),64)
+LDFLAGS += --exclude-file "*/linux/*" --exclude-file "*/isa-test/*" --exclude-file "*/kernel-Image" --exclude-file "*/fw_jump.bin"
+else
+LDFLAGS += --exclude-file "*/linux64*"
+endif
 endif
 
 ##---------------------------------------------------------------------
