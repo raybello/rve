@@ -129,15 +129,19 @@ xlen_t RV32::readCsrRaw(u32 address)
     case CSR_FCSR:
         return csr.data[CSR_FCSR] & 0xFFu;
     case CSR_MSTATUS:
-        return csr.data[CSR_MSTATUS] | MSTATUS_XL_FIXED;
+        return csr.data[CSR_MSTATUS] | MSTATUS_XL_FIXED |
+               (((csr.data[CSR_MSTATUS] >> 13) & 3) == 3 ? MSTATUS_SD_BIT : 0);
     case CSR_SSTATUS:
-        return (csr.data[CSR_MSTATUS] & 0x000de162u) | SSTATUS_XL_FIXED;
+        return (csr.data[CSR_MSTATUS] & 0x000de162u) | SSTATUS_XL_FIXED |
+               (((csr.data[CSR_MSTATUS] >> 13) & 3) == 3 ? MSTATUS_SD_BIT : 0);
     case CSR_SIE:
         return csr.data[CSR_MIE] & 0x222u;
     case CSR_SIP:
         return csr.data[CSR_MIP] & 0x222u;
     case CSR_MCYCLE:
     case CSR_CYCLE:
+    case 0xb02: // minstret
+    case 0xc02: // instret
         return (xlen_t)clock;
     case CSR_TIME:
 #if XLEN == 64
@@ -168,15 +172,18 @@ void RV32::writeCsrRaw(u32 address, xlen_t value)
     {
     case CSR_FFLAGS:
         csr.data[CSR_FCSR] = (csr.data[CSR_FCSR] & ~0x1Fu) | (value & 0x1Fu);
+        fpStateDirty();
         break;
     case CSR_FRM:
         csr.data[CSR_FCSR] = (csr.data[CSR_FCSR] & ~0xE0u) | ((value & 0x7u) << 5);
+        fpStateDirty();
         break;
     case CSR_FCSR:
         csr.data[CSR_FCSR] = value & 0xFFu;
+        fpStateDirty();
         break;
     case CSR_MSTATUS:
-        csr.data[CSR_MSTATUS] = value & ~(xlen_t)MSTATUS_XL_FIXED;
+        csr.data[CSR_MSTATUS] = value & ~(xlen_t)(MSTATUS_XL_FIXED | MSTATUS_SD_BIT);
         break;
     case CSR_SSTATUS:
         csr.data[CSR_MSTATUS] &= ~(xlen_t)0x000de162u;  // was !0x000de162 (bug: logical NOT → 0)
@@ -206,6 +213,43 @@ void RV32::writeCsrRaw(u32 address, xlen_t value)
         csr.data[address] = value;
         break;
     };
+}
+
+// mstatus.FS -> Dirty (3) if the FPU is enabled. Supervisors context-switch FP state based on
+// this, so it must be set whenever FP registers or fcsr are modified.
+void RV32::fpStateDirty()
+{
+#if XLEN == 64
+    if ((csr.data[CSR_MSTATUS] >> 13) & 3)
+        csr.data[CSR_MSTATUS] |= (xlen_t)3 << 13;
+#endif
+}
+
+// The set of CSRs rve implements on RV64. Anything else raises illegal-instruction, which is
+// how OpenSBI/Linux detect optional extensions (Sstc menvcfg/stimecmp, hpm counters, ...).
+bool RV32::csrImplemented(u32 a)
+{
+    switch (a)
+    {
+    case CSR_FFLAGS: case CSR_FRM: case CSR_FCSR:
+    case CSR_CYCLE: case CSR_TIME: case 0xc02:
+    case CSR_SSTATUS: case CSR_SIE: case CSR_STVEC: case 0x106 /*scounteren*/:
+    case 0x140 /*sscratch*/: case CSR_SEPC: case CSR_SCAUSE: case CSR_STVAL: case CSR_SIP: case CSR_SATP:
+    case CSR_MSTATUS: case CSR_MISA: case CSR_MEDELEG: case CSR_MIDELEG: case CSR_MIE: case CSR_MTVEC:
+    case 0x306 /*mcounteren*/: case 0x340 /*mscratch*/: case CSR_MEPC: case CSR_MCAUSE: case CSR_MTVAL: case CSR_MIP:
+    case CSR_MCYCLE: case 0xb02 /*minstret*/:
+    case 0xf11: case 0xf12: case 0xf13: case CSR_MHARTID:
+    // rve custom CSRs
+    case CSR_MEMOP_OP: case CSR_MEMOP_SRC: case CSR_MEMOP_DST: case CSR_MEMOP_N:
+    case CSR_PLAYER_ID: case CSR_RNG:
+    case CSR_NET_TX_BUF_ADDR: case CSR_NET_TX_BUF_SIZE_AND_SEND: case CSR_NET_RX_BUF_ADDR: case CSR_NET_RX_BUF_READY:
+        return true;
+    }
+    // PMP: pmpcfg0/2/.../14 (RV64 uses even registers only) and pmpaddr0..15. rve does not
+    // enforce PMP, the registers just hold what firmware writes.
+    if (a >= 0x3a0 && a <= 0x3ae && !(a & 1)) return true;
+    if (a >= 0x3b0 && a <= 0x3bf) return true;
+    return false;
 }
 
 xlen_t RV32::getCsr(u32 address, ins_ret *ret)
@@ -618,12 +662,17 @@ void RV32::memSetByte(xlen_t addr, u32 val)
             return;
         }
 
-        // Writing to mtimecmp clears MTIP/STIP (spec requirement)
+        // Writing to mtimecmp clears MTIP (spec requirement). On RV64 STIP is left alone: it is
+        // a software bit that the SBI firmware sets/clears on behalf of the supervisor.
         if ((addr >= 0x02004000u && addr < 0x02004008u) ||
             (addr >= 0x11004000u && addr < 0x11004008u))
         {
             xlen_t cur_mip = readCsrRaw(CSR_MIP);
+#if XLEN == 64
+            writeCsrRaw(CSR_MIP, cur_mip & ~(xlen_t)MIP_MTIP);
+#else
             writeCsrRaw(CSR_MIP, cur_mip & ~(xlen_t)(MIP_MTIP | MIP_STIP));
+#endif
         }
 
         switch (addr)

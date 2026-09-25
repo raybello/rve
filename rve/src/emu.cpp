@@ -1,6 +1,9 @@
 #include "emu.h"
 #include "net.h"
 #include "default64mbdtc.h"
+#if XLEN == 64
+#include "default_rv64_dtc.h"
+#endif
 #include <sys/time.h>
 #include <cfenv>
 #include <cmath>
@@ -1410,6 +1413,16 @@ imp(fmv_d_x, FormatR, { // rv64d: freg[rd] = xreg[rs1] bits
     {
         // could be CSR instruction
         ins_FormatCSR.value = cpu.getCsr(ins_FormatCSR.csr, &ret);
+#if XLEN == 64
+        // A real CSR instruction (opcode SYSTEM, funct3 != 0) to a CSR we don't implement
+        if (!ret.trap.en && (ins_word & 0x7f) == 0x73 && ((ins_word >> 12) & 7) != 0 &&
+            !cpu.csrImplemented(ins_FormatCSR.csr))
+        {
+            ret.trap.en = true;
+            ret.trap.type = trap_IllegalInstruction;
+            ret.trap.value = ins_word;
+        }
+#endif
     }
 
     ins_masked = ins_word & 0x0000007f;
@@ -1744,9 +1757,18 @@ void Emulator::initializeBin(const char *path)
         return;
 
     // Place default DTB at end of RAM
+#if XLEN == 64
+    // RV64 image = OpenSBI (fw_jump at 0x80000000) + Linux (0x80200000). OpenSBI grows the
+    // FDT in place (reserved-memory fixups), so leave 1 MiB of room after the DTB.
+    const unsigned char *dtb_data = default_rv64_dtb;
+    uint32_t dtb_size   = (uint32_t)sizeof(default_rv64_dtb);
+    uint32_t dtb_offset = (uint32_t)MEM_SIZE - 0x100000u;
+#else
+    const unsigned char *dtb_data = default64mbdtb;
     uint32_t dtb_size   = (uint32_t)sizeof(default64mbdtb);
     uint32_t dtb_offset = (uint32_t)MEM_SIZE - dtb_size;
-    memcpy(memory + dtb_offset, default64mbdtb, dtb_size);
+#endif
+    memcpy(memory + dtb_offset, dtb_data, dtb_size);
 
     // Patch DTB memory-size field (offset 0x13c contains magic 0x00c0ff03)
     // uint32_t *dtb_u32 = (uint32_t *)(memory + dtb_offset);
@@ -1785,6 +1807,15 @@ void Emulator::emulate()
         {
             ins_word = cpu.memGetWord(phys_pc);
             ret = insSelect(ins_word);
+
+#if XLEN == 64
+            // Any FP register write makes mstatus.FS Dirty so the OS saves FP state on switch
+            {
+                u32 op = ins_word & 0x7f;
+                if (!ret.trap.en && (op == 0x07 || op == 0x43 || op == 0x47 || op == 0x4b || op == 0x4f || op == 0x53))
+                    cpu.fpStateDirty();
+            }
+#endif
 
             if (ret.csr_write && !ret.trap.en)
                 cpu.setCsr(ret.csr_write, ret.csr_val, &ret);

@@ -185,6 +185,18 @@ linux: all linux-clean linux-dl
 	@echo ============ Running Linux Test ============
 	./$(BUILD_DIR)/$(EXE) -r -b $(BUILD_DIR)/Image
 
+# RV64 Linux (OpenSBI + Sv39 kernel built by `make build ARCH=rv64`, see docker/container.mk)
+LINUX64_IMAGE = $(ASSETS_DIR)/linux64/Image
+
+lnx64:
+	$(MAKE) XLEN=64 all
+	./build64/rve64 -r -b $(LINUX64_IMAGE)
+
+# headless (UART on stdout / stdin)
+linuxn64:
+	$(MAKE) XLEN=64 all
+	./build64/rve64 -n -b $(LINUX64_IMAGE)
+
 lnx: clean
 	make all && \
 	echo '============ Copying Linux Image ============' && \

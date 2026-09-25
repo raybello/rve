@@ -1,0 +1,125 @@
+/dts-v1/;
+
+/*
+ * Device tree for the rve RV64 (Sv39) machine: OpenSBI in M-mode, Linux in S-mode.
+ * Compiled into rve/include/default_rv64_dtc.h by `make -C dts rv64`.
+ */
+/ {
+	#address-cells = <0x02>;
+	#size-cells = <0x02>;
+	compatible = "rve,virt-rv64";
+	model = "rve,rv64";
+
+	aliases {
+		serial0 = &uart0;
+	};
+
+	chosen {
+		bootargs = "earlycon=uart8250,mmio,0x10000000,115200n8 console=tty0 console=ttyS0";
+		stdout-path = "serial0:115200n8";
+	};
+
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x00 0x80000000 0x00 0x8000000>;
+	};
+
+	reserved-memory {
+		#address-cells = <0x02>;
+		#size-cells = <0x02>;
+		ranges;
+
+		/* Emulated framebuffer that the GUI scans out; must not be given to the page allocator */
+		framebuffer_mem: framebuffer@84000000 {
+			reg = <0x00 0x84000000 0x00 0x200000>;
+			no-map;
+		};
+	};
+
+	framebuffer0: framebuffer@84000000 {
+		compatible = "simple-framebuffer";
+		reg = <0x00 0x84000000 0x00 0x18cc18>;
+		width = <850>;
+		height = <478>;
+		stride = <0xd48>;
+		format = "a8b8g8r8";
+		status = "okay";
+	};
+
+	cpus {
+		#address-cells = <0x01>;
+		#size-cells = <0x00>;
+		timebase-frequency = <0xf4240>;
+
+		cpu0: cpu@0 {
+			device_type = "cpu";
+			reg = <0x00>;
+			status = "okay";
+			compatible = "riscv";
+			riscv,isa = "rv64imafd";
+			riscv,isa-base = "rv64i";
+			riscv,isa-extensions = "i", "m", "a", "f", "d", "zicsr", "zifencei";
+			mmu-type = "riscv,sv39";
+
+			cpu0_intc: interrupt-controller {
+				#interrupt-cells = <0x01>;
+				interrupt-controller;
+				compatible = "riscv,cpu-intc";
+			};
+		};
+
+		cpu-map {
+			cluster0 {
+				core0 {
+					cpu = <&cpu0>;
+				};
+			};
+		};
+	};
+
+	soc {
+		#address-cells = <0x02>;
+		#size-cells = <0x02>;
+		compatible = "simple-bus";
+		ranges;
+
+		uart0: serial@10000000 {
+			compatible = "ns16550a";
+			reg = <0x00 0x10000000 0x00 0x100>;
+			clock-frequency = <0x1000000>;
+			reg-shift = <0x00>;
+			reg-io-width = <0x01>;
+		};
+
+		syscon: syscon@11100000 {
+			compatible = "syscon";
+			reg = <0x00 0x11100000 0x00 0x1000>;
+		};
+
+		poweroff {
+			compatible = "syscon-poweroff";
+			regmap = <&syscon>;
+			offset = <0x00>;
+			value = <0x5555>;
+		};
+
+		reboot {
+			compatible = "syscon-reboot";
+			regmap = <&syscon>;
+			offset = <0x00>;
+			value = <0x7777>;
+		};
+
+		clint@11000000 {
+			compatible = "sifive,clint0", "riscv,clint0";
+			interrupts-extended = <&cpu0_intc 0x03 &cpu0_intc 0x07>;
+			reg = <0x00 0x11000000 0x00 0x10000>;
+		};
+
+		keyboard@10001000 {
+			compatible = "rve-kbd";
+			reg = <0x00 0x10001000 0x00 0x10>;
+			status = "okay";
+		};
+	};
+};

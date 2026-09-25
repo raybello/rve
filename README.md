@@ -136,6 +136,37 @@ make shell    # open a bash shell inside the running container
 make stop     # stop and remove the container
 ```
 
+### RV64 Linux (Sv39 MMU + OpenSBI)
+
+`ARCH=rv64` builds a full-MMU 64-bit image instead of the nommu RV32 one. It boots the way QEMU `virt` does:
+OpenSBI (M-mode firmware) at `0x80000000` jumps to a Linux kernel running in S-mode at `0x80200000`, with the
+root filesystem embedded as an initramfs. Userland is musl + busybox + **vim** (vim needs an MMU, so it is
+only in the rv64 image). It runs on the RV64 emulator core (`make XLEN=64`, binary `rve64`).
+
+```sh
+make image && make container        # as above
+make build ARCH=rv64                # toolchain + OpenSBI + kernel + rootfs, then launches rve64
+make lnx ARCH=rv64                  # run rve/assets/linux64/Image with the GUI (or: make lnx64)
+make linuxn64                       # run it headless on the terminal
+make config-save64                  # copy the container's kernel .config back to configs/rv64/kernel_config
+```
+
+Outputs land in `rve/assets/linux64/`: `Image` (OpenSBI padded to 2 MiB + kernel; what `rve64 -b` loads),
+`fw_jump.bin` and `kernel-Image`. The rv32 and rv64 builds use separate Buildroot output directories
+(`output/` and `output-rv64/`), so both can live in the same container.
+
+| | rv32 (default) | rv64 (`ARCH=rv64`) |
+|---|---|---|
+| ISA / ABI | rv32im, ilp32, soft-float | rv64imafd, lp64d (no C: rve has no compressed instructions) |
+| MMU | none (M-mode nommu) | Sv39, S-mode kernel |
+| Firmware | none | OpenSBI 1.3 `generic` (fw_jump) |
+| libc | uClibc, static, flat binaries | musl, ELF |
+| Device tree | `dts/sixtyfourmb.dts` | `dts/rve64.dts` (`make -C dts rv64` regenerates `rve/include/default_rv64_dtc.h`) |
+| Configs | `configs/{buildroot,kernel,busybox,uclibc}_config` | `configs/rv64/{buildroot_defconfig,kernel_config}` |
+
+The Docker base image is pinned to Ubuntu 24.04: newer releases ship GCC 15, which breaks the host tools this
+Buildroot version compiles.
+
 **Run Linux directly (downloads a pre-built image):**
 ```sh
 make linux    # download image and run with GUI

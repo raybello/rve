@@ -4,6 +4,10 @@ OUTPUT_DIR = $(ROOT_DIR)/rve/assets/linux
 IMAGE=rve-linux
 CONTAINER_NAME=rve-linux-build
 
+# ARCH=rv32 (default): nommu RV32 kernel.  ARCH=rv64: Sv39 RV64 kernel + OpenSBI
+# (built into rve/assets/linux64/ and run with rve64).  Example: make build ARCH=rv64
+ARCH ?= rv32
+
 all:
 	make -C rve
 
@@ -43,7 +47,17 @@ linuxn:
 	make -C rve linuxn
 
 lnx:
+ifeq ($(ARCH),rv64)
+	make -C rve lnx64
+else
 	make -C rve lnx
+endif
+
+lnx64:
+	make -C rve lnx64
+
+linuxn64:
+	make -C rve linuxn64
 
 web:
 	make -C rve web
@@ -70,8 +84,16 @@ container:
 
 # Copy configs and build inside the running container (incremental)
 build:
-	docker exec $(CONTAINER_NAME) make -f docker/container.mk build
+	docker exec $(CONTAINER_NAME) make -f docker/container.mk build ARCH=$(ARCH)
+ifeq ($(ARCH),rv64)
+	make -C rve lnx64
+else
 	make -C rve lnx
+endif
+
+# Save the rv64 kernel .config from the container back into configs/rv64/kernel_config
+config-save64:
+	docker exec $(CONTAINER_NAME) make -f docker/container.mk config-save64
 
 # Stop and remove the container (next 'make container' starts fresh)
 stop:

@@ -97,12 +97,14 @@ const u32 CSR_NET_RX_BUF_READY        = 0x0c3; // Write = signal RX buffer is re
 #define MISA_MXL 2
 #define MSTATUS_XL_FIXED  ((u64)0xA << 32)  // SXL[35:34]=2, UXL[33:32]=2
 #define SSTATUS_XL_FIXED  ((u64)0x2 << 32)  // UXL[33:32]=2
+#define MSTATUS_SD_BIT    ((u64)1 << 63)    // summary dirty: set when FS==3 (computed on read)
 #define XREG_FMT  "%016llx"
 #define XREG_CAST unsigned long long
 #else
 #define MISA_MXL 1
 #define MSTATUS_XL_FIXED  0
 #define SSTATUS_XL_FIXED  0
+#define MSTATUS_SD_BIT    0
 #define XREG_FMT  "%08x"
 #define XREG_CAST unsigned int
 #endif
@@ -287,6 +289,8 @@ public:
 
     // CSR Functions
     bool hasCsrAccessPrivilege(u32 addr);
+    void fpStateDirty();
+    bool csrImplemented(u32 addr); // RV64: unimplemented CSRs raise illegal-instruction (M/S firmware probes them)
     xlen_t readCsrRaw(u32 address);
     void writeCsrRaw(u32 address, xlen_t value);
     xlen_t getCsr(u32 address, ins_ret *ret);
