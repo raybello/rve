@@ -1,0 +1,2 @@
+# Tests intentionally skipped by scripts/run_isa.sh, one name per line followed by
+# an optional reason. This list must stay empty for the rv32/rv64 u{i,m,a,f,d} suites.

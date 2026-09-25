@@ -39,8 +39,9 @@ int loadBin(const char *path, uint64_t path_len, uint8_t *data, uint64_t data_le
 
 // Load an ELF32/ELF64 executable by copying its PT_LOAD segments into RAM.
 // Physical addresses at/above RAM_BASE (0x80000000) map to data[paddr - RAM_BASE].
-// If entry is non-null it receives e_entry.
-int loadElf(const char *path, uint64_t path_len, uint8_t *data, uint64_t data_len, uint64_t *entry)
+// If entry is non-null it receives e_entry; if tohost is non-null it receives the
+// address of the "tohost" symbol (riscv-tests HTIF exit mailbox), or 0 if absent.
+int loadElf(const char *path, uint64_t path_len, uint8_t *data, uint64_t data_len, uint64_t *entry, uint64_t *tohost)
 {
     (void)path_len;
     const uint64_t RAM_BASE = 0x80000000ull;
@@ -119,6 +120,71 @@ int loadElf(const char *path, uint64_t path_len, uint8_t *data, uint64_t data_le
 
     if (entry)
         *entry = e_entry;
+
+    if (tohost)
+    {
+        *tohost = 0;
+        uint64_t e_shoff;
+        uint32_t e_shnum, e_shentsize;
+        if (is64)
+        {
+            Elf64_Ehdr eh; memcpy(&eh, img.data(), sizeof(eh));
+            e_shoff = eh.e_shoff; e_shnum = eh.e_shnum; e_shentsize = eh.e_shentsize;
+        }
+        else
+        {
+            Elf32_Ehdr eh; memcpy(&eh, img.data(), sizeof(eh));
+            e_shoff = eh.e_shoff; e_shnum = eh.e_shnum; e_shentsize = eh.e_shentsize;
+        }
+        auto shdr = [&](uint32_t idx, uint32_t &type, uint64_t &off, uint64_t &size, uint32_t &link, uint64_t &entsize) {
+            uint64_t o = e_shoff + (uint64_t)idx * e_shentsize;
+            if (is64)
+            {
+                if (o + sizeof(Elf64_Shdr) > img.size()) return false;
+                Elf64_Shdr sh; memcpy(&sh, img.data() + o, sizeof(sh));
+                type = sh.sh_type; off = sh.sh_offset; size = sh.sh_size; link = sh.sh_link; entsize = sh.sh_entsize;
+            }
+            else
+            {
+                if (o + sizeof(Elf32_Shdr) > img.size()) return false;
+                Elf32_Shdr sh; memcpy(&sh, img.data() + o, sizeof(sh));
+                type = sh.sh_type; off = sh.sh_offset; size = sh.sh_size; link = sh.sh_link; entsize = sh.sh_entsize;
+            }
+            return true;
+        };
+        for (uint32_t i = 0; i < e_shnum; i++)
+        {
+            uint32_t type, link; uint64_t off, size, entsize;
+            if (!shdr(i, type, off, size, link, entsize) || type != SHT_SYMTAB || entsize == 0)
+                continue;
+            uint32_t st_type, st_link; uint64_t st_off, st_size, st_entsize;
+            if (!shdr(link, st_type, st_off, st_size, st_link, st_entsize))
+                continue;
+            for (uint64_t k = 0; k < size / entsize; k++)
+            {
+                uint64_t so = off + k * entsize;
+                uint32_t name; uint64_t value;
+                if (is64)
+                {
+                    if (so + sizeof(Elf64_Sym) > img.size()) break;
+                    Elf64_Sym sym; memcpy(&sym, img.data() + so, sizeof(sym));
+                    name = sym.st_name; value = sym.st_value;
+                }
+                else
+                {
+                    if (so + sizeof(Elf32_Sym) > img.size()) break;
+                    Elf32_Sym sym; memcpy(&sym, img.data() + so, sizeof(sym));
+                    name = sym.st_name; value = sym.st_value;
+                }
+                if (st_off + name + 7 <= img.size() &&
+                    strncmp((const char *)img.data() + st_off + name, "tohost", 7) == 0)
+                {
+                    *tohost = value;
+                    return 0;
+                }
+            }
+        }
+    }
     return 0;
 }
 

@@ -5,11 +5,15 @@
 BIN=$1
 DIR=$2
 FILTER=${3:-.}
-pass=0; fail=0; total=0; failed=""
+SKIPFILE=${SKIPFILE:-$(dirname "$0")/isa_skip.txt}
+pass=0; fail=0; total=0; skipped=0; failed=""
 for t in "$DIR"/*; do
   case "$t" in *.dump) continue;; esac
   n=$(basename "$t")
   echo "$n" | grep -Eq "$FILTER" || continue
+  if [ -f "$SKIPFILE" ] && grep -Eq "^$n([[:space:]]|\$)" "$SKIPFILE"; then
+    skipped=$((skipped+1)); echo "SKIP  $n"; continue
+  fi
   total=$((total+1))
   "$BIN" -n -t -e "$t" >/tmp/rve_isa_out.$$ 2>&1
   rc=$?
@@ -22,5 +26,5 @@ for t in "$DIR"/*; do
 done
 rm -f /tmp/rve_isa_out.$$
 echo "----------------------------------------"
-echo "$pass/$total passed, $fail failed"
+echo "$pass/$total passed, $fail failed, $skipped skipped"
 [ $fail -eq 0 ] || { echo "failed:$failed"; exit 1; }

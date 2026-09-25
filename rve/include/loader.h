@@ -38,7 +38,7 @@ int loadLinuxImage(const char *path, uint64_t path_len, uint8_t *data, uint64_t 
 // - data: A pointer to a uint8_t array where the contents of the ELF file will be stored.
 // - data_len: An unsigned 64-bit integer defining the size of the data buffer provided.
 // https : // stackoverflow.com/questions/13908276/loading-elf-file-in-c-in-user-space
-int loadElf(const char *path, uint64_t path_len, uint8_t *data, uint64_t data_len, uint64_t *entry = nullptr);
+int loadElf(const char *path, uint64_t path_len, uint8_t *data, uint64_t data_len, uint64_t *entry = nullptr, uint64_t *tohost = nullptr);
 
 // Function to load a binary file from the specified file path into the provided memory buffer.
 // Parameters:

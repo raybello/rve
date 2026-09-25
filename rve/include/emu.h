@@ -116,6 +116,9 @@ public:
     bool test_mode = false;
     bool test_done = false;
     uint64_t test_result = 0;
+    // riscv-tests HTIF exit mailbox ("tohost" symbol): a non-zero write ends the test,
+    // 1 = pass, otherwise (failing test number << 1) | 1.
+    uint64_t tohost_addr = 0;
 
     // Clock frequency
     int clk_freq_sel = -1; // Hertz

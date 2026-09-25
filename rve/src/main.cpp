@@ -23,6 +23,8 @@ static int runHeadless(int argc, char *argv[])
             elf_file = argv[++i];
         else if (strcmp(argv[i], "-t") == 0)
             emu.test_mode = true;
+        else if (strcmp(argv[i], "-s") == 0)
+            emu.debugMode = true; // trace every instruction
         else if (strcmp(argv[i], "-c") == 0 && i + 1 < argc)
             max_instr = strtoull(argv[++i], nullptr, 0);
     }

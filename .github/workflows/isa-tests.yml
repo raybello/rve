@@ -1,0 +1,39 @@
+name: ISA tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  isa:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies and RISC-V toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ make libsdl2-dev libgl1-mesa-dev gcc-riscv64-unknown-elf
+
+      # The checked-in binaries are what normally run; rebuilding them from source
+      # keeps the corpus honest and catches toolchain/test drift.
+      - name: Rebuild rv64 ISA tests from source
+        run: |
+          scripts/build_isa64.sh /tmp/isa-rv64
+          scripts/build_isa64.sh /tmp/isa-rv64-v --virtual
+
+      - name: RV32 ISA tests (rv32u{i,m,a,f,d})
+        run: make -C rve isas32
+
+      - name: RV64 ISA tests, physical (rv64u{i,m,a,f,d}-p-*)
+        run: make -C rve isas64
+
+      - name: RV64 ISA tests, Sv39 virtual memory (rv64u{i,m,a,f,d}-v-*)
+        run: make -C rve isas64-v
+
+      - name: RV64 ISA tests, freshly built from source
+        run: |
+          scripts/run_isa.sh rve/build64/rve64 /tmp/isa-rv64
+          scripts/run_isa.sh rve/build64/rve64 /tmp/isa-rv64-v

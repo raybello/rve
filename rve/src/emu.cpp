@@ -1711,7 +1711,8 @@ void Emulator::initializeElf(const char *path)
     memset(memory, 0, MEM_SIZE);
     // Load ELF image
     uint64_t entry = 0x80000000u;
-    if (loadElf(path, strlen(path) + 1, memory, MEM_SIZE, &entry) != 0)
+    tohost_addr = 0;
+    if (loadElf(path, strlen(path) + 1, memory, MEM_SIZE, &entry, &tohost_addr) != 0)
         return;
 
     cpu.init(memory, NULL, debugMode);
@@ -1878,4 +1879,16 @@ void Emulator::emulate()
 
     // Advance PC (ret.pc_val defaults to pc+4)
     cpu.pc = ret.pc_val;
+
+    // ISA-test HTIF exit: a non-zero write to `tohost` finishes the test
+    if (test_mode && tohost_addr && !test_done)
+    {
+        u64 v = XLEN == 64 ? cpu.memGetDword(tohost_addr) : cpu.memGetWord(tohost_addr);
+        if (v != 0)
+        {
+            test_done = true;
+            test_result = (v == 1) ? 0 : v;
+            running = false;
+        }
+    }
 }

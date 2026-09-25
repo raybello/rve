@@ -145,13 +145,28 @@ isas32:
 	$(MAKE) XLEN=32 all
 	../scripts/run_isa.sh build/rve $(ISA_TEST_DIR)
 
+# rve's own directed RV64 tests (CSR/satp WARL behaviour), see rve/tests/rv64
+ISA_RV64_RVE_DIR = $(ASSETS_DIR)/isa-test-rv64-rve
+
 isas64:
 	$(MAKE) XLEN=64 all
 	../scripts/run_isa.sh build64/rve64 $(ISA_RV64_DIR)
+	../scripts/run_isa.sh build64/rve64 $(ISA_RV64_RVE_DIR)
+
+# Sv39 virtual-memory (-v-) variants of the rv64 tests
+ISA_RV64_V_DIR = $(ASSETS_DIR)/isa-test-rv64-v
+
+isas64-v:
+	$(MAKE) XLEN=64 all
+	../scripts/run_isa.sh build64/rve64 $(ISA_RV64_V_DIR)
 
 isas: isas32
 
-isas-all: isas32 isas64
+# Serialized on purpose: isas64 and isas64-v share build64/ and MAKEFLAGS enables -j
+isas-all:
+	$(MAKE) -j1 isas32
+	$(MAKE) -j1 isas64
+	$(MAKE) -j1 isas64-v
 
 linux-clean:
 	@echo ============ Cleaning Linux Test ============
@@ -181,4 +196,4 @@ rerun: clean
 	make run
 
 clean:
-	rm -rf $(BUILD_DIR)/*
+	rm -rf build/* build64/*

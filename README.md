@@ -45,9 +45,22 @@ make rerun        # clean, build, and run
 
 **Run ISA tests:**
 ```sh
-make isas         # run all ISA tests (rv32ui/m/a/f/d)
-make isa ISA_TEST=rv32ui-p-add   # run a single test
+make isas         # rv32 u{i,m,a,f,d} tests, headless; prints PASS/FAIL/TIMEOUT per test
+make isas64       # rv64 u{i,m,a,f,d} physical (-p-) tests + rve directed tests (rve/tests/rv64)
+make isas64-v     # rv64 tests under Sv39 virtual memory (-v-)
+make isas-all     # all of the above; exits non-zero on any failure
+make isa ISA_TEST=rv32ui-p-add   # run a single test in the GUI
 ```
+
+**RV64 build:** `make XLEN=64` (in `rve/`) builds `build64/rve64`, a 64-bit RV64IMAFD core with Sv39
+(same source tree as the RV32 `build/rve`). The headless test runner is also usable directly:
+```sh
+rve/build64/rve64 -n -t -e rve/assets/isa-test-rv64/rv64ui-p-add   # exit 0=pass, 1=fail, 2=timeout
+rve/build64/rve64 -n -t -s -e <test>                                # -s traces every instruction
+```
+
+**Compile rv64 ISA tests from source** (optional — pre-built binaries included): `make isa-tests64`
+(needs `riscv64-elf-gcc` from brew or `gcc-riscv64-unknown-elf` from apt).
 
 **Compile rv32imafd ISA tests from source** (optional — pre-built binaries included):
 
@@ -140,7 +153,13 @@ make lnx      # use local assets/linux/Image and run with GUI
 
 ## ISA Test Status
 
-81/81 tests pass (`make isas`).
+| Suite | Result |
+|-------|--------|
+| rv32 u{i,m,a,f,d} + mi/si CSR (`make isas32`) | 81/81 |
+| rv64 u{i,m,a,f,d}-p (`make isas64`) | 109/109 |
+| rv64 u{i,m,a,f,d}-v, Sv39 (`make isas64-v`) | 109/109 |
+
+RV32 detail (`make isas`):
 
 | Test | Description | Status |
 |------|-------------|--------|
