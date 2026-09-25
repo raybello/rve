@@ -15,7 +15,6 @@
 
 CC = emcc
 CXX = em++
-WEB_DIR = web
 EXE = $(WEB_DIR)/index.html
 
 SOURCE_DIR    = src
@@ -27,7 +26,7 @@ DISASM_DIR    = lib/disasm
 
 # Source Files
 SOURCES  = $(SOURCE_DIR)/main.cpp
-SOURCES += $(SOURCE_DIR)/rv32.cpp $(SOURCE_DIR)/emu.cpp $(SOURCE_DIR)/loader.cpp $(SOURCE_DIR)/app.cpp
+SOURCES += $(SOURCE_DIR)/rv32.cpp $(SOURCE_DIR)/emu.cpp $(SOURCE_DIR)/loader.cpp $(SOURCE_DIR)/app.cpp $(SOURCE_DIR)/headless.cpp
 # ImGui Files
 SOURCES += $(IMGUI_DIR)/imgui.cpp $(IMGUI_DIR)/imgui_demo.cpp $(IMGUI_DIR)/imgui_draw.cpp $(IMGUI_DIR)/imgui_tables.cpp $(IMGUI_DIR)/imgui_widgets.cpp
 SOURCES += $(IMGUI_DIR)/backends/imgui_impl_sdl2.cpp $(IMGUI_DIR)/backends/imgui_impl_opengl3.cpp
@@ -44,6 +43,15 @@ CPPFLAGS =
 LDFLAGS =
 EMS =
 
+# XLEN=32 (default) builds web/, XLEN=64 builds web64/ (RV64IMAFD + Sv39 core)
+XLEN ?= 32
+ifeq ($(XLEN),64)
+WEB_DIR ?= web64
+CPPFLAGS += -DXLEN=64
+else
+WEB_DIR ?= web
+endif
+
 ##---------------------------------------------------------------------
 ## EMSCRIPTEN OPTIONS
 ##---------------------------------------------------------------------
@@ -52,6 +60,8 @@ EMS =
 EMS += -s USE_SDL=2
 EMS += -s DISABLE_EXCEPTION_CATCHING=1
 EMS += -DIMGUI_IMPL_OPENGL_ES2
+# The Emulator object (CSR file etc.) lives on the stack; RV64 needs more than the 64 KB default
+LDFLAGS += -s STACK_SIZE=1048576
 LDFLAGS += -s WASM=1 -s ALLOW_MEMORY_GROWTH=1 -s NO_EXIT_RUNTIME=0 -s ASSERTIONS=1 -s ERROR_ON_UNDEFINED_SYMBOLS=0
 
 # Build as single file (binary text encoded in .html file)
@@ -71,7 +81,7 @@ LDFLAGS += -s NO_FILESYSTEM=1
 CPPFLAGS += -DIMGUI_DISABLE_FILE_FUNCTIONS
 endif
 ifeq ($(USE_FILE_SYSTEM), 1)
-LDFLAGS += --no-heap-copy --preload-file $(ASSETS_DIR)@/assets
+LDFLAGS += --no-heap-copy --preload-file $(ASSETS_DIR)@/assets --exclude-file "*/isa-test-rv64*"
 endif
 
 ##---------------------------------------------------------------------
@@ -120,6 +130,31 @@ serve: all
 
 $(EXE): $(OBJS)
 	$(CXX) -o $@ $(OBJS) $(LDFLAGS)
+
+##---------------------------------------------------------------------
+## WASM ISA TEST RUNNER (Node.js)
+## Compiles the emulator core (no GUI) to WebAssembly and runs it under Node so
+## the ISA suites can be executed against the wasm build:
+##   make -f Makefile.emscripten isas-wasm            (RV32)
+##   make -f Makefile.emscripten XLEN=64 isas-wasm    (RV64, -p- tests)
+##---------------------------------------------------------------------
+ISA_JS = $(WEB_DIR)/isa.js
+ISA_OBJS = $(addprefix $(WEB_DIR)/, rv32.o emu.o loader.o headless.o wasm_isa_main.o disasm.o)
+
+$(ISA_JS): $(ISA_OBJS)
+	$(CXX) -o $@ $(ISA_OBJS) -s ENVIRONMENT=node -s NODERAWFS=1 -s EXIT_RUNTIME=1 \
+		-s ALLOW_MEMORY_GROWTH=1 -s DISABLE_EXCEPTION_CATCHING=1 -s ERROR_ON_UNDEFINED_SYMBOLS=0 \
+		-s STACK_SIZE=1048576
+
+isa-wasm: $(ISA_JS)
+
+ISA_TEST_DIR ?= $(ASSETS_DIR)/isa-test
+ifeq ($(XLEN),64)
+ISA_TEST_DIR = $(ASSETS_DIR)/isa-test-rv64
+endif
+
+isas-wasm: $(ISA_JS)
+	../scripts/run_isa.sh "node $(ISA_JS)" $(ISA_TEST_DIR)
 
 clean:
 	rm -rf $(WEB_DIR)

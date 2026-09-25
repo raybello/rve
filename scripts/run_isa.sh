@@ -1,6 +1,7 @@
 #!/bin/sh
 # Run every ISA test in a directory headless and report PASS/FAIL/TIMEOUT.
-# Usage: scripts/run_isa.sh <rve-binary> <test-dir> [name-filter-regex]
+# Usage: scripts/run_isa.sh <rve-binary or command> <test-dir> [name-filter-regex]
+#   e.g. scripts/run_isa.sh "node web/isa.js" rve/assets/isa-test
 # Exit status: 0 if all tests passed, 1 otherwise.
 BIN=$1
 DIR=$2
@@ -15,7 +16,7 @@ for t in "$DIR"/*; do
     skipped=$((skipped+1)); echo "SKIP  $n"; continue
   fi
   total=$((total+1))
-  "$BIN" -n -t -e "$t" >/tmp/rve_isa_out.$$ 2>&1
+  $BIN -n -t -e "$t" >/tmp/rve_isa_out.$$ 2>&1
   rc=$?
   if [ $rc -eq 0 ]; then
     pass=$((pass+1)); echo "PASS  $n"
