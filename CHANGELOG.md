@@ -1,5 +1,12 @@
 # Changelog
 
+## [v2026.09.25.1] - 2026-09-25
+
+- Merge pull request #12 from raybello/web-demo-rv64
+- Fix disassembler showing 'illegal' for rv64: translate the virtual pc before fetching
+- Web demo: switch the emscripten build to RV64 (OpenSBI + Sv39 Linux)
+
+
 ## [v2026.09.25] - 2026-09-25
 
 - Merge pull request #11 from raybello/fix/ci-gha-cache-reserve
