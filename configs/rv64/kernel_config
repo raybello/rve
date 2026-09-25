@@ -499,7 +499,18 @@ CONFIG_LOCK_MM_AND_FIND_VMA=y
 # end of Data Access Monitoring
 # end of Memory Management options
 
-# CONFIG_NET is not set
+CONFIG_NET=y
+
+#
+# Networking support (virtio-net to the in-browser stack)
+#
+CONFIG_PACKET=y
+CONFIG_UNIX=y
+CONFIG_INET=y
+# CONFIG_IPV6 is not set
+CONFIG_NETDEVICES=y
+CONFIG_NET_CORE=y
+CONFIG_VIRTIO_NET=y
 
 #
 # Device Drivers

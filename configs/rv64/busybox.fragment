@@ -2,3 +2,13 @@
 # CONFIG_TC is not set
 # awk math functions (sqrt, sin, ...): handy for exercising the FPU from the shell
 CONFIG_FEATURE_AWK_LIBM=y
+# networking (virtio-net + the emulator's DHCP/DNS/HTTP userspace stack)
+CONFIG_UDHCPC=y
+# CONFIG_FEATURE_UDHCPC_ARPING is not set
+CONFIG_IFCONFIG=y
+CONFIG_ROUTE=y
+CONFIG_IP=y
+CONFIG_PING=y
+CONFIG_WGET=y
+CONFIG_NSLOOKUP=y
+CONFIG_NC=y

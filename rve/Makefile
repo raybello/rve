@@ -219,6 +219,9 @@ net-test:
 	$(CXX) $(CXXFLAGS) -I$(INCLUDE_DIR) -o $(BUILD_DIR)/virtio_net_test \
 		$(SOURCE_DIR)/virtio_net.cpp $(SOURCE_DIR)/plic.cpp tests/virtio_net_test.cpp
 	./$(BUILD_DIR)/virtio_net_test
+	$(CXX) $(CXXFLAGS) -I$(INCLUDE_DIR) -o $(BUILD_DIR)/usernet_test \
+		$(SOURCE_DIR)/usernet.cpp tests/usernet_test.cpp
+	./$(BUILD_DIR)/usernet_test
 
 clean:
 	rm -rf build/* build64/*
