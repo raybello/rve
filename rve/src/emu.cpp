@@ -107,6 +107,19 @@ static inline void freg_write_d(RV32 &cpu, u32 rd, double d)
     cpu.freg[rd] = bits;
 }
 
+// RISC-V arithmetic results that are NaN must be the canonical NaN (positive quiet NaN).
+// x86 SSE produces the "default NaN" with the sign bit set, so canonicalize explicitly.
+static inline void freg_write_s_canon(RV32 &cpu, u32 rd, float f)
+{
+    if (std::isnan(f)) cpu.freg[rd] = 0xFFFFFFFF7FC00000ULL;
+    else freg_write_s(cpu, rd, f);
+}
+static inline void freg_write_d_canon(RV32 &cpu, u32 rd, double d)
+{
+    if (std::isnan(d)) cpu.freg[rd] = 0x7FF8000000000000ULL;
+    else freg_write_d(cpu, rd, d);
+}
+
 // Read single-precision float from freg. If not NaN-boxed, return canonical qNaN.
 static inline float freg_read_s(RV32 &cpu, u32 rs)
 {
@@ -897,31 +910,31 @@ imp(fsd, FormatS, { // rv32d
 imp(fadd_s, FormatR, { // rv32f
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_s(cpu, ins.rd, freg_read_s(cpu, ins.rs1) + freg_read_s(cpu, ins.rs2));
+    freg_write_s_canon(cpu, ins.rd, freg_read_s(cpu, ins.rs1) + freg_read_s(cpu, ins.rs2));
     fp_accum_flags(cpu);
 })
 imp(fsub_s, FormatR, { // rv32f
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_s(cpu, ins.rd, freg_read_s(cpu, ins.rs1) - freg_read_s(cpu, ins.rs2));
+    freg_write_s_canon(cpu, ins.rd, freg_read_s(cpu, ins.rs1) - freg_read_s(cpu, ins.rs2));
     fp_accum_flags(cpu);
 })
 imp(fmul_s, FormatR, { // rv32f
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_s(cpu, ins.rd, freg_read_s(cpu, ins.rs1) * freg_read_s(cpu, ins.rs2));
+    freg_write_s_canon(cpu, ins.rd, freg_read_s(cpu, ins.rs1) * freg_read_s(cpu, ins.rs2));
     fp_accum_flags(cpu);
 })
 imp(fdiv_s, FormatR, { // rv32f
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_s(cpu, ins.rd, freg_read_s(cpu, ins.rs1) / freg_read_s(cpu, ins.rs2));
+    freg_write_s_canon(cpu, ins.rd, freg_read_s(cpu, ins.rs1) / freg_read_s(cpu, ins.rs2));
     fp_accum_flags(cpu);
 })
 imp(fsqrt_s, FormatR, { // rv32f
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_s(cpu, ins.rd, std::sqrt(freg_read_s(cpu, ins.rs1)));
+    freg_write_s_canon(cpu, ins.rd, std::sqrt(freg_read_s(cpu, ins.rs1)));
     fp_accum_flags(cpu);
 })
 
@@ -929,31 +942,31 @@ imp(fsqrt_s, FormatR, { // rv32f
 imp(fadd_d, FormatR, { // rv32d
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_d(cpu, ins.rd, freg_read_d(cpu, ins.rs1) + freg_read_d(cpu, ins.rs2));
+    freg_write_d_canon(cpu, ins.rd, freg_read_d(cpu, ins.rs1) + freg_read_d(cpu, ins.rs2));
     fp_accum_flags(cpu);
 })
 imp(fsub_d, FormatR, { // rv32d
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_d(cpu, ins.rd, freg_read_d(cpu, ins.rs1) - freg_read_d(cpu, ins.rs2));
+    freg_write_d_canon(cpu, ins.rd, freg_read_d(cpu, ins.rs1) - freg_read_d(cpu, ins.rs2));
     fp_accum_flags(cpu);
 })
 imp(fmul_d, FormatR, { // rv32d
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_d(cpu, ins.rd, freg_read_d(cpu, ins.rs1) * freg_read_d(cpu, ins.rs2));
+    freg_write_d_canon(cpu, ins.rd, freg_read_d(cpu, ins.rs1) * freg_read_d(cpu, ins.rs2));
     fp_accum_flags(cpu);
 })
 imp(fdiv_d, FormatR, { // rv32d
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_d(cpu, ins.rd, freg_read_d(cpu, ins.rs1) / freg_read_d(cpu, ins.rs2));
+    freg_write_d_canon(cpu, ins.rd, freg_read_d(cpu, ins.rs1) / freg_read_d(cpu, ins.rs2));
     fp_accum_flags(cpu);
 })
 imp(fsqrt_d, FormatR, { // rv32d
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_d(cpu, ins.rd, std::sqrt(freg_read_d(cpu, ins.rs1)));
+    freg_write_d_canon(cpu, ins.rd, std::sqrt(freg_read_d(cpu, ins.rs1)));
     fp_accum_flags(cpu);
 })
 
@@ -961,25 +974,25 @@ imp(fsqrt_d, FormatR, { // rv32d
 imp(fmadd_s, FormatR, { // rv32f: rd = rs1*rs2 + rs3
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_s(cpu, ins.rd, std::fma(freg_read_s(cpu, ins.rs1), freg_read_s(cpu, ins.rs2), freg_read_s(cpu, ins.rs3)));
+    freg_write_s_canon(cpu, ins.rd, std::fma(freg_read_s(cpu, ins.rs1), freg_read_s(cpu, ins.rs2), freg_read_s(cpu, ins.rs3)));
     fp_accum_flags(cpu);
 })
 imp(fmsub_s, FormatR, { // rv32f: rd = rs1*rs2 - rs3
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_s(cpu, ins.rd, std::fma(freg_read_s(cpu, ins.rs1), freg_read_s(cpu, ins.rs2), -freg_read_s(cpu, ins.rs3)));
+    freg_write_s_canon(cpu, ins.rd, std::fma(freg_read_s(cpu, ins.rs1), freg_read_s(cpu, ins.rs2), -freg_read_s(cpu, ins.rs3)));
     fp_accum_flags(cpu);
 })
 imp(fnmsub_s, FormatR, { // rv32f: rd = -(rs1*rs2) + rs3
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_s(cpu, ins.rd, std::fma(-freg_read_s(cpu, ins.rs1), freg_read_s(cpu, ins.rs2), freg_read_s(cpu, ins.rs3)));
+    freg_write_s_canon(cpu, ins.rd, std::fma(-freg_read_s(cpu, ins.rs1), freg_read_s(cpu, ins.rs2), freg_read_s(cpu, ins.rs3)));
     fp_accum_flags(cpu);
 })
 imp(fnmadd_s, FormatR, { // rv32f: rd = -(rs1*rs2) - rs3
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_s(cpu, ins.rd, std::fma(-freg_read_s(cpu, ins.rs1), freg_read_s(cpu, ins.rs2), -freg_read_s(cpu, ins.rs3)));
+    freg_write_s_canon(cpu, ins.rd, std::fma(-freg_read_s(cpu, ins.rs1), freg_read_s(cpu, ins.rs2), -freg_read_s(cpu, ins.rs3)));
     fp_accum_flags(cpu);
 })
 
@@ -987,25 +1000,25 @@ imp(fnmadd_s, FormatR, { // rv32f: rd = -(rs1*rs2) - rs3
 imp(fmadd_d, FormatR, { // rv32d: rd = rs1*rs2 + rs3
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_d(cpu, ins.rd, std::fma(freg_read_d(cpu, ins.rs1), freg_read_d(cpu, ins.rs2), freg_read_d(cpu, ins.rs3)));
+    freg_write_d_canon(cpu, ins.rd, std::fma(freg_read_d(cpu, ins.rs1), freg_read_d(cpu, ins.rs2), freg_read_d(cpu, ins.rs3)));
     fp_accum_flags(cpu);
 })
 imp(fmsub_d, FormatR, { // rv32d: rd = rs1*rs2 - rs3
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_d(cpu, ins.rd, std::fma(freg_read_d(cpu, ins.rs1), freg_read_d(cpu, ins.rs2), -freg_read_d(cpu, ins.rs3)));
+    freg_write_d_canon(cpu, ins.rd, std::fma(freg_read_d(cpu, ins.rs1), freg_read_d(cpu, ins.rs2), -freg_read_d(cpu, ins.rs3)));
     fp_accum_flags(cpu);
 })
 imp(fnmsub_d, FormatR, { // rv32d: rd = -(rs1*rs2) + rs3
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_d(cpu, ins.rd, std::fma(-freg_read_d(cpu, ins.rs1), freg_read_d(cpu, ins.rs2), freg_read_d(cpu, ins.rs3)));
+    freg_write_d_canon(cpu, ins.rd, std::fma(-freg_read_d(cpu, ins.rs1), freg_read_d(cpu, ins.rs2), freg_read_d(cpu, ins.rs3)));
     fp_accum_flags(cpu);
 })
 imp(fnmadd_d, FormatR, { // rv32d: rd = -(rs1*rs2) - rs3
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_d(cpu, ins.rd, std::fma(-freg_read_d(cpu, ins.rs1), freg_read_d(cpu, ins.rs2), -freg_read_d(cpu, ins.rs3)));
+    freg_write_d_canon(cpu, ins.rd, std::fma(-freg_read_d(cpu, ins.rs1), freg_read_d(cpu, ins.rs2), -freg_read_d(cpu, ins.rs3)));
     fp_accum_flags(cpu);
 })
 
