@@ -283,3 +283,118 @@ RV32 detail (`make isas`):
 | rv32um-p-mulhu | Integer multiply high unsigned (MULHU) | PASS |
 | rv32um-p-rem | Integer remainder signed (REM) | PASS |
 | rv32um-p-remu | Integer remainder unsigned (REMU) | PASS |
+
+RV64 detail (`make isas64`; the same tests also run under Sv39 as `rv64*-v-*` via `make isas64-v`, and CI rebuilds them from source in `isa-tests.yml`):
+
+| Test | Description | Status |
+|------|-------------|--------|
+| rv64ua-p-amoadd\_d | Atomic AMO: ADD doubleword | PASS |
+| rv64ua-p-amoadd\_w | Atomic AMO: ADD word | PASS |
+| rv64ua-p-amoand\_d | Atomic AMO: AND doubleword | PASS |
+| rv64ua-p-amoand\_w | Atomic AMO: AND word | PASS |
+| rv64ua-p-amomax\_d | Atomic AMO: signed MAX doubleword | PASS |
+| rv64ua-p-amomax\_w | Atomic AMO: signed MAX word | PASS |
+| rv64ua-p-amomaxu\_d | Atomic AMO: unsigned MAXU doubleword | PASS |
+| rv64ua-p-amomaxu\_w | Atomic AMO: unsigned MAXU word | PASS |
+| rv64ua-p-amomin\_d | Atomic AMO: signed MIN doubleword | PASS |
+| rv64ua-p-amomin\_w | Atomic AMO: signed MIN word | PASS |
+| rv64ua-p-amominu\_d | Atomic AMO: unsigned MINU doubleword | PASS |
+| rv64ua-p-amominu\_w | Atomic AMO: unsigned MINU word | PASS |
+| rv64ua-p-amoor\_d | Atomic AMO: OR doubleword | PASS |
+| rv64ua-p-amoor\_w | Atomic AMO: OR word | PASS |
+| rv64ua-p-amoswap\_d | Atomic AMO: SWAP doubleword | PASS |
+| rv64ua-p-amoswap\_w | Atomic AMO: SWAP word | PASS |
+| rv64ua-p-amoxor\_d | Atomic AMO: XOR doubleword | PASS |
+| rv64ua-p-amoxor\_w | Atomic AMO: XOR word | PASS |
+| rv64ua-p-lrsc | Atomic LR/SC (load-reserved / store-conditional) | PASS |
+| rv64ud-p-fadd | Double-precision FP add/sub | PASS |
+| rv64ud-p-fclass | Double-precision fclass (classify NaN/Inf/zero/normal) | PASS |
+| rv64ud-p-fcmp | Double-precision FP compare (feq/flt/fle) | PASS |
+| rv64ud-p-fcvt | Double-precision FP ↔ double conversions (fcvt.s.d, fcvt.d.s, NaN canonicalization) | PASS |
+| rv64ud-p-fcvt\_w | Double-precision FP ↔ integer conversions (fcvt.w/wu/l/lu.d) | PASS |
+| rv64ud-p-fdiv | Double-precision FP divide and sqrt | PASS |
+| rv64ud-p-fmadd | Double-precision fused multiply-add (fmadd/fmsub/fnmadd/fnmsub) | PASS |
+| rv64ud-p-fmin | Double-precision fmin/fmax | PASS |
+| rv64ud-p-ldst | Double-precision FP load/store (fld/fsd) | PASS |
+| rv64ud-p-move | FP ↔ integer register moves (fmv.x.d, fmv.d.x) | PASS |
+| rv64ud-p-recoding | Double-precision NaN/subnormal recoding and NaN-boxing | PASS |
+| rv64ud-p-structural | Double-precision FP structural hazards | PASS |
+| rv64uf-p-fadd | Single-precision FP add/sub | PASS |
+| rv64uf-p-fclass | Single-precision fclass | PASS |
+| rv64uf-p-fcmp | Single-precision FP compare (feq/flt/fle) | PASS |
+| rv64uf-p-fcvt | Single-precision FP ↔ float conversions | PASS |
+| rv64uf-p-fcvt\_w | Single-precision FP ↔ integer conversions (fcvt.w/wu/l/lu.s) | PASS |
+| rv64uf-p-fdiv | Single-precision FP divide and sqrt | PASS |
+| rv64uf-p-fmadd | Single-precision fused multiply-add | PASS |
+| rv64uf-p-fmin | Single-precision fmin/fmax | PASS |
+| rv64uf-p-ldst | Single-precision FP load/store (flw/fsw) | PASS |
+| rv64uf-p-move | FP ↔ integer register moves (fmv.x.w, fmv.w.x) | PASS |
+| rv64uf-p-recoding | Single-precision NaN/subnormal recoding and NaN-boxing | PASS |
+| rv64ui-p-add | Integer ADD | PASS |
+| rv64ui-p-addi | Integer ADDI (add immediate) | PASS |
+| rv64ui-p-addiw | Add immediate word, sign-extended (ADDIW) | PASS |
+| rv64ui-p-addw | Integer ADD word, sign-extended (ADDW) | PASS |
+| rv64ui-p-and | Integer AND | PASS |
+| rv64ui-p-andi | Integer ANDI (and immediate) | PASS |
+| rv64ui-p-auipc | Add upper immediate to PC (AUIPC) | PASS |
+| rv64ui-p-beq | Branch if equal (BEQ) | PASS |
+| rv64ui-p-bge | Branch if ≥ signed (BGE) | PASS |
+| rv64ui-p-bgeu | Branch if ≥ unsigned (BGEU) | PASS |
+| rv64ui-p-blt | Branch if < signed (BLT) | PASS |
+| rv64ui-p-bltu | Branch if < unsigned (BLTU) | PASS |
+| rv64ui-p-bne | Branch if not equal (BNE) | PASS |
+| rv64ui-p-fence\_i | Instruction fence (FENCE.I) | PASS |
+| rv64ui-p-jal | Jump and link (JAL) | PASS |
+| rv64ui-p-jalr | Jump and link register (JALR) | PASS |
+| rv64ui-p-lb | Load byte signed (LB) | PASS |
+| rv64ui-p-lbu | Load byte unsigned (LBU) | PASS |
+| rv64ui-p-ld | Load doubleword (LD) | PASS |
+| rv64ui-p-ld\_st | Back-to-back load/store doubleword hazards | PASS |
+| rv64ui-p-lh | Load halfword signed (LH) | PASS |
+| rv64ui-p-lhu | Load halfword unsigned (LHU) | PASS |
+| rv64ui-p-lui | Load upper immediate (LUI) | PASS |
+| rv64ui-p-lw | Load word (LW) | PASS |
+| rv64ui-p-lwu | Load word unsigned (LWU) | PASS |
+| rv64ui-p-ma\_data | Misaligned data loads/stores (handled or trapped) | PASS |
+| rv64ui-p-or | Integer OR | PASS |
+| rv64ui-p-ori | Integer ORI (or immediate) | PASS |
+| rv64ui-p-sb | Store byte (SB) | PASS |
+| rv64ui-p-sd | Store doubleword (SD) | PASS |
+| rv64ui-p-sh | Store halfword (SH) | PASS |
+| rv64ui-p-simple | Minimal smoke test (add, branch, ecall) | PASS |
+| rv64ui-p-sll | Shift left logical (SLL) | PASS |
+| rv64ui-p-slli | Shift left logical immediate (SLLI) | PASS |
+| rv64ui-p-slliw | Shift left logical immediate word (SLLIW) | PASS |
+| rv64ui-p-sllw | Shift left logical word (SLLW) | PASS |
+| rv64ui-p-slt | Set less than signed (SLT) | PASS |
+| rv64ui-p-slti | Set less than immediate signed (SLTI) | PASS |
+| rv64ui-p-sltiu | Set less than immediate unsigned (SLTIU) | PASS |
+| rv64ui-p-sltu | Set less than unsigned (SLTU) | PASS |
+| rv64ui-p-sra | Shift right arithmetic (SRA) | PASS |
+| rv64ui-p-srai | Shift right arithmetic immediate (SRAI) | PASS |
+| rv64ui-p-sraiw | Shift right arithmetic immediate word (SRAIW) | PASS |
+| rv64ui-p-sraw | Shift right arithmetic word (SRAW) | PASS |
+| rv64ui-p-srl | Shift right logical (SRL) | PASS |
+| rv64ui-p-srli | Shift right logical immediate (SRLI) | PASS |
+| rv64ui-p-srliw | Shift right logical immediate word (SRLIW) | PASS |
+| rv64ui-p-srlw | Shift right logical word (SRLW) | PASS |
+| rv64ui-p-st\_ld | Back-to-back store/load doubleword hazards | PASS |
+| rv64ui-p-sub | Integer SUB | PASS |
+| rv64ui-p-subw | Integer SUB word, sign-extended (SUBW) | PASS |
+| rv64ui-p-sw | Store word (SW) | PASS |
+| rv64ui-p-xor | Integer XOR | PASS |
+| rv64ui-p-xori | Integer XORI (xor immediate) | PASS |
+| rv64um-p-div | Integer divide signed (DIV) | PASS |
+| rv64um-p-divu | Integer divide unsigned (DIVU) | PASS |
+| rv64um-p-divuw | Integer divide unsigned word (DIVUW) | PASS |
+| rv64um-p-divw | Integer divide signed word (DIVW) | PASS |
+| rv64um-p-mul | Integer multiply low (MUL) | PASS |
+| rv64um-p-mulh | Integer multiply high signed (MULH) | PASS |
+| rv64um-p-mulhsu | Integer multiply high signed×unsigned (MULHSU) | PASS |
+| rv64um-p-mulhu | Integer multiply high unsigned (MULHU) | PASS |
+| rv64um-p-mulw | Integer multiply word (MULW) | PASS |
+| rv64um-p-rem | Integer remainder signed (REM) | PASS |
+| rv64um-p-remu | Integer remainder unsigned (REMU) | PASS |
+| rv64um-p-remuw | Integer remainder unsigned word (REMUW) | PASS |
+| rv64um-p-remw | Integer remainder signed word (REMW) | PASS |
+| rv64mi-p-csr-warl | rve custom: satp/mstatus WARL behaviour (`rve/tests/rv64`) | PASS |
