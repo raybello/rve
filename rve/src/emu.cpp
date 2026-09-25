@@ -489,17 +489,22 @@ imp(add, FormatR, { // rv32i
     if (cpu.xreg[17] == 93)
     {
         // EXIT CALL
-        u32 status = cpu.xreg[10] >> 1;
-        u32 x10 = cpu.xreg[10];
-
+        if (test_mode)
+        {
+            test_done = true;
+            test_result = cpu.xreg[10];
+            running = false;
+        }
         #ifndef __EMSCRIPTEN__
-        printf("\nECALL EXIT = x10[%x] %d (0x%x)\n", x10, status, status);
-        // exit(status);
-        // running = false;
-        // debugMode = true;
-        // printf("MMU mode: %d, ppn: %x\n", cpu.mmu.mode, cpu.mmu.ppn);
+        else
+        {
+            u32 x10 = (u32)cpu.xreg[10];
+            u32 status = x10 >> 1;
+            printf("\nECALL EXIT = x10[%x] %d (0x%x)\n", x10, status, status);
+        }
         #else
-        printf("Exit called in WebAssembly environment. Ignoring exit.\n");
+        else
+            printf("Exit called in WebAssembly environment. Ignoring exit.\n");
         #endif
     }
 
@@ -1425,11 +1430,14 @@ void Emulator::initialize()
 void Emulator::initializeElf(const char *path)
 {
     initialize();
+    memset(memory, 0, MEM_SIZE);
     // Load ELF image
-    if (loadElf(path, strlen(path) + 1, memory, MEM_SIZE) != 0)
+    uint64_t entry = 0x80000000u;
+    if (loadElf(path, strlen(path) + 1, memory, MEM_SIZE, &entry) != 0)
         return;
 
     cpu.init(memory, NULL, debugMode);
+    cpu.pc = (xlen_t)entry;
     elf_file_path = path;
     ready_to_run = true;
 }

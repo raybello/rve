@@ -19,6 +19,18 @@ isa:
 isas:
 	make -C rve isas
 
+isas32:
+	make -C rve isas32
+
+isas64:
+	make -C rve isas64
+
+isas-all:
+	make -C rve isas-all
+
+isa-tests64:
+	scripts/build_isa64.sh
+
 linux:
 	make -C rve linux
 

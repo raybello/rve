@@ -111,6 +111,12 @@ public:
     // Control
     bool ready_to_run = false;
 
+    // ISA-test mode: an ecall with a7 == 93 (riscv-tests exit) stops the
+    // emulator and records a0 (0 = pass, non-zero = failing test number).
+    bool test_mode = false;
+    bool test_done = false;
+    uint64_t test_result = 0;
+
     // Clock frequency
     int clk_freq_sel = -1; // Hertz
     // int clk_freq_sel = 10; // Hertz

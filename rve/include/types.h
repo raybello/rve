@@ -15,6 +15,20 @@ using s32 = int32_t;
 using s16 = int16_t;
 using s8  = int8_t;
 
+// Register width. Build with -DXLEN=64 for RV64 (default is RV32).
+#ifndef XLEN
+#define XLEN 32
+#endif
+#if XLEN == 64
+using xlen_t  = uint64_t;
+using sxlen_t = int64_t;
+#elif XLEN == 32
+using xlen_t  = uint32_t;
+using sxlen_t = int32_t;
+#else
+#error "XLEN must be 32 or 64"
+#endif
+
 // Clocking options
 enum CLK_SPEED
 {

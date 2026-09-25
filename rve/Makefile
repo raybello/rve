@@ -4,8 +4,16 @@ MAKEFLAGS += -j$(shell nproc 2>/dev/null || sysctl -n hw.logicalcpu)
 CXX = g++
 CC  = gcc
 
+# XLEN=32 (default) builds build/rve, XLEN=64 builds build64/rve64
+XLEN ?= 32
+ifeq ($(XLEN),64)
+BUILD_DIR = build64
+EXE = rve64
+CXXFLAGS += -DXLEN=64
+else
 BUILD_DIR = build
 EXE = rve
+endif
 
 SOURCE_DIR = src
 INCLUDE_DIR = include
@@ -127,8 +135,23 @@ isa: all
 	./$(BUILD_DIR)/$(EXE) $(ISAFLAGS) $(ISA_TEST_DIR)/$(ISA_TEST)
 	@echo =====================================
 
-isas: all
+isas-gui: all
 	@$(foreach test, $(ISA_TEST_FILES), ./$(BUILD_DIR)/$(EXE) $(ISAFLAGS) $(ISA_TEST_DIR)/$(test);)
+
+# Headless ISA regression: prints PASS/FAIL/TIMEOUT per test, exits non-zero on any failure
+ISA_RV64_DIR = $(ASSETS_DIR)/isa-test-rv64
+
+isas32:
+	$(MAKE) XLEN=32 all
+	../scripts/run_isa.sh build/rve $(ISA_TEST_DIR)
+
+isas64:
+	$(MAKE) XLEN=64 all
+	../scripts/run_isa.sh build64/rve64 $(ISA_RV64_DIR)
+
+isas: isas32
+
+isas-all: isas32 isas64
 
 linux-clean:
 	@echo ============ Cleaning Linux Test ============

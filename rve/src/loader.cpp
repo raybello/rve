@@ -37,88 +37,88 @@ int loadBin(const char *path, uint64_t path_len, uint8_t *data, uint64_t data_le
     return loadLinuxImage(path, path_len, data, data_len);
 }
 
-int loadElf(const char *path, uint64_t path_len, uint8_t *data, uint64_t data_len)
+// Load an ELF32/ELF64 executable by copying its PT_LOAD segments into RAM.
+// Physical addresses at/above RAM_BASE (0x80000000) map to data[paddr - RAM_BASE].
+// If entry is non-null it receives e_entry.
+int loadElf(const char *path, uint64_t path_len, uint8_t *data, uint64_t data_len, uint64_t *entry)
 {
+    (void)path_len;
+    const uint64_t RAM_BASE = 0x80000000ull;
 
-    // Open in binary mode
-    uint32_t fd = open(path, O_RDONLY | O_SYNC);
-    if (fd <= 0) {
-        printf("ERRO: Failed to open ELF file\n");
+    std::ifstream file(path, std::ios::binary);
+    if (!file.is_open())
+    {
+        printf("ERRO: Failed to open ELF file: %s\n", path);
         return 1;
     }
-    printf("INFO: %s Opened ELF file: %s\n", __func__, path);
+    std::vector<uint8_t> img((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
-    /* ELF header : at start of file */
-    Elf32_Ehdr eh;
-    if (lseek(fd, 0, SEEK_SET) == -1 || read(fd, &eh, sizeof(eh)) != sizeof(eh))
-    {
-        printf("ERRO: Failed to read ELF header\n");
-        close(fd);
-        return 2;
-    }
-
-    printf("INFO: %s Read %ld bytes of ELF32 Header\n", __func__, sizeof(Elf32_Ehdr));
-
-    if (memcmp(eh.e_ident, ELFMAG, SELFMAG) != 0)
+    if (img.size() < EI_NIDENT || memcmp(img.data(), ELFMAG, SELFMAG) != 0)
     {
         printf("ERRO: ELFMAGIC mismatch!\n");
-        close(fd);
         return 2;
     }
 
-    if (eh.e_ident[EI_CLASS] == ELFCLASS64)
+    bool is64 = img[EI_CLASS] == ELFCLASS64;
+    if (!is64 && img[EI_CLASS] != ELFCLASS32)
     {
-        printf("ERRO: 64b ELF. Currently unsupported...\n");
-        close(fd);
+        printf("ERRO: unknown ELF class\n");
         return 3;
     }
-    else if (eh.e_ident[EI_CLASS] == ELFCLASS32)
+
+    uint64_t e_entry, e_phoff;
+    uint32_t e_phnum, e_phentsize;
+    if (is64)
     {
-        std::vector<Elf32_Shdr> sh_tbl(eh.e_shnum);
-        if (lseek(fd, eh.e_shoff, SEEK_SET) == -1 ||
-            read(fd, sh_tbl.data(), eh.e_shentsize * eh.e_shnum) != eh.e_shentsize * eh.e_shnum)
-        {
-            printf("ERRO: Error reading section headers\n");
-            close(fd);
-            return 4;
-        }
-        printf("INFO: %s Read %ld bytes of section headers\n", __func__, sizeof(eh.e_shentsize * eh.e_shnum));
-
-        std::vector<ElfSection> sections;
-
-        for (const auto &sh : sh_tbl)
-        {
-            if (sh.sh_type == SHT_PROGBITS)
-            {
-                ElfSection section{sh.sh_addr & 0x7FFFFFFF, sh.sh_offset, sh.sh_size};
-                sections.push_back(std::move(section));
-            }
-        }
-
-        for (auto &section : sections)
-        {
-            section.sData.resize(section.size);
-            if (lseek(fd, section.offset, SEEK_SET) == -1 ||
-                read(fd, section.sData.data(), section.size) != section.size)
-            {
-                printf("ERRO: Error reading section data\n");
-                close(fd);
-                return 5;
-            }
-            printf("INFO: %s Read %0d bytes of section data\n", __func__, section.size);
-
-            if (section.addr_real + section.size > data_len)
-            {
-                printf("ERRO: ELF section too big or offset too great\n");
-                close(fd);
-                return 6;
-            }
-            std::copy(section.sData.begin(), section.sData.end(), data + section.addr_real);
-        }
-
-        printf("INFO: %s Loaded ELF file: %s\n", __func__, path);
+        if (img.size() < sizeof(Elf64_Ehdr)) return 2;
+        Elf64_Ehdr eh;
+        memcpy(&eh, img.data(), sizeof(eh));
+        e_entry = eh.e_entry; e_phoff = eh.e_phoff; e_phnum = eh.e_phnum; e_phentsize = eh.e_phentsize;
     }
-    close(fd);
+    else
+    {
+        if (img.size() < sizeof(Elf32_Ehdr)) return 2;
+        Elf32_Ehdr eh;
+        memcpy(&eh, img.data(), sizeof(eh));
+        e_entry = eh.e_entry; e_phoff = eh.e_phoff; e_phnum = eh.e_phnum; e_phentsize = eh.e_phentsize;
+    }
+
+    for (uint32_t i = 0; i < e_phnum; i++)
+    {
+        uint64_t off = e_phoff + (uint64_t)i * e_phentsize;
+        uint32_t p_type;
+        uint64_t p_offset, p_paddr, p_filesz, p_memsz;
+        if (is64)
+        {
+            if (off + sizeof(Elf64_Phdr) > img.size()) return 4;
+            Elf64_Phdr ph;
+            memcpy(&ph, img.data() + off, sizeof(ph));
+            p_type = ph.p_type; p_offset = ph.p_offset; p_paddr = ph.p_paddr;
+            p_filesz = ph.p_filesz; p_memsz = ph.p_memsz;
+        }
+        else
+        {
+            if (off + sizeof(Elf32_Phdr) > img.size()) return 4;
+            Elf32_Phdr ph;
+            memcpy(&ph, img.data() + off, sizeof(ph));
+            p_type = ph.p_type; p_offset = ph.p_offset; p_paddr = ph.p_paddr;
+            p_filesz = ph.p_filesz; p_memsz = ph.p_memsz;
+        }
+        if (p_type != PT_LOAD || p_memsz == 0)
+            continue;
+
+        uint64_t dst = p_paddr >= RAM_BASE ? p_paddr - RAM_BASE : p_paddr;
+        if (dst + p_memsz > data_len || p_offset + p_filesz > img.size())
+        {
+            printf("ERRO: ELF segment too big or offset too great\n");
+            return 6;
+        }
+        memcpy(data + dst, img.data() + p_offset, p_filesz);
+        memset(data + dst + p_filesz, 0, p_memsz - p_filesz);
+    }
+
+    if (entry)
+        *entry = e_entry;
     return 0;
 }
 
