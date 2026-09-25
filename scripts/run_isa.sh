@@ -16,7 +16,7 @@ for t in "$DIR"/*; do
     skipped=$((skipped+1)); echo "SKIP  $n"; continue
   fi
   total=$((total+1))
-  $BIN -n -t -e "$t" >/tmp/rve_isa_out.$$ 2>&1
+  $BIN -n -F -t -e "$t" >/tmp/rve_isa_out.$$ 2>&1
   rc=$?
   if [ $rc -eq 0 ]; then
     pass=$((pass+1)); echo "PASS  $n"

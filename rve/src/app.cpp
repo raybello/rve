@@ -1,4 +1,5 @@
 #include "app.h"
+#include "netsetup.h"
 #include "net.h"
 
 static void HelpMarker(const char *desc)
@@ -239,6 +240,7 @@ int App::initializeEmu(int argc, char *argv[])
     const char *elf_file_name = 0;
     const char *bin_file_name = 0;
     const char *dtb_file_name = 0;
+    bool net_fake = false;
 
     // First pass: standalone flags that consume the next argument.
     // -N <path>  open a Unix socket as server (player 0)
@@ -287,6 +289,9 @@ int App::initializeEmu(int argc, char *argv[])
                     break;
                 case 'n': // consumed by main.cpp; ignore here
                     break;
+                case 'F': // virtio-net on the userspace stack with the fake host (tests)
+                    net_fake = true;
+                    break;
                 default:
                     if (param_continue)
                         param_continue = 0;
@@ -311,6 +316,14 @@ int App::initializeEmu(int argc, char *argv[])
         running = false;
         return 1;
     }
+
+    // Networking: the web build always uses the browser host; native builds opt in with -F.
+#ifdef __EMSCRIPTEN__
+    net_attach_usernet(emu.cpu, false);
+#else
+    if (net_fake)
+        net_attach_usernet(emu.cpu, true);
+#endif
 
     if (elf_file_name)
     {

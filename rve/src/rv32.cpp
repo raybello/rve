@@ -4,6 +4,10 @@
 #include <unistd.h>
 #include <stdlib.h>
 
+// Selected backend (not owned). Global so it survives Emulator::initialize()'s `cpu = RV32()`.
+static NetBackend *g_net_backend = nullptr;
+
+
 
 RV32::RV32(/* args */)
 {
@@ -57,7 +61,9 @@ bool RV32::init(u8 *memory, u8 *dtb, bool debug_mode, u8 *mtd, u32 mtd_size)
     net.netrx = (u8 *)malloc(4096);
 
     plic.reset();
-    setNetBackend(nullptr);
+    vnet.reset();
+    plic_seip = false;
+    setNetBackend(g_net_backend);
 
     rtc0 = 0;
     rtc1 = 0;
@@ -490,6 +496,7 @@ void RV32::handleIrqAndTrap(ins_ret *ret)
 ///////////////////////////////////////
 void RV32::setNetBackend(NetBackend *be)
 {
+    g_net_backend = be;
     GuestMem gm;
     gm.read = [this](uint64_t pa, void *dst, size_t n) {
         if (pa >= 0x80000000u && pa - 0x80000000u + n <= (uint64_t)RV32_MEM_SIZE)
