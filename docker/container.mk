@@ -6,7 +6,7 @@ DTS=dts
 
 WORKDIR=/workspace/project
 OUTPUT=/workspace/output
-JOBS=$(shell nproc)
+JOBS ?= $(shell nproc)
 
 # RVE_ARCH=rv32 (default): nommu RV32 kernel, output/ in the buildroot tree (existing flow)
 # RVE_ARCH=rv64          : Sv39 RV64 kernel + OpenSBI, out-of-tree output-rv64/ so both can coexist

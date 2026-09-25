@@ -26,7 +26,7 @@ DISASM_DIR    = lib/disasm
 
 # Source Files
 SOURCES  = $(SOURCE_DIR)/main.cpp
-SOURCES += $(SOURCE_DIR)/rv32.cpp $(SOURCE_DIR)/emu.cpp $(SOURCE_DIR)/loader.cpp $(SOURCE_DIR)/app.cpp $(SOURCE_DIR)/headless.cpp
+SOURCES += $(SOURCE_DIR)/rv32.cpp $(SOURCE_DIR)/emu.cpp $(SOURCE_DIR)/loader.cpp $(SOURCE_DIR)/app.cpp $(SOURCE_DIR)/net.cpp $(SOURCE_DIR)/headless.cpp
 # ImGui Files
 SOURCES += $(IMGUI_DIR)/imgui.cpp $(IMGUI_DIR)/imgui_demo.cpp $(IMGUI_DIR)/imgui_draw.cpp $(IMGUI_DIR)/imgui_tables.cpp $(IMGUI_DIR)/imgui_widgets.cpp
 SOURCES += $(IMGUI_DIR)/backends/imgui_impl_sdl2.cpp $(IMGUI_DIR)/backends/imgui_impl_opengl3.cpp
@@ -139,7 +139,7 @@ $(EXE): $(OBJS)
 ##   make -f Makefile.emscripten XLEN=64 isas-wasm    (RV64, -p- tests)
 ##---------------------------------------------------------------------
 ISA_JS = $(WEB_DIR)/isa.js
-ISA_OBJS = $(addprefix $(WEB_DIR)/, rv32.o emu.o loader.o headless.o wasm_isa_main.o disasm.o)
+ISA_OBJS = $(addprefix $(WEB_DIR)/, rv32.o emu.o loader.o net.o headless.o wasm_isa_main.o disasm.o)
 
 $(ISA_JS): $(ISA_OBJS)
 	$(CXX) -o $@ $(ISA_OBJS) -s ENVIRONMENT=node -s NODERAWFS=1 -s EXIT_RUNTIME=1 \

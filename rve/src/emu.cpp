@@ -506,22 +506,25 @@ void Emulator::emu_ecall(u32 ins_word, ins_ret *ret, FormatEmpty ins) // system
 {
     if (cpu.xreg[17] == 93)
     {
-        // EXIT CALL
+        // EXIT CALL (syscall 93)
         if (test_mode)
         {
+            // Headless ISA-test runner (-t): record a0 and stop; 0 = pass, else (case << 1) | 1
             test_done = true;
             test_result = cpu.xreg[10];
             running = false;
         }
         else
         {
-            u32 x10 = (u32)cpu.xreg[10];
-            u32 status = x10 >> 1;
-#ifndef __EMSCRIPTEN__
-            printf("\nECALL EXIT = x10[%x] %d (0x%x)\n", x10, status, status);
+            u32 status = (u32)(cpu.xreg[10] >> 1);
+#ifdef RVE_ISA_TEST
+            printf("ECALL EXIT = %d\n", status);
+            exit((int)status);
+#elif !defined(__EMSCRIPTEN__)
+            printf("\nECALL EXIT = x10[%x] status=%d\n", (u32)cpu.xreg[10], status);
 #else
             (void)status;
-            printf("Exit called in WebAssembly environment. Ignoring exit.\n");
+            printf("Exit called in WebAssembly environment. Ignoring.\n");
 #endif
         }
     }

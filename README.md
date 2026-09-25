@@ -1,4 +1,7 @@
 # RVE - RISC-V Emulator
+
+[![CI](https://github.com/raybello/rve/actions/workflows/ci.yml/badge.svg)](https://github.com/raybello/rve/actions/workflows/ci.yml)
+
 Cross platform RISC-V simulator
 
 - Web demo: https://raybello.github.io/rve/demo/
@@ -56,7 +59,7 @@ make isa ISA_TEST=rv32ui-p-add   # run a single test in the GUI
 (same source tree as the RV32 `build/rve`). The headless test runner is also usable directly:
 ```sh
 rve/build64/rve64 -n -t -e rve/assets/isa-test-rv64/rv64ui-p-add   # exit 0=pass, 1=fail, 2=timeout
-rve/build64/rve64 -n -t -s -e <test>                                # -s traces every instruction
+rve/build64/rve64 -n -t -T -e <test>                                # -T traces every instruction
 ```
 
 **Compile rv64 ISA tests from source** (optional — pre-built binaries included): `make isa-tests64`
@@ -182,6 +185,10 @@ make lnx      # use local assets/linux/Image and run with GUI
 <img src="docs/demo.gif" width="1200">
 
 ---
+
+## TODO
+
+- [ ] Enable floating point in the Linux kernel (`CONFIG_FPU`) so userspace programs can use FP instructions without trapping to a software emulation handler
 
 ## ISA Test Status
 

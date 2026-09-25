@@ -33,8 +33,8 @@ ISA_TEST_FILES = $(filter-out %.dump, $(notdir $(wildcard $(ISA_TEST_DIR)/*)))
 $(shell mkdir -p $(BUILD_DIR))
 
 # Source Files
-SOURCES =  $(SOURCE_DIR)/main.cpp 
-SOURCES += $(SOURCE_DIR)/rv32.cpp $(SOURCE_DIR)/emu.cpp $(SOURCE_DIR)/loader.cpp $(SOURCE_DIR)/app.cpp $(SOURCE_DIR)/headless.cpp
+SOURCES =  $(SOURCE_DIR)/main.cpp
+SOURCES += $(SOURCE_DIR)/rv32.cpp $(SOURCE_DIR)/emu.cpp $(SOURCE_DIR)/loader.cpp $(SOURCE_DIR)/app.cpp $(SOURCE_DIR)/net.cpp $(SOURCE_DIR)/headless.cpp
 # ImGui Files
 SOURCES += $(IMGUI_DIR)/imgui.cpp $(IMGUI_DIR)/imgui_demo.cpp $(IMGUI_DIR)/imgui_draw.cpp $(IMGUI_DIR)/imgui_tables.cpp $(IMGUI_DIR)/imgui_widgets.cpp
 SOURCES += $(IMGUI_DIR)/backends/imgui_impl_sdl2.cpp $(IMGUI_DIR)/backends/imgui_impl_opengl3.cpp
@@ -130,31 +130,36 @@ clean_web:
 run: all
 	./$(BUILD_DIR)/$(EXE)
 
-isa: all
+isa:
+	$(MAKE) clean
+	$(MAKE) CXXFLAGS="$(CXXFLAGS) -DRVE_ISA_TEST" $(BUILD_DIR)/$(EXE)
 	@echo ============ $(ISA_TEST) ============
 	./$(BUILD_DIR)/$(EXE) $(ISAFLAGS) $(ISA_TEST_DIR)/$(ISA_TEST)
 	@echo =====================================
 
-isas-gui: all
-	@$(foreach test, $(ISA_TEST_FILES), ./$(BUILD_DIR)/$(EXE) $(ISAFLAGS) $(ISA_TEST_DIR)/$(test);)
+isas-gui:
+	$(MAKE) clean
+	$(MAKE) CXXFLAGS="$(CXXFLAGS) -DRVE_ISA_TEST" $(BUILD_DIR)/$(EXE)
+	@$(foreach test, $(ISA_TEST_FILES), \
+	  echo "=== $(test) ==="; \
+	  ./$(BUILD_DIR)/$(EXE) $(ISAFLAGS) $(ISA_TEST_DIR)/$(test); \
+	)
 
 # Headless ISA regression: prints PASS/FAIL/TIMEOUT per test, exits non-zero on any failure
 ISA_RV64_DIR = $(ASSETS_DIR)/isa-test-rv64
+# rve's own directed RV64 tests (CSR/satp WARL behaviour), see rve/tests/rv64
+ISA_RV64_RVE_DIR = $(ASSETS_DIR)/isa-test-rv64-rve
+# Sv39 virtual-memory (-v-) variants of the rv64 tests
+ISA_RV64_V_DIR = $(ASSETS_DIR)/isa-test-rv64-v
 
 isas32:
 	$(MAKE) XLEN=32 all
 	../scripts/run_isa.sh build/rve $(ISA_TEST_DIR)
 
-# rve's own directed RV64 tests (CSR/satp WARL behaviour), see rve/tests/rv64
-ISA_RV64_RVE_DIR = $(ASSETS_DIR)/isa-test-rv64-rve
-
 isas64:
 	$(MAKE) XLEN=64 all
 	../scripts/run_isa.sh build64/rve64 $(ISA_RV64_DIR)
 	../scripts/run_isa.sh build64/rve64 $(ISA_RV64_RVE_DIR)
-
-# Sv39 virtual-memory (-v-) variants of the rv64 tests
-ISA_RV64_V_DIR = $(ASSETS_DIR)/isa-test-rv64-v
 
 isas64-v:
 	$(MAKE) XLEN=64 all
@@ -206,6 +211,11 @@ lnx: clean
 
 rerun: clean
 	make run
+
+net-test:
+	$(CXX) $(CXXFLAGS) -o $(BUILD_DIR)/net_pair_test \
+		$(SOURCE_DIR)/net.cpp tests/net_pair_test.cpp
+	./$(BUILD_DIR)/net_pair_test
 
 clean:
 	rm -rf build/* build64/*

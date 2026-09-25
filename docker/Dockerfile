@@ -1,6 +1,4 @@
-# Pinned: newer Ubuntu releases ship GCC 15 (C23 by default), which breaks the host tools this
-# Buildroot version builds (host-m4, ...)
-FROM ubuntu:24.04 AS base
+FROM ubuntu:22.04 AS base
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y \

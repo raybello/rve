@@ -1,0 +1,252 @@
+name: CI / Release
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches: [master]
+
+jobs:
+  # ── Tests — run on push and PR open / update, skip on PR merge ──────────────
+
+  test-isa:
+    name: ISA Tests
+    if: github.event_name == 'push' || github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: sudo apt-get update -y && sudo apt-get install -y libsdl2-dev
+
+      - name: Run ISA tests (rv32, rv64, rv64 Sv39)
+        working-directory: rve
+        run: make isas-all
+
+  test-net:
+    name: Net Pair Test
+    if: github.event_name == 'push' || github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: sudo apt-get update -y && sudo apt-get install -y libsdl2-dev
+
+      - name: Run net pair test
+        working-directory: rve
+        run: make net-test
+
+  # ── Linux image build — PR merge only ───────────────────────────────────────
+
+  docker-build:
+    name: Build Linux Image
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: docker
+          file: docker/Dockerfile
+          load: true
+          tags: rve-linux:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ github.sha }}
+          restore-keys: ccache-
+
+      - name: Cache Buildroot downloads
+        uses: actions/cache@v4
+        with:
+          path: .buildroot-dl
+          key: buildroot-dl-${{ hashFiles('configs/buildroot_config') }}
+          restore-keys: buildroot-dl-
+
+      - name: Prepare build directories
+        run: |
+          mkdir -p rve/assets/linux .ccache .buildroot-dl
+          chmod 777 .ccache .buildroot-dl
+
+      - name: Run Buildroot build
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace/project \
+            -v ${{ github.workspace }}/rve/assets/linux:/workspace/output \
+            -v ${{ github.workspace }}/.ccache:/ccache \
+            -v ${{ github.workspace }}/.buildroot-dl:/opt/buildroot/dl \
+            -w /workspace/project \
+            rve-linux:latest \
+            bash -c "mkdir -p /ccache/tmp && chmod -R 777 /ccache && make -f docker/container.mk build"
+
+      - name: Fix artifact ownership
+        run: sudo chown -R "$USER:$USER" rve/assets/linux baremetal hello_linux dts || true
+
+      - name: Stage Linux artifacts
+        run: |
+          mkdir -p dist
+          cp rve/assets/linux/Image   dist/Image
+          cp baremetal/baremetal.elf  dist/baremetal.elf
+          cp hello_linux/hello_linux  dist/hello_linux
+          cp hello_linux/pi           dist/pi
+          cp hello_linux/framebuff    dist/framebuff
+          cp dts/sixtyfourmb.dtb      dist/sixtyfourmb.dtb
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-image-artifacts
+          path: dist/
+          retention-days: 7
+
+  # ── rve emulator — build for all platforms on PR merge ───────────────────────
+
+  build-rve:
+    name: Build rve (${{ matrix.name }})
+    if: github.event.pull_request.merged == true
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-x86_64
+            install: sudo apt-get update -y && sudo apt-get install -y libsdl2-dev
+            binary: rve/build/rve
+            artifact: rve-linux-x86_64
+
+          - os: macos-latest
+            name: macos-arm64
+            install: brew install sdl2
+            binary: rve/build/rve
+            artifact: rve-macos-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: ${{ matrix.install }}
+
+      - name: Build rve
+        working-directory: rve
+        run: make all
+
+      - name: Stage binary
+        shell: bash
+        run: cp ${{ matrix.binary }} ${{ matrix.artifact }}
+
+      - name: Upload rve binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+          retention-days: 7
+
+  # ── Release — create tag, changelog, and upload all artifacts ───────────────
+
+  release:
+    name: Create Release
+    if: github.event.pull_request.merged == true
+    needs: [docker-build, build-rve]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download Linux image artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-image-artifacts
+          path: dist/
+
+      - name: Download rve binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: rve-*
+          merge-multiple: true
+          path: dist/rve/
+
+      - name: Generate release tag
+        id: tag
+        run: |
+          DATE=$(date -u +%Y.%m.%d)
+          COUNT=$(git tag -l "v${DATE}*" | wc -l | tr -d ' ')
+          if [ "$COUNT" -eq 0 ]; then
+            TAG="v${DATE}"
+          else
+            TAG="v${DATE}.${COUNT}"
+          fi
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog entry
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          DATE=$(date -u +%Y-%m-%d)
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          if [ -z "$LAST_TAG" ]; then
+            COMMITS=$(git log --pretty=format:"- %s" | head -50)
+          else
+            COMMITS=$(git log "${LAST_TAG}..HEAD" --pretty=format:"- %s")
+          fi
+
+          printf '%s\n' "$COMMITS" > release_notes.txt
+
+          ENTRY="## [${TAG}] - ${DATE}\n\n${COMMITS}\n"
+          if [ -f CHANGELOG.md ]; then
+            HEAD=$(head -1 CHANGELOG.md)
+            TAIL=$(tail -n +2 CHANGELOG.md)
+            printf '%s\n\n%b\n%s\n' "$HEAD" "$ENTRY" "$TAIL" > CHANGELOG.md
+          else
+            printf '# Changelog\n\n%b\n' "$ENTRY" > CHANGELOG.md
+          fi
+
+      - name: Commit and push CHANGELOG
+        run: |
+          git config user.name "raybello"
+          git config user.email "raymondbello11@gmail.com"
+          git add CHANGELOG.md
+          git diff --cached --quiet || git commit -m "chore: update CHANGELOG for ${{ steps.tag.outputs.tag }} [skip ci]"
+          git push origin master
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Release ${{ steps.tag.outputs.tag }}
+          body_path: release_notes.txt
+          files: |
+            dist/Image
+            dist/baremetal.elf
+            dist/hello_linux
+            dist/pi
+            dist/framebuff
+            dist/sixtyfourmb.dtb
+            dist/rve/rve-linux-x86_64
+            dist/rve/rve-macos-arm64
+

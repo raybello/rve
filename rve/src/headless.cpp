@@ -1,10 +1,17 @@
 #include "stdio.h"
 #include "headless.h"
 #include "emu.h"
+#include "net.h"
 #include <cstring>
 #include <cstdlib>
 
-// Headless emulation loop 
+// Headless emulation loop.
+// Flags:
+//   -b <image>   raw binary image to boot          -e <elf>   load an ELF (ISA tests)
+//   -s <path>    Unix socket, act as server (player 0)
+//   -S <path>    Unix socket, connect as client (player 1)
+//   -t           ISA-test mode: exit 0 = pass, 1 = fail, 2 = timeout;  -c <n> sets the watchdog
+//   -T           trace every instruction;  -x <addr> dump CPU state + memory on exit (test mode)
 // The emulator's captureKeyboardInput() (called from Emulator::initialize()) puts the
 // terminal into raw mode so every keystroke is immediately visible to the guest OS.
 int runHeadless(int argc, char *argv[])
@@ -14,6 +21,8 @@ int runHeadless(int argc, char *argv[])
     const char *bin_file = nullptr;
     const char *elf_file = nullptr;
     uint64_t max_instr = 20000000ull; // ISA-test watchdog
+    const char *net_server = nullptr;
+    const char *net_client = nullptr;
     uint64_t dump_addr = 0;           // -x <addr>: print 64 bytes at this guest address on exit
     for (int i = 1; i < argc; i++)
     {
@@ -23,8 +32,12 @@ int runHeadless(int argc, char *argv[])
             elf_file = argv[++i];
         else if (strcmp(argv[i], "-t") == 0)
             emu.test_mode = true;
-        else if (strcmp(argv[i], "-s") == 0)
+        else if (strcmp(argv[i], "-T") == 0)
             emu.debugMode = true; // trace every instruction
+        else if (strcmp(argv[i], "-s") == 0 && i + 1 < argc)
+            net_server = argv[++i];
+        else if (strcmp(argv[i], "-S") == 0 && i + 1 < argc)
+            net_client = argv[++i];
         else if (strcmp(argv[i], "-x") == 0 && i + 1 < argc)
             dump_addr = strtoull(argv[++i], nullptr, 0);
         else if (strcmp(argv[i], "-c") == 0 && i + 1 < argc)
@@ -36,6 +49,11 @@ int runHeadless(int argc, char *argv[])
         fprintf(stderr, "ERRO: headless mode requires -b <image> or -e <elf>\n");
         return 1;
     }
+
+    if (net_server)
+        net_init(net_server, /*server=*/true);
+    else if (net_client)
+        net_init(net_client, /*server=*/false);
 
     if (elf_file)
         emu.initializeElf(elf_file);
