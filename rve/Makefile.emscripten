@@ -81,7 +81,7 @@ LDFLAGS += -s NO_FILESYSTEM=1
 CPPFLAGS += -DIMGUI_DISABLE_FILE_FUNCTIONS
 endif
 ifeq ($(USE_FILE_SYSTEM), 1)
-LDFLAGS += --no-heap-copy --preload-file $(ASSETS_DIR)@/assets --exclude-file "*/isa-test-rv64*"
+LDFLAGS += --no-heap-copy --preload-file $(ASSETS_DIR)@/assets --exclude-file "*/isa-test-rv64*" --exclude-file "*/linux64*"
 endif
 
 ##---------------------------------------------------------------------

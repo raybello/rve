@@ -1,0 +1,4 @@
+# busybox 1.36's tc applet does not build against 6.8 kernel headers (CBQ was removed)
+# CONFIG_TC is not set
+# awk math functions (sqrt, sin, ...): handy for exercising the FPU from the shell
+CONFIG_FEATURE_AWK_LIBM=y

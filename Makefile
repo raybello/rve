@@ -84,7 +84,7 @@ container:
 
 # Copy configs and build inside the running container (incremental)
 build:
-	docker exec $(CONTAINER_NAME) make -f docker/container.mk build ARCH=$(ARCH)
+	docker exec $(CONTAINER_NAME) make -f docker/container.mk build RVE_ARCH=$(ARCH)
 ifeq ($(ARCH),rv64)
 	make -C rve lnx64
 else

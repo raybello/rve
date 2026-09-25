@@ -8,16 +8,18 @@ WORKDIR=/workspace/project
 OUTPUT=/workspace/output
 JOBS=$(shell nproc)
 
-# ARCH=rv32 (default): nommu RV32 kernel, output/ in the buildroot tree (existing flow)
-# ARCH=rv64          : Sv39 RV64 kernel + OpenSBI, out-of-tree output-rv64/ so both can coexist
-ARCH ?= rv32
+# RVE_ARCH=rv32 (default): nommu RV32 kernel, output/ in the buildroot tree (existing flow)
+# RVE_ARCH=rv64          : Sv39 RV64 kernel + OpenSBI, out-of-tree output-rv64/ so both can coexist
+# NOTE: deliberately not called ARCH: a command-line ARCH= is exported to the nested Buildroot
+# make, where ARCH is Buildroot's own variable (it would rename the toolchain to rv64-buildroot-...).
+RVE_ARCH ?= rv32
 
 BR64_OUT=$(BUILDROOT)/output-rv64
 IMAGE64_DIR=$(WORKDIR)/rve/assets/linux64
 
 .PHONY: build toolchain linux config64 toolchain64 linux64 config-save64
 
-ifeq ($(ARCH),rv64)
+ifeq ($(RVE_ARCH),rv64)
 build: toolchain64 linux64
 else
 build: toolchain linux
