@@ -1,6 +1,9 @@
 #include "emu.h"
 #include "net.h"
 #include "default64mbdtc.h"
+#if XLEN == 64
+#include "default_rv64_dtc.h"
+#endif
 #include <sys/time.h>
 #include <cfenv>
 #include <cmath>
@@ -104,6 +107,19 @@ static inline void freg_write_d(RV32 &cpu, u32 rd, double d)
     cpu.freg[rd] = bits;
 }
 
+// RISC-V arithmetic results that are NaN must be the canonical NaN (positive quiet NaN).
+// x86 SSE produces the "default NaN" with the sign bit set, so canonicalize explicitly.
+static inline void freg_write_s_canon(RV32 &cpu, u32 rd, float f)
+{
+    if (std::isnan(f)) cpu.freg[rd] = 0xFFFFFFFF7FC00000ULL;
+    else freg_write_s(cpu, rd, f);
+}
+static inline void freg_write_d_canon(RV32 &cpu, u32 rd, double d)
+{
+    if (std::isnan(d)) cpu.freg[rd] = 0x7FF8000000000000ULL;
+    else freg_write_d(cpu, rd, d);
+}
+
 // Read single-precision float from freg. If not NaN-boxed, return canonical qNaN.
 static inline float freg_read_s(RV32 &cpu, u32 rs)
 {
@@ -131,16 +147,15 @@ static inline double freg_read_d(RV32 &cpu, u32 rs)
 
 // Load 64-bit double from memory (two consecutive 32-bit words, little-endian).
 // addr must already be a translated physical address.
-static u64 mem_get_double(RV32 &cpu, u32 addr)
+static u64 mem_get_double(RV32 &cpu, xlen_t addr)
 {
-    return (u64)cpu.memGetWord(addr) | ((u64)cpu.memGetWord(addr + 4) << 32);
+    return cpu.memGetDword(addr);
 }
 
 // Store 64-bit double to memory as two 32-bit words (little-endian).
-static void mem_set_double(RV32 &cpu, u32 addr, u64 val)
+static void mem_set_double(RV32 &cpu, xlen_t addr, u64 val)
 {
-    cpu.memSetWord(addr,     (u32)(val & 0xFFFFFFFFu));
-    cpu.memSetWord(addr + 4, (u32)(val >> 32));
+    cpu.memSetDword(addr, val);
 }
 
 // fclass result: one-hot bit per floating-point class (Table 11.2 of RISC-V spec).
@@ -195,12 +210,12 @@ void print_inst(uint64_t pc, uint32_t inst)
 // Instruction Decoding
 ////////////////////////////////////////////////////////////////
 // Function to sign-extend an unsigned integer `x` based on the bit width `b`.
-u32 signExtend(u32 x, u32 b)
+xlen_t signExtend(xlen_t x, u32 b)
 {
     // Calculate the mask `m`. This sets a single bit at position (b - 1),
     // which corresponds to the most significant bit of a signed value with `b` bits.
     // In essence, this is `2^(b-1)`.
-    u32 m = ((u32)1) << (b - 1);
+    xlen_t m = ((xlen_t)1) << (b - 1);
 
     // Return the result of the sign extension:
     // 1. The expression `(x ^ m)` toggles the bit at position (b - 1).
@@ -210,15 +225,18 @@ u32 signExtend(u32 x, u32 b)
     return (x ^ m) - m;
 }
 
+// Sign-extend a 32-bit instruction immediate / word result to XLEN bits.
+#define SEXT32(v) ((xlen_t)(sxlen_t)(int32_t)(v))
+
 FormatB parse_FormatB(u32 word)
 {
     FormatB ret;
     ret.rs1 = (word >> 15) & 0x1f;
     ret.rs2 = (word >> 20) & 0x1f;
-    ret.imm = (word & 0x80000000 ? 0xfffff000 : 0) |
-              ((word << 4) & 0x00000800) |
-              ((word >> 20) & 0x000007e0) |
-              ((word >> 7) & 0x0000001e);
+    ret.imm = SEXT32((word & 0x80000000 ? 0xfffff000 : 0) |
+                     ((word << 4) & 0x00000800) |
+                     ((word >> 20) & 0x000007e0) |
+                     ((word >> 7) & 0x0000001e));
     return ret;
 }
 
@@ -236,8 +254,8 @@ FormatI parse_FormatI(u32 word)
     FormatI ret;
     ret.rd = (word >> 7) & 0x1f;
     ret.rs1 = (word >> 15) & 0x1f;
-    ret.imm = (word & 0x80000000 ? 0xfffff800 : 0) |
-              ((word >> 20) & 0x000007ff);
+    ret.imm = SEXT32((word & 0x80000000 ? 0xfffff800 : 0) |
+                     ((word >> 20) & 0x000007ff));
     return ret;
 }
 
@@ -245,10 +263,10 @@ FormatJ parse_FormatJ(u32 word)
 {
     FormatJ ret;
     ret.rd = (word >> 7) & 0x1f;
-    ret.imm = (word & 0x80000000 ? 0xfff00000 : 0) |
-              (word & 0x000ff000) |
-              ((word & 0x00100000) >> 9) |
-              ((word & 0x7fe00000) >> 20);
+    ret.imm = SEXT32((word & 0x80000000 ? 0xfff00000 : 0) |
+                     (word & 0x000ff000) |
+                     ((word & 0x00100000) >> 9) |
+                     ((word & 0x7fe00000) >> 20));
     return ret;
 }
 
@@ -267,9 +285,9 @@ FormatS parse_FormatS(u32 word)
     FormatS ret;
     ret.rs1 = (word >> 15) & 0x1f;
     ret.rs2 = (word >> 20) & 0x1f;
-    ret.imm = (word & 0x80000000 ? 0xfffff000 : 0) |
-              ((word >> 20) & 0xfe0) |
-              ((word >> 7) & 0x1f);
+    ret.imm = SEXT32((word & 0x80000000 ? 0xfffff000 : 0) |
+                     ((word >> 20) & 0xfe0) |
+                     ((word >> 7) & 0x1f));
     return ret;
 }
 
@@ -277,7 +295,7 @@ FormatU parse_FormatU(u32 word)
 {
     FormatU ret;
     ret.rd = (word >> 7) & 0x1f;
-    ret.imm = word & 0xfffff000;
+    ret.imm = SEXT32(word & 0xfffff000);
     return ret;
 }
 
@@ -290,12 +308,16 @@ FormatEmpty parse_FormatEmpty(u32 word)
 ////////////////////////////////////////////////////////////////
 // Instruction Implement
 ////////////////////////////////////////////////////////////////
-#define AS_SIGNED(val) (*(int32_t *)&val)
-#define AS_UNSIGNED(val) (*(u32 *)&val)
+#define AS_SIGNED(val) ((sxlen_t)(val))
+#define AS_UNSIGNED(val) ((xlen_t)(val))
 #define ins_p(name) printf("DBUG: INS %s (%08x)\n", #name, ins_word);
 
-const u32 ZERO = 0;
-const u32 ONE = 1;
+// Shift amounts use log2(XLEN) bits; the *W instructions always use 5.
+#define SHMASK ((xlen_t)(XLEN - 1))
+#define SXMIN ((sxlen_t)((xlen_t)1 << (XLEN - 1)))
+
+const xlen_t ZERO = 0;
+const xlen_t ONE = 1;
 
 #define imp(name, fmt_t, code) \
     void Emulator::emu_##name(u32 ins_word, ins_ret *ret, fmt_t ins) { code }
@@ -309,10 +331,10 @@ const u32 ONE = 1;
         return ret;                               \
     }
 
-#define WR_RD(code)                         \
-    {                                       \
-        ret->write_reg = ins.rd;            \
-        ret->write_val = AS_UNSIGNED(code); \
+#define WR_RD(code)                       \
+    {                                     \
+        ret->write_reg = ins.rd;          \
+        ret->write_val = (xlen_t)(code);  \
     }
 #define WR_PC(code)         \
     {                       \
@@ -324,181 +346,200 @@ const u32 ONE = 1;
         ret->csr_val = code;      \
     }
 
+// Raise an address-misaligned trap unless (addr & mask) == 0
+#define ALIGN_CHECK(addr, mask, trap_type)   \
+    if ((addr) & (mask))                     \
+    {                                        \
+        ret->trap.en = true;                 \
+        ret->trap.type = (trap_type);        \
+        ret->trap.value = (addr);            \
+        return;                              \
+    }
+
+// Atomic memory operations. `tmp` is the value loaded from memory and `sec` is rs2.
+#define AMO_W(name, expr)                                                                  \
+    void Emulator::emu_##name(u32 ins_word, ins_ret *ret, FormatR ins)                     \
+    {                                                                                      \
+        xlen_t vaddr = cpu.xreg[ins.rs1];                                                  \
+        ALIGN_CHECK(vaddr, 3, trap_StoreAddressMisaligned)                                 \
+        xlen_t addr = cpu.mmuTranslate(ret, vaddr, MMU_ACCESS_WRITE);                      \
+        if (ret->trap.en) return;                                                          \
+        u32 tmp = cpu.memGetWord(addr);                                                    \
+        u32 sec = (u32)cpu.xreg[ins.rs2];                                                  \
+        cpu.memSetWord(addr, (u32)(expr));                                                 \
+        WR_RD(SEXT32(tmp))                                                                 \
+    }
+
+#define AMO_D(name, expr)                                                                  \
+    void Emulator::emu_##name(u32 ins_word, ins_ret *ret, FormatR ins)                     \
+    {                                                                                      \
+        xlen_t vaddr = cpu.xreg[ins.rs1];                                                  \
+        ALIGN_CHECK(vaddr, 7, trap_StoreAddressMisaligned)                                 \
+        xlen_t addr = cpu.mmuTranslate(ret, vaddr, MMU_ACCESS_WRITE);                      \
+        if (ret->trap.en) return;                                                          \
+        u64 tmp = cpu.memGetDword(addr);                                                   \
+        u64 sec = (u64)cpu.xreg[ins.rs2];                                                  \
+        cpu.memSetDword(addr, (u64)(expr));                                                \
+        WR_RD(tmp)                                                                         \
+    }
+
 imp(add, FormatR, { // rv32i
-    WR_RD(AS_SIGNED(cpu.xreg[ins.rs1]) + AS_SIGNED(cpu.xreg[ins.rs2]));
-}) imp(addi, FormatI, { // rv32i
-    WR_RD(AS_SIGNED(cpu.xreg[ins.rs1]) + AS_SIGNED(ins.imm));
-}) imp(amoswap_w, FormatR, { // rv32a
-    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1], MMU_ACCESS_WRITE);
-    if (ret->trap.en) return;
-    u32 tmp = cpu.memGetWord(addr);
-    cpu.memSetWord(addr, cpu.xreg[ins.rs2]);
-    WR_RD(tmp)
-}) imp(amoadd_w, FormatR, { // rv32a
-    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1], MMU_ACCESS_WRITE);
-    if (ret->trap.en) return;
-    u32 tmp = cpu.memGetWord(addr);
-    cpu.memSetWord(addr, cpu.xreg[ins.rs2] + tmp);
-    WR_RD(tmp)
-}) imp(amoxor_w, FormatR, { // rv32a
-    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1], MMU_ACCESS_WRITE);
-    if (ret->trap.en) return;
-    u32 tmp = cpu.memGetWord(addr);
-    cpu.memSetWord(addr, cpu.xreg[ins.rs2] ^ tmp);
-    WR_RD(tmp)
-}) imp(amoand_w, FormatR, { // rv32a
-    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1], MMU_ACCESS_WRITE);
-    if (ret->trap.en) return;
-    u32 tmp = cpu.memGetWord(addr);
-    cpu.memSetWord(addr, cpu.xreg[ins.rs2] & tmp);
-    WR_RD(tmp)
-}) imp(amoor_w, FormatR, { // rv32a
-    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1], MMU_ACCESS_WRITE);
-    if (ret->trap.en) return;
-    u32 tmp = cpu.memGetWord(addr);
-    cpu.memSetWord(addr, cpu.xreg[ins.rs2] | tmp);
-    WR_RD(tmp)
-}) imp(amomin_w, FormatR, { // rv32a
-    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1], MMU_ACCESS_WRITE);
-    if (ret->trap.en) return;
-    u32 tmp = cpu.memGetWord(addr);
-    u32 sec = cpu.xreg[ins.rs2];
-    cpu.memSetWord(addr, AS_SIGNED(sec) < AS_SIGNED(tmp) ? sec : tmp);
-    WR_RD(tmp)
-}) imp(amomax_w, FormatR, { // rv32a
-    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1], MMU_ACCESS_WRITE);
-    if (ret->trap.en) return;
-    u32 tmp = cpu.memGetWord(addr);
-    u32 sec = cpu.xreg[ins.rs2];
-    cpu.memSetWord(addr, AS_SIGNED(sec) > AS_SIGNED(tmp) ? sec : tmp);
-    WR_RD(tmp)
-}) imp(amominu_w, FormatR, { // rv32a
-    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1], MMU_ACCESS_WRITE);
-    if (ret->trap.en) return;
-    u32 tmp = cpu.memGetWord(addr);
-    u32 sec = cpu.xreg[ins.rs2];
-    cpu.memSetWord(addr, sec < tmp ? sec : tmp);
-    WR_RD(tmp)
-}) imp(amomaxu_w, FormatR, { // rv32a
-    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1], MMU_ACCESS_WRITE);
-    if (ret->trap.en) return;
-    u32 tmp = cpu.memGetWord(addr);
-    u32 sec = cpu.xreg[ins.rs2];
-    cpu.memSetWord(addr, sec > tmp ? sec : tmp);
-    WR_RD(tmp)
-}) imp(and, FormatR, {                                                                                                                                                                           // rv32i
-                      WR_RD(cpu.xreg[ins.rs1] & cpu.xreg[ins.rs2])}) imp(andi, FormatI, {                                                                                                        // rv32i
-                                                                                         WR_RD(cpu.xreg[ins.rs1] & ins.imm)}) imp(auipc, FormatU, {                                              // rv32i
-                                                                                                                                                   WR_RD(cpu.pc + ins.imm)}) imp(beq, FormatB, { // rv32i
+    WR_RD(cpu.xreg[ins.rs1] + cpu.xreg[ins.rs2]);
+})
+imp(addi, FormatI, { // rv32i
+    WR_RD(cpu.xreg[ins.rs1] + ins.imm);
+})
+AMO_W(amoswap_w, sec)                                                        // rv32a
+AMO_W(amoadd_w, sec + tmp)                                                   // rv32a
+AMO_W(amoxor_w, sec ^ tmp)                                                   // rv32a
+AMO_W(amoand_w, sec &tmp)                                                    // rv32a
+AMO_W(amoor_w, sec | tmp)                                                    // rv32a
+AMO_W(amomin_w, (int32_t)sec < (int32_t)tmp ? sec : tmp)                     // rv32a
+AMO_W(amomax_w, (int32_t)sec > (int32_t)tmp ? sec : tmp)                     // rv32a
+AMO_W(amominu_w, sec < tmp ? sec : tmp)                                      // rv32a
+AMO_W(amomaxu_w, sec > tmp ? sec : tmp)                                      // rv32a
+#if XLEN == 64
+AMO_D(amoswap_d, sec)                                                        // rv64a
+AMO_D(amoadd_d, sec + tmp)                                                   // rv64a
+AMO_D(amoxor_d, sec ^ tmp)                                                   // rv64a
+AMO_D(amoand_d, sec &tmp)                                                    // rv64a
+AMO_D(amoor_d, sec | tmp)                                                    // rv64a
+AMO_D(amomin_d, (s64)sec < (s64)tmp ? sec : tmp)                             // rv64a
+AMO_D(amomax_d, (s64)sec > (s64)tmp ? sec : tmp)                             // rv64a
+AMO_D(amominu_d, sec < tmp ? sec : tmp)                                      // rv64a
+AMO_D(amomaxu_d, sec > tmp ? sec : tmp)                                      // rv64a
+#endif
+imp(and, FormatR, { // rv32i
+    WR_RD(cpu.xreg[ins.rs1] & cpu.xreg[ins.rs2])
+})
+imp(andi, FormatI, { // rv32i
+    WR_RD(cpu.xreg[ins.rs1] & ins.imm)
+})
+imp(auipc, FormatU, { // rv32i
+    WR_RD(cpu.pc + ins.imm)
+})
+imp(beq, FormatB, { // rv32i
     if (cpu.xreg[ins.rs1] == cpu.xreg[ins.rs2])
     {
         WR_PC(cpu.pc + ins.imm);
     }
-}) imp(bge, FormatB, { // rv32i
+})
+imp(bge, FormatB, { // rv32i
     if (AS_SIGNED(cpu.xreg[ins.rs1]) >= AS_SIGNED(cpu.xreg[ins.rs2]))
     {
         WR_PC(cpu.pc + ins.imm);
     }
-}) imp(bgeu, FormatB, { // rv32i
-    if (AS_UNSIGNED(cpu.xreg[ins.rs1]) >= AS_UNSIGNED(cpu.xreg[ins.rs2]))
+})
+imp(bgeu, FormatB, { // rv32i
+    if (cpu.xreg[ins.rs1] >= cpu.xreg[ins.rs2])
     {
         WR_PC(cpu.pc + ins.imm);
     }
-}) imp(blt, FormatB, { // rv32i
+})
+imp(blt, FormatB, { // rv32i
     if (AS_SIGNED(cpu.xreg[ins.rs1]) < AS_SIGNED(cpu.xreg[ins.rs2]))
     {
         WR_PC(cpu.pc + ins.imm);
     }
-}) imp(bltu, FormatB, { // rv32i
-    if (AS_UNSIGNED(cpu.xreg[ins.rs1]) < AS_UNSIGNED(cpu.xreg[ins.rs2]))
+})
+imp(bltu, FormatB, { // rv32i
+    if (cpu.xreg[ins.rs1] < cpu.xreg[ins.rs2])
     {
         WR_PC(cpu.pc + ins.imm);
     }
-}) imp(bne, FormatB, { // rv32i
+})
+imp(bne, FormatB, { // rv32i
     if (cpu.xreg[ins.rs1] != cpu.xreg[ins.rs2])
     {
         WR_PC(cpu.pc + ins.imm);
     }
-}) imp(csrrc, FormatCSR, { // system
-    u32 rs = cpu.xreg[ins.rs];
-    if (rs != 0)
+})
+imp(csrrc, FormatCSR, { // system
+    xlen_t rs = cpu.xreg[ins.rs];
+    if (ins.rs != 0)
     {
         WR_CSR(ins.value & ~rs);
     }
     WR_RD(ins.value)
-}) imp(csrrci, FormatCSR, { // system
+})
+imp(csrrci, FormatCSR, { // system
     if (ins.rs != 0)
     {
-        WR_CSR(ins.value & (~ins.rs));
+        WR_CSR(ins.value & ~(xlen_t)ins.rs);
     }
     WR_RD(ins.value)
-}) imp(csrrs, FormatCSR, { // system
-    u32 rs = cpu.xreg[ins.rs];
-    if (rs != 0)
+})
+imp(csrrs, FormatCSR, { // system
+    xlen_t rs = cpu.xreg[ins.rs];
+    if (ins.rs != 0)
     {
         WR_CSR(ins.value | rs);
     }
     WR_RD(ins.value)
-}) imp(csrrsi, FormatCSR, { // system
+})
+imp(csrrsi, FormatCSR, { // system
     if (ins.rs != 0)
     {
         WR_CSR(ins.value | ins.rs);
     }
     WR_RD(ins.value)
-}) imp(csrrw, FormatCSR, { // system
+})
+imp(csrrw, FormatCSR, { // system
     WR_CSR(cpu.xreg[ins.rs]);
     WR_RD(ins.value)
-}) imp(csrrwi, FormatCSR, { // system
+})
+imp(csrrwi, FormatCSR, { // system
     WR_CSR(ins.rs);
     WR_RD(ins.value)
-}) imp(div, FormatR, { // rv32m
-    u32 dividend = cpu.xreg[ins.rs1];
-    u32 divisor = cpu.xreg[ins.rs2];
-    u32 result;
+})
+imp(div, FormatR, { // rv32m
+    sxlen_t dividend = AS_SIGNED(cpu.xreg[ins.rs1]);
+    sxlen_t divisor = AS_SIGNED(cpu.xreg[ins.rs2]);
+    xlen_t result;
     if (divisor == 0)
-    {
-        result = 0xFFFFFFFF;
-    }
-    else if (dividend == 0x80000000 && divisor == 0xFFFFFFFF)
-    {
-        result = dividend;
-    }
+        result = ~(xlen_t)0;
+    else if (dividend == SXMIN && divisor == -1)
+        result = (xlen_t)dividend;
     else
-    {
-        int32_t tmp = AS_SIGNED(dividend) / AS_SIGNED(divisor);
-        result = AS_UNSIGNED(tmp);
-    }
+        result = (xlen_t)(dividend / divisor);
     WR_RD(result)
-}) imp(divu, FormatR, { // rv32m
-    u32 dividend = cpu.xreg[ins.rs1];
-    u32 divisor = cpu.xreg[ins.rs2];
-    u32 result;
-    if (divisor == 0)
-    {
-        result = 0xFFFFFFFF;
-    }
-    else
-    {
-        result = dividend / divisor;
-    }
-    WR_RD(result)
-}) imp(ebreak, FormatEmpty, {
-                                // system
-                                // unnecessary?
-                            }) imp(ecall, FormatEmpty, { // system
+})
+imp(divu, FormatR, { // rv32m
+    xlen_t dividend = cpu.xreg[ins.rs1];
+    xlen_t divisor = cpu.xreg[ins.rs2];
+    WR_RD(divisor == 0 ? ~(xlen_t)0 : dividend / divisor)
+})
+imp(ebreak, FormatEmpty, { // system
+    // Breakpoint exception (firmware probes for a semihosting debugger by executing ebreak)
+    ret->trap.en = true;
+    ret->trap.type = trap_Breakpoint;
+    ret->trap.value = cpu.pc;
+})
+void Emulator::emu_ecall(u32 ins_word, ins_ret *ret, FormatEmpty ins) // system
+{
     if (cpu.xreg[17] == 93)
     {
         // EXIT CALL (syscall 93)
-        u32 status = cpu.xreg[10] >> 1;
+        if (test_mode)
+        {
+            // Headless ISA-test runner (-t): record a0 and stop; 0 = pass, else (case << 1) | 1
+            test_done = true;
+            test_result = cpu.xreg[10];
+            running = false;
+        }
+        else
+        {
+            u32 status = (u32)(cpu.xreg[10] >> 1);
 #ifdef RVE_ISA_TEST
-        printf("ECALL EXIT = %d\n", status);
-        exit((int)status);
+            printf("ECALL EXIT = %d\n", status);
+            exit((int)status);
 #elif !defined(__EMSCRIPTEN__)
-        printf("\nECALL EXIT = x10[%x] status=%d\n", cpu.xreg[10], status);
+            printf("\nECALL EXIT = x10[%x] status=%d\n", (u32)cpu.xreg[10], status);
 #else
-        (void)status;
-        printf("Exit called in WebAssembly environment. Ignoring.\n");
+            (void)status;
+            printf("Exit called in WebAssembly environment. Ignoring.\n");
 #endif
+        }
     }
 
     ret->trap.en = true;
@@ -515,212 +556,325 @@ imp(add, FormatR, { // rv32i
     { // PRIV_MACHINE
         ret->trap.type = trap_EnvironmentCallFromMMode;
     }
-}) imp(fence, FormatEmpty, {
-                               // rv32i
-                               // skip
-                           }) imp(fence_i, FormatEmpty, {
-                                                            // rv32i
-                                                            // skip
-                                                        }) imp(jal, FormatJ, { // rv32i
+}
+imp(fence, FormatEmpty, {
+    // rv32i
+    // skip
+})
+imp(fence_i, FormatEmpty, {
+    // rv32i
+    // skip
+})
+imp(jal, FormatJ, { // rv32i
     WR_RD(cpu.pc + 4);
     WR_PC(cpu.pc + ins.imm);
-}) imp(jalr, FormatI, { // rv32i
+})
+imp(jalr, FormatI, { // rv32i
     WR_RD(cpu.pc + 4);
-    WR_PC(cpu.xreg[ins.rs1] + ins.imm);
-}) imp(lb, FormatI, { // rv32i
-    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_READ);
+    WR_PC((cpu.xreg[ins.rs1] + ins.imm) & ~(xlen_t)1);
+})
+imp(lb, FormatI, { // rv32i
+    xlen_t addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_READ);
     if (ret->trap.en) return;
-    u32 tmp = signExtend(cpu.memGetByte(addr), 8);
-    WR_RD(tmp)
-}) imp(lbu, FormatI, { // rv32i
-    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_READ);
+    WR_RD(signExtend(cpu.memGetByte(addr), 8))
+})
+imp(lbu, FormatI, { // rv32i
+    xlen_t addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_READ);
     if (ret->trap.en) return;
-    u32 tmp = cpu.memGetByte(addr);
-    WR_RD(tmp)
-}) imp(lh, FormatI, { // rv32i
-    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_READ);
+    WR_RD(cpu.memGetByte(addr))
+})
+imp(lh, FormatI, { // rv32i
+    xlen_t addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_READ);
     if (ret->trap.en) return;
-    u32 tmp = signExtend(cpu.memGetHalfWord(addr), 16);
-    WR_RD(tmp)
-}) imp(lhu, FormatI, { // rv32i
-    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_READ);
+    WR_RD(signExtend(cpu.memGetHalfWord(addr), 16))
+})
+imp(lhu, FormatI, { // rv32i
+    xlen_t addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_READ);
     if (ret->trap.en) return;
-    u32 tmp = cpu.memGetHalfWord(addr);
-    WR_RD(tmp)
-}) imp(lr_w, FormatR, { // rv32a
-    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1], MMU_ACCESS_READ);
+    WR_RD(cpu.memGetHalfWord(addr))
+})
+imp(lr_w, FormatR, { // rv32a
+    xlen_t vaddr = cpu.xreg[ins.rs1];
+    ALIGN_CHECK(vaddr, 3, trap_LoadAddressMisaligned)
+    xlen_t addr = cpu.mmuTranslate(ret, vaddr, MMU_ACCESS_READ);
     if (ret->trap.en) return;
     u32 tmp = cpu.memGetWord(addr);
     cpu.reservation_en = true;
     cpu.reservation_addr = addr;
-    WR_RD(tmp)
-}) imp(lui, FormatU, {                                    // rv32i
-                      WR_RD(ins.imm)}) imp(lw, FormatI, { // rv32i
-    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_READ);
+    WR_RD(SEXT32(tmp))
+})
+imp(lui, FormatU, { // rv32i
+    WR_RD(ins.imm)
+})
+imp(lw, FormatI, { // rv32i
+    xlen_t addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_READ);
     if (ret->trap.en) return;
-    u32 tmp = cpu.memGetWord(addr);
-    WR_RD(tmp)
-}) imp(mret, FormatEmpty, { // system
-    u32 newpc = cpu.getCsr(CSR_MEPC, ret);
+    WR_RD(SEXT32(cpu.memGetWord(addr)))
+})
+imp(mret, FormatEmpty, { // system
+    xlen_t newpc = cpu.getCsr(CSR_MEPC, ret);
     if (!ret->trap.en)
     {
-        u32 status = cpu.readCsrRaw(CSR_MSTATUS);
-        u32 mpie = (status >> 7) & 1;
-        u32 mpp = (status >> 11) & 0x3;
-        u32 mprv = mpp == PRIV_MACHINE ? ((status >> 17) & 1) : 0;
-        u32 new_status = (status & ~0x21888) | (mprv << 17) | (mpie << 3) | (1 << 7);
+        xlen_t status = cpu.readCsrRaw(CSR_MSTATUS);
+        xlen_t mpie = (status >> 7) & 1;
+        xlen_t mpp = (status >> 11) & 0x3;
+        xlen_t mprv = mpp == PRIV_MACHINE ? ((status >> 17) & 1) : 0;
+        xlen_t new_status = (status & ~(xlen_t)0x21888) | (mprv << 17) | (mpie << 3) | (1 << 7);
         cpu.writeCsrRaw(CSR_MSTATUS, new_status);
-        cpu.csr.privilege = mpp;
+        cpu.csr.privilege = (u32)mpp;
         WR_PC(newpc)
     }
-}) imp(mul, FormatR, { // rv32m
-    u32 tmp = AS_SIGNED(cpu.xreg[ins.rs1]) * AS_SIGNED(cpu.xreg[ins.rs2]);
-    WR_RD(tmp)
-}) imp(mulh, FormatR, { // rv32m
-    u32 tmp = ((int64_t)AS_SIGNED(cpu.xreg[ins.rs1]) * (int64_t)AS_SIGNED(cpu.xreg[ins.rs2])) >> 32;
-    WR_RD(tmp)
-}) imp(mulhsu, FormatR, { // rv32m
-    u32 tmp = ((int64_t)AS_SIGNED(cpu.xreg[ins.rs1]) * (uint64_t)AS_UNSIGNED(cpu.xreg[ins.rs2])) >> 32;
-    WR_RD(tmp)
-}) imp(mulhu, FormatR, { // rv32m
-    u32 tmp = ((uint64_t)AS_UNSIGNED(cpu.xreg[ins.rs1]) * (uint64_t)AS_UNSIGNED(cpu.xreg[ins.rs2])) >> 32;
-    WR_RD(tmp)
-}) imp(or, FormatR, {                                                                                                                           // rv32i
-                     WR_RD(cpu.xreg[ins.rs1] | cpu.xreg[ins.rs2])}) imp(ori, FormatI, {                                                         // rv32i
-                                                                                       WR_RD(cpu.xreg[ins.rs1] | ins.imm)}) imp(rem, FormatR, { // rv32m
-    u32 dividend = cpu.xreg[ins.rs1];
-    u32 divisor = cpu.xreg[ins.rs2];
-    u32 result;
+})
+imp(mul, FormatR, { // rv32m
+    WR_RD(cpu.xreg[ins.rs1] * cpu.xreg[ins.rs2])
+})
+imp(mulh, FormatR, { // rv32m
+    WR_RD((xlen_t)(((sxlen2_t)AS_SIGNED(cpu.xreg[ins.rs1]) * (sxlen2_t)AS_SIGNED(cpu.xreg[ins.rs2])) >> XLEN))
+})
+imp(mulhsu, FormatR, { // rv32m
+    WR_RD((xlen_t)(((sxlen2_t)AS_SIGNED(cpu.xreg[ins.rs1]) * (sxlen2_t)(xlen2_t)cpu.xreg[ins.rs2]) >> XLEN))
+})
+imp(mulhu, FormatR, { // rv32m
+    WR_RD((xlen_t)(((xlen2_t)cpu.xreg[ins.rs1] * (xlen2_t)cpu.xreg[ins.rs2]) >> XLEN))
+})
+imp(or, FormatR, { // rv32i
+    WR_RD(cpu.xreg[ins.rs1] | cpu.xreg[ins.rs2])
+})
+imp(ori, FormatI, { // rv32i
+    WR_RD(cpu.xreg[ins.rs1] | ins.imm)
+})
+imp(rem, FormatR, { // rv32m
+    sxlen_t dividend = AS_SIGNED(cpu.xreg[ins.rs1]);
+    sxlen_t divisor = AS_SIGNED(cpu.xreg[ins.rs2]);
+    xlen_t result;
     if (divisor == 0)
-    {
-        result = dividend;
-    }
-    else if (dividend == 0x80000000 && divisor == 0xFFFFFFFF)
-    {
+        result = (xlen_t)dividend;
+    else if (dividend == SXMIN && divisor == -1)
         result = 0;
-    }
     else
-    {
-        int32_t tmp = AS_SIGNED(dividend) % AS_SIGNED(divisor);
-        result = AS_UNSIGNED(tmp);
-    }
+        result = (xlen_t)(dividend % divisor);
     WR_RD(result)
-}) imp(remu, FormatR, { // rv32m
-    u32 dividend = cpu.xreg[ins.rs1];
-    u32 divisor = cpu.xreg[ins.rs2];
-    u32 result;
-    if (divisor == 0)
-    {
-        result = dividend;
-    }
-    else
-    {
-        result = dividend % divisor;
-    }
-    WR_RD(result)
-}) imp(sb, FormatS, { // rv32i
-    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_WRITE);
+})
+imp(remu, FormatR, { // rv32m
+    xlen_t dividend = cpu.xreg[ins.rs1];
+    xlen_t divisor = cpu.xreg[ins.rs2];
+    WR_RD(divisor == 0 ? dividend : dividend % divisor)
+})
+imp(sb, FormatS, { // rv32i
+    xlen_t addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_WRITE);
     if (ret->trap.en) return;
-    cpu.memSetByte(addr, cpu.xreg[ins.rs2]);
-}) imp(sc_w, FormatR, { // rv32a
-    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1], MMU_ACCESS_WRITE);
+    cpu.memSetByte(addr, (u32)cpu.xreg[ins.rs2]);
+})
+imp(sc_w, FormatR, { // rv32a
+    xlen_t vaddr = cpu.xreg[ins.rs1];
+    ALIGN_CHECK(vaddr, 3, trap_StoreAddressMisaligned)
+    xlen_t addr = cpu.mmuTranslate(ret, vaddr, MMU_ACCESS_WRITE);
     if (ret->trap.en) return;
-    if (cpu.reservation_en && cpu.reservation_addr == addr)
+    bool ok = cpu.reservation_en && cpu.reservation_addr == addr;
+    cpu.reservation_en = false; // a reservation is consumed by any SC
+    if (ok)
     {
-        cpu.memSetWord(addr, cpu.xreg[ins.rs2]);
-        cpu.reservation_en = false;
+        cpu.memSetWord(addr, (u32)cpu.xreg[ins.rs2]);
         WR_RD(ZERO)
     }
     else
     {
         WR_RD(ONE)
     }
-}) imp(sfence_vma, FormatEmpty, {
-                                    // system
-                                    // skip
-                                }) imp(sh, FormatS, { // rv32i
-    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_WRITE);
+})
+imp(sfence_vma, FormatEmpty, {
+    // system
+    // skip
+})
+imp(sh, FormatS, { // rv32i
+    xlen_t addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_WRITE);
     if (ret->trap.en) return;
-    cpu.memSetHalfWord(addr, cpu.xreg[ins.rs2]);
-}) imp(sll, FormatR, {                                                                     // rv32i
-                      WR_RD(cpu.xreg[ins.rs1] << cpu.xreg[ins.rs2])}) imp(slli, FormatR, { // rv32i
-    u32 shamt = (ins_word >> 20) & 0x1F;
+    cpu.memSetHalfWord(addr, (u32)cpu.xreg[ins.rs2]);
+})
+imp(sll, FormatR, { // rv32i
+    WR_RD(cpu.xreg[ins.rs1] << (cpu.xreg[ins.rs2] & SHMASK))
+})
+imp(slli, FormatR, { // rv32i
+    u32 shamt = (ins_word >> 20) & SHMASK;
     WR_RD(cpu.xreg[ins.rs1] << shamt)
-}) imp(slt, FormatR, { // rv32i
-    if (AS_SIGNED(cpu.xreg[ins.rs1]) < AS_SIGNED(cpu.xreg[ins.rs2]))
-    {
-        WR_RD(ONE)
-    }
-    else
-    {
-        WR_RD(ZERO)
-    }
-}) imp(slti, FormatI, { // rv32i
-    if (AS_SIGNED(cpu.xreg[ins.rs1]) < AS_SIGNED(ins.imm))
-    {
-        WR_RD(ONE)
-    }
-    else
-    {
-        WR_RD(ZERO)
-    }
-}) imp(sltiu, FormatI, { // rv32i
-    if (AS_UNSIGNED(cpu.xreg[ins.rs1]) < AS_UNSIGNED(ins.imm))
-    {
-        WR_RD(ONE)
-    }
-    else
-    {
-        WR_RD(ZERO)
-    }
-}) imp(sltu, FormatR, { // rv32i
-    if (AS_UNSIGNED(cpu.xreg[ins.rs1]) < AS_UNSIGNED(cpu.xreg[ins.rs2]))
-    {
-        WR_RD(ONE)
-    }
-    else
-    {
-        WR_RD(ZERO)
-    }
-}) imp(sra, FormatR, { // rv32i
-    u32 msr = cpu.xreg[ins.rs1] & 0x80000000;
-    WR_RD(msr ? ~(~cpu.xreg[ins.rs1] >> cpu.xreg[ins.rs2]) : cpu.xreg[ins.rs1] >> cpu.xreg[ins.rs2])
-}) imp(srai, FormatR, { // rv32i
-    u32 msr = cpu.xreg[ins.rs1] & 0x80000000;
-    u32 shamt = (ins_word >> 20) & 0x1F;
-    WR_RD(msr ? ~(~cpu.xreg[ins.rs1] >> shamt) : cpu.xreg[ins.rs1] >> shamt)
-}) imp(sret, FormatEmpty, { // system
-    u32 newpc = cpu.getCsr(CSR_SEPC, ret);
+})
+imp(slt, FormatR, { // rv32i
+    WR_RD(AS_SIGNED(cpu.xreg[ins.rs1]) < AS_SIGNED(cpu.xreg[ins.rs2]) ? ONE : ZERO)
+})
+imp(slti, FormatI, { // rv32i
+    WR_RD(AS_SIGNED(cpu.xreg[ins.rs1]) < AS_SIGNED(ins.imm) ? ONE : ZERO)
+})
+imp(sltiu, FormatI, { // rv32i
+    WR_RD(cpu.xreg[ins.rs1] < ins.imm ? ONE : ZERO)
+})
+imp(sltu, FormatR, { // rv32i
+    WR_RD(cpu.xreg[ins.rs1] < cpu.xreg[ins.rs2] ? ONE : ZERO)
+})
+imp(sra, FormatR, { // rv32i
+    WR_RD(AS_SIGNED(cpu.xreg[ins.rs1]) >> (cpu.xreg[ins.rs2] & SHMASK))
+})
+imp(srai, FormatR, { // rv32i
+    u32 shamt = (ins_word >> 20) & SHMASK;
+    WR_RD(AS_SIGNED(cpu.xreg[ins.rs1]) >> shamt)
+})
+imp(sret, FormatEmpty, { // system
+    xlen_t newpc = cpu.getCsr(CSR_SEPC, ret);
     if (!ret->trap.en)
     {
-        u32 status = cpu.readCsrRaw(CSR_SSTATUS);
-        u32 spie = (status >> 5) & 1;
-        u32 spp = (status >> 8) & 1;
-        u32 mprv = spp == PRIV_MACHINE ? ((status >> 17) & 1) : 0;
-        u32 new_status = (status & ~0x20122) | (mprv << 17) | (spie << 1) | (1 << 5);
+        xlen_t status = cpu.readCsrRaw(CSR_SSTATUS);
+        xlen_t spie = (status >> 5) & 1;
+        xlen_t spp = (status >> 8) & 1;
+        xlen_t mprv = spp == PRIV_MACHINE ? ((status >> 17) & 1) : 0;
+        xlen_t new_status = (status & ~(xlen_t)0x20122) | (mprv << 17) | (spie << 1) | (1 << 5);
         cpu.writeCsrRaw(CSR_SSTATUS, new_status);
-        cpu.csr.privilege = spp;
+        cpu.csr.privilege = (u32)spp;
         WR_PC(newpc)
     }
-}) imp(srl, FormatR, {                                                                     // rv32i
-                      WR_RD(cpu.xreg[ins.rs1] >> cpu.xreg[ins.rs2])}) imp(srli, FormatR, { // rv32i
-    u32 shamt = (ins_word >> 20) & 0x1F;
+})
+imp(srl, FormatR, { // rv32i
+    WR_RD(cpu.xreg[ins.rs1] >> (cpu.xreg[ins.rs2] & SHMASK))
+})
+imp(srli, FormatR, { // rv32i
+    u32 shamt = (ins_word >> 20) & SHMASK;
     WR_RD(cpu.xreg[ins.rs1] >> shamt)
-}) imp(sub, FormatR, { // rv32i
-    WR_RD(AS_SIGNED(cpu.xreg[ins.rs1]) - AS_SIGNED(cpu.xreg[ins.rs2]));
-}) imp(sw, FormatS, { // rv32i
-    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_WRITE);
+})
+imp(sub, FormatR, { // rv32i
+    WR_RD(cpu.xreg[ins.rs1] - cpu.xreg[ins.rs2]);
+})
+imp(sw, FormatS, { // rv32i
+    xlen_t addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_WRITE);
     if (ret->trap.en) return;
-    cpu.memSetWord(addr, cpu.xreg[ins.rs2]);
-}) imp(uret, FormatEmpty, {
-                              // system
-                              // unnecessary?
-                          }) imp(wfi, FormatEmpty, {
-                                                       // system
-                                                       // no-op is valid here, so skip
-                                                   }) imp(xor, FormatR, {                                                                   // rv32i
-                                                                         WR_RD(cpu.xreg[ins.rs1] ^ cpu.xreg[ins.rs2])}) imp(xori, FormatI, {// rv32i
-                                                                                                                                            WR_RD(cpu.xreg[ins.rs1] ^ ins.imm)})
+    cpu.memSetWord(addr, (u32)cpu.xreg[ins.rs2]);
+})
+imp(uret, FormatEmpty, {
+    // system
+    // unnecessary?
+})
+imp(wfi, FormatEmpty, {
+    // system
+    // no-op is valid here, so skip
+})
+imp(xor, FormatR, { // rv32i
+    WR_RD(cpu.xreg[ins.rs1] ^ cpu.xreg[ins.rs2])
+})
+imp(xori, FormatI, { // rv32i
+    WR_RD(cpu.xreg[ins.rs1] ^ ins.imm)
+})
+
+#if XLEN == 64
+////////////////////////////////////////////////////////////////
+// RV64I / RV64M / RV64A additions
+////////////////////////////////////////////////////////////////
+imp(lwu, FormatI, { // rv64i
+    xlen_t addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_READ);
+    if (ret->trap.en) return;
+    WR_RD(cpu.memGetWord(addr))
+})
+imp(ld, FormatI, { // rv64i
+    xlen_t addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_READ);
+    if (ret->trap.en) return;
+    WR_RD(cpu.memGetDword(addr))
+})
+imp(sd, FormatS, { // rv64i
+    xlen_t addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_WRITE);
+    if (ret->trap.en) return;
+    cpu.memSetDword(addr, cpu.xreg[ins.rs2]);
+})
+imp(addiw, FormatI, { // rv64i
+    WR_RD(SEXT32((u32)cpu.xreg[ins.rs1] + (u32)ins.imm))
+})
+imp(slliw, FormatR, { // rv64i
+    u32 shamt = (ins_word >> 20) & 0x1f;
+    WR_RD(SEXT32((u32)cpu.xreg[ins.rs1] << shamt))
+})
+imp(srliw, FormatR, { // rv64i
+    u32 shamt = (ins_word >> 20) & 0x1f;
+    WR_RD(SEXT32((u32)cpu.xreg[ins.rs1] >> shamt))
+})
+imp(sraiw, FormatR, { // rv64i
+    u32 shamt = (ins_word >> 20) & 0x1f;
+    WR_RD(SEXT32((int32_t)cpu.xreg[ins.rs1] >> shamt))
+})
+imp(addw, FormatR, { // rv64i
+    WR_RD(SEXT32((u32)cpu.xreg[ins.rs1] + (u32)cpu.xreg[ins.rs2]))
+})
+imp(subw, FormatR, { // rv64i
+    WR_RD(SEXT32((u32)cpu.xreg[ins.rs1] - (u32)cpu.xreg[ins.rs2]))
+})
+imp(sllw, FormatR, { // rv64i
+    WR_RD(SEXT32((u32)cpu.xreg[ins.rs1] << (cpu.xreg[ins.rs2] & 0x1f)))
+})
+imp(srlw, FormatR, { // rv64i
+    WR_RD(SEXT32((u32)cpu.xreg[ins.rs1] >> (cpu.xreg[ins.rs2] & 0x1f)))
+})
+imp(sraw, FormatR, { // rv64i
+    WR_RD(SEXT32((int32_t)cpu.xreg[ins.rs1] >> (cpu.xreg[ins.rs2] & 0x1f)))
+})
+imp(mulw, FormatR, { // rv64m
+    WR_RD(SEXT32((u32)cpu.xreg[ins.rs1] * (u32)cpu.xreg[ins.rs2]))
+})
+imp(divw, FormatR, { // rv64m
+    int32_t dividend = (int32_t)cpu.xreg[ins.rs1];
+    int32_t divisor = (int32_t)cpu.xreg[ins.rs2];
+    int32_t result;
+    if (divisor == 0)
+        result = -1;
+    else if (dividend == INT32_MIN && divisor == -1)
+        result = dividend;
+    else
+        result = dividend / divisor;
+    WR_RD(SEXT32(result))
+})
+imp(divuw, FormatR, { // rv64m
+    u32 dividend = (u32)cpu.xreg[ins.rs1];
+    u32 divisor = (u32)cpu.xreg[ins.rs2];
+    WR_RD(SEXT32(divisor == 0 ? 0xFFFFFFFFu : dividend / divisor))
+})
+imp(remw, FormatR, { // rv64m
+    int32_t dividend = (int32_t)cpu.xreg[ins.rs1];
+    int32_t divisor = (int32_t)cpu.xreg[ins.rs2];
+    int32_t result;
+    if (divisor == 0)
+        result = dividend;
+    else if (dividend == INT32_MIN && divisor == -1)
+        result = 0;
+    else
+        result = dividend % divisor;
+    WR_RD(SEXT32(result))
+})
+imp(remuw, FormatR, { // rv64m
+    u32 dividend = (u32)cpu.xreg[ins.rs1];
+    u32 divisor = (u32)cpu.xreg[ins.rs2];
+    WR_RD(SEXT32(divisor == 0 ? dividend : dividend % divisor))
+})
+imp(lr_d, FormatR, { // rv64a
+    xlen_t vaddr = cpu.xreg[ins.rs1];
+    ALIGN_CHECK(vaddr, 7, trap_LoadAddressMisaligned)
+    xlen_t addr = cpu.mmuTranslate(ret, vaddr, MMU_ACCESS_READ);
+    if (ret->trap.en) return;
+    u64 tmp = cpu.memGetDword(addr);
+    cpu.reservation_en = true;
+    cpu.reservation_addr = addr;
+    WR_RD(tmp)
+})
+imp(sc_d, FormatR, { // rv64a
+    xlen_t vaddr = cpu.xreg[ins.rs1];
+    ALIGN_CHECK(vaddr, 7, trap_StoreAddressMisaligned)
+    xlen_t addr = cpu.mmuTranslate(ret, vaddr, MMU_ACCESS_WRITE);
+    if (ret->trap.en) return;
+    bool ok = cpu.reservation_en && cpu.reservation_addr == addr;
+    cpu.reservation_en = false; // a reservation is consumed by any SC
+    if (ok)
+    {
+        cpu.memSetDword(addr, cpu.xreg[ins.rs2]);
+        WR_RD(ZERO)
+    }
+    else
+    {
+        WR_RD(ONE)
+    }
+})
+#endif
 
 ////////////////////////////////////////////////////////////////
 // RV32F / RV32D Instruction Implementations
@@ -729,25 +883,25 @@ imp(add, FormatR, { // rv32i
 // ---- FP Loads / Stores ----
 imp(flw, FormatI, { // rv32f
     FP_CHECK_FS()
-    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_READ);
+    xlen_t addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_READ);
     if (ret->trap.en) return;
     cpu.freg[ins.rd] = 0xFFFFFFFF00000000ULL | (u64)cpu.memGetWord(addr);
 })
 imp(fld, FormatI, { // rv32d
     FP_CHECK_FS()
-    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_READ);
+    xlen_t addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_READ);
     if (ret->trap.en) return;
     cpu.freg[ins.rd] = mem_get_double(cpu, addr);
 })
 imp(fsw, FormatS, { // rv32f
     FP_CHECK_FS()
-    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_WRITE);
+    xlen_t addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_WRITE);
     if (ret->trap.en) return;
     cpu.memSetWord(addr, (u32)(cpu.freg[ins.rs2] & 0xFFFFFFFFu));
 })
 imp(fsd, FormatS, { // rv32d
     FP_CHECK_FS()
-    u32 addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_WRITE);
+    xlen_t addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_WRITE);
     if (ret->trap.en) return;
     mem_set_double(cpu, addr, cpu.freg[ins.rs2]);
 })
@@ -756,31 +910,31 @@ imp(fsd, FormatS, { // rv32d
 imp(fadd_s, FormatR, { // rv32f
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_s(cpu, ins.rd, freg_read_s(cpu, ins.rs1) + freg_read_s(cpu, ins.rs2));
+    freg_write_s_canon(cpu, ins.rd, freg_read_s(cpu, ins.rs1) + freg_read_s(cpu, ins.rs2));
     fp_accum_flags(cpu);
 })
 imp(fsub_s, FormatR, { // rv32f
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_s(cpu, ins.rd, freg_read_s(cpu, ins.rs1) - freg_read_s(cpu, ins.rs2));
+    freg_write_s_canon(cpu, ins.rd, freg_read_s(cpu, ins.rs1) - freg_read_s(cpu, ins.rs2));
     fp_accum_flags(cpu);
 })
 imp(fmul_s, FormatR, { // rv32f
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_s(cpu, ins.rd, freg_read_s(cpu, ins.rs1) * freg_read_s(cpu, ins.rs2));
+    freg_write_s_canon(cpu, ins.rd, freg_read_s(cpu, ins.rs1) * freg_read_s(cpu, ins.rs2));
     fp_accum_flags(cpu);
 })
 imp(fdiv_s, FormatR, { // rv32f
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_s(cpu, ins.rd, freg_read_s(cpu, ins.rs1) / freg_read_s(cpu, ins.rs2));
+    freg_write_s_canon(cpu, ins.rd, freg_read_s(cpu, ins.rs1) / freg_read_s(cpu, ins.rs2));
     fp_accum_flags(cpu);
 })
 imp(fsqrt_s, FormatR, { // rv32f
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_s(cpu, ins.rd, std::sqrt(freg_read_s(cpu, ins.rs1)));
+    freg_write_s_canon(cpu, ins.rd, std::sqrt(freg_read_s(cpu, ins.rs1)));
     fp_accum_flags(cpu);
 })
 
@@ -788,31 +942,31 @@ imp(fsqrt_s, FormatR, { // rv32f
 imp(fadd_d, FormatR, { // rv32d
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_d(cpu, ins.rd, freg_read_d(cpu, ins.rs1) + freg_read_d(cpu, ins.rs2));
+    freg_write_d_canon(cpu, ins.rd, freg_read_d(cpu, ins.rs1) + freg_read_d(cpu, ins.rs2));
     fp_accum_flags(cpu);
 })
 imp(fsub_d, FormatR, { // rv32d
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_d(cpu, ins.rd, freg_read_d(cpu, ins.rs1) - freg_read_d(cpu, ins.rs2));
+    freg_write_d_canon(cpu, ins.rd, freg_read_d(cpu, ins.rs1) - freg_read_d(cpu, ins.rs2));
     fp_accum_flags(cpu);
 })
 imp(fmul_d, FormatR, { // rv32d
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_d(cpu, ins.rd, freg_read_d(cpu, ins.rs1) * freg_read_d(cpu, ins.rs2));
+    freg_write_d_canon(cpu, ins.rd, freg_read_d(cpu, ins.rs1) * freg_read_d(cpu, ins.rs2));
     fp_accum_flags(cpu);
 })
 imp(fdiv_d, FormatR, { // rv32d
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_d(cpu, ins.rd, freg_read_d(cpu, ins.rs1) / freg_read_d(cpu, ins.rs2));
+    freg_write_d_canon(cpu, ins.rd, freg_read_d(cpu, ins.rs1) / freg_read_d(cpu, ins.rs2));
     fp_accum_flags(cpu);
 })
 imp(fsqrt_d, FormatR, { // rv32d
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_d(cpu, ins.rd, std::sqrt(freg_read_d(cpu, ins.rs1)));
+    freg_write_d_canon(cpu, ins.rd, std::sqrt(freg_read_d(cpu, ins.rs1)));
     fp_accum_flags(cpu);
 })
 
@@ -820,25 +974,25 @@ imp(fsqrt_d, FormatR, { // rv32d
 imp(fmadd_s, FormatR, { // rv32f: rd = rs1*rs2 + rs3
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_s(cpu, ins.rd, std::fma(freg_read_s(cpu, ins.rs1), freg_read_s(cpu, ins.rs2), freg_read_s(cpu, ins.rs3)));
+    freg_write_s_canon(cpu, ins.rd, std::fma(freg_read_s(cpu, ins.rs1), freg_read_s(cpu, ins.rs2), freg_read_s(cpu, ins.rs3)));
     fp_accum_flags(cpu);
 })
 imp(fmsub_s, FormatR, { // rv32f: rd = rs1*rs2 - rs3
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_s(cpu, ins.rd, std::fma(freg_read_s(cpu, ins.rs1), freg_read_s(cpu, ins.rs2), -freg_read_s(cpu, ins.rs3)));
+    freg_write_s_canon(cpu, ins.rd, std::fma(freg_read_s(cpu, ins.rs1), freg_read_s(cpu, ins.rs2), -freg_read_s(cpu, ins.rs3)));
     fp_accum_flags(cpu);
 })
 imp(fnmsub_s, FormatR, { // rv32f: rd = -(rs1*rs2) + rs3
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_s(cpu, ins.rd, std::fma(-freg_read_s(cpu, ins.rs1), freg_read_s(cpu, ins.rs2), freg_read_s(cpu, ins.rs3)));
+    freg_write_s_canon(cpu, ins.rd, std::fma(-freg_read_s(cpu, ins.rs1), freg_read_s(cpu, ins.rs2), freg_read_s(cpu, ins.rs3)));
     fp_accum_flags(cpu);
 })
 imp(fnmadd_s, FormatR, { // rv32f: rd = -(rs1*rs2) - rs3
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_s(cpu, ins.rd, std::fma(-freg_read_s(cpu, ins.rs1), freg_read_s(cpu, ins.rs2), -freg_read_s(cpu, ins.rs3)));
+    freg_write_s_canon(cpu, ins.rd, std::fma(-freg_read_s(cpu, ins.rs1), freg_read_s(cpu, ins.rs2), -freg_read_s(cpu, ins.rs3)));
     fp_accum_flags(cpu);
 })
 
@@ -846,25 +1000,25 @@ imp(fnmadd_s, FormatR, { // rv32f: rd = -(rs1*rs2) - rs3
 imp(fmadd_d, FormatR, { // rv32d: rd = rs1*rs2 + rs3
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_d(cpu, ins.rd, std::fma(freg_read_d(cpu, ins.rs1), freg_read_d(cpu, ins.rs2), freg_read_d(cpu, ins.rs3)));
+    freg_write_d_canon(cpu, ins.rd, std::fma(freg_read_d(cpu, ins.rs1), freg_read_d(cpu, ins.rs2), freg_read_d(cpu, ins.rs3)));
     fp_accum_flags(cpu);
 })
 imp(fmsub_d, FormatR, { // rv32d: rd = rs1*rs2 - rs3
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_d(cpu, ins.rd, std::fma(freg_read_d(cpu, ins.rs1), freg_read_d(cpu, ins.rs2), -freg_read_d(cpu, ins.rs3)));
+    freg_write_d_canon(cpu, ins.rd, std::fma(freg_read_d(cpu, ins.rs1), freg_read_d(cpu, ins.rs2), -freg_read_d(cpu, ins.rs3)));
     fp_accum_flags(cpu);
 })
 imp(fnmsub_d, FormatR, { // rv32d: rd = -(rs1*rs2) + rs3
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_d(cpu, ins.rd, std::fma(-freg_read_d(cpu, ins.rs1), freg_read_d(cpu, ins.rs2), freg_read_d(cpu, ins.rs3)));
+    freg_write_d_canon(cpu, ins.rd, std::fma(-freg_read_d(cpu, ins.rs1), freg_read_d(cpu, ins.rs2), freg_read_d(cpu, ins.rs3)));
     fp_accum_flags(cpu);
 })
 imp(fnmadd_d, FormatR, { // rv32d: rd = -(rs1*rs2) - rs3
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
     feclearexcept(FE_ALL_EXCEPT);
-    freg_write_d(cpu, ins.rd, std::fma(-freg_read_d(cpu, ins.rs1), freg_read_d(cpu, ins.rs2), -freg_read_d(cpu, ins.rs3)));
+    freg_write_d_canon(cpu, ins.rd, std::fma(-freg_read_d(cpu, ins.rs1), freg_read_d(cpu, ins.rs2), -freg_read_d(cpu, ins.rs3)));
     fp_accum_flags(cpu);
 })
 
@@ -1039,39 +1193,66 @@ imp(fclass_d, FormatR, { // rv32d
 // ---- Integer ↔ FP Move (raw bits) ----
 imp(fmv_x_w, FormatR, { // rv32f: rd(int) = lower 32 bits of freg[rs1]
     u32 _bits = (u32)(cpu.freg[ins.rs1] & 0xFFFFFFFFu);
-    WR_RD(_bits)
+    WR_RD(SEXT32(_bits))
 })
 imp(fmv_w_x, FormatR, { // rv32f: freg[rd] = NaN-box(xreg[rs1])
-    cpu.freg[ins.rd] = 0xFFFFFFFF00000000ULL | (u64)cpu.xreg[ins.rs1];
+    cpu.freg[ins.rd] = 0xFFFFFFFF00000000ULL | (u64)(u32)cpu.xreg[ins.rs1];
 })
 
+// Round `a` to an integral value using RISC-V rounding mode `rm` (FRM_*).
+static double fp_round_int(double a, u32 rm)
+{
+    switch (rm)
+    {
+    case FRM_RTZ: return std::trunc(a);
+    case FRM_RDN: return std::floor(a);
+    case FRM_RUP: return std::ceil(a);
+    case FRM_RMM: return std::round(a);       // ties away from zero
+    default:      return std::nearbyint(a);   // RNE (default FP environment)
+    }
+}
+
+static u32 fp_resolve_rm(u32 ins_word, u32 fcsr)
+{
+    u32 rm = (ins_word >> 12) & 0x7u;
+    return rm == FRM_DYN ? (fcsr >> 5) & 0x7u : rm;
+}
+
+// FP → signed 32-bit integer (saturating, sets NV/NX). Explicit rounding rather than a C cast,
+// so the result and NX flag don't depend on how the host compiler lowers the conversion.
+static u32 fp_to_s32(RV32 &cpu, double a, u32 rm)
+{
+    if (std::isnan(a)) { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; return 0x7FFFFFFFu; }
+    double r = fp_round_int(a, rm);
+    if (r >= 2147483648.0)  { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; return 0x7FFFFFFFu; }
+    if (r < -2147483648.0)  { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; return 0x80000000u; }
+    if (r != a) cpu.csr.data[CSR_FCSR] |= FFLAG_NX;
+    return (u32)(int32_t)r;
+}
+
+// FP → unsigned 32-bit integer (saturating, sets NV/NX)
+static u32 fp_to_u32(RV32 &cpu, double a, u32 rm)
+{
+    if (std::isnan(a)) { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; return 0xFFFFFFFFu; }
+    double r = fp_round_int(a, rm);
+    if (r >= 4294967296.0) { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; return 0xFFFFFFFFu; }
+    if (r < 0.0)           { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; return 0; }
+    if (r != a) cpu.csr.data[CSR_FCSR] |= FFLAG_NX;
+    return (u32)r;
+}
+
 // ---- FP → Integer Conversions (single) ----
-imp(fcvt_w_s, FormatR, { // rv32f: float → signed int32 (saturating)
+imp(fcvt_w_s, FormatR, {
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
-    float a = freg_read_s(cpu, ins.rs1);
-    u32 result;
-    if (std::isnan(a) || a >= 2147483648.0f)
-        { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0x7FFFFFFFu; }
-    else if (a < -2147483648.0f)
-        { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0x80000000u; }
-    else
-        { feclearexcept(FE_ALL_EXCEPT); result = (u32)(int32_t)a; fp_accum_flags(cpu); }
-    WR_RD(result)
+    u32 rm = fp_resolve_rm(ins_word, cpu.csr.data[CSR_FCSR]);
+    fesetround(FE_TONEAREST);
+    WR_RD(SEXT32(fp_to_s32(cpu, (double)freg_read_s(cpu, ins.rs1), rm)))
 })
-imp(fcvt_wu_s, FormatR, { // rv32f: float → unsigned int32 (saturating)
+imp(fcvt_wu_s, FormatR, {
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
-    float a = freg_read_s(cpu, ins.rs1);
-    u32 result;
-    if (std::isnan(a) || a >= 4294967296.0f)
-        { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0xFFFFFFFFu; }
-    else if (a < 0.0f) {
-        // Negative: round with selected mode; if it rounds up to 0 it's inexact (NX), else invalid (NV)
-        float rounded = std::rint(a);
-        if (rounded >= 0.0f) { cpu.csr.data[CSR_FCSR] |= FFLAG_NX; result = (u32)rounded; }
-        else                 { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0; }
-    } else
-        { feclearexcept(FE_ALL_EXCEPT); result = (u32)a; fp_accum_flags(cpu); }
-    WR_RD(result)
+    u32 rm = fp_resolve_rm(ins_word, cpu.csr.data[CSR_FCSR]);
+    fesetround(FE_TONEAREST);
+    WR_RD(SEXT32(fp_to_u32(cpu, (double)freg_read_s(cpu, ins.rs1), rm)))
 })
 
 // ---- Integer → FP Conversions (single) ----
@@ -1089,32 +1270,17 @@ imp(fcvt_s_wu, FormatR, { // rv32f: unsigned int32 → float
 })
 
 // ---- FP → Integer Conversions (double) ----
-imp(fcvt_w_d, FormatR, { // rv32d: double → signed int32 (saturating)
+imp(fcvt_w_d, FormatR, {
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
-    double a = freg_read_d(cpu, ins.rs1);
-    u32 result;
-    if (std::isnan(a) || a >= 2147483648.0)
-        { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0x7FFFFFFFu; }
-    else if (a < -2147483648.0)
-        { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0x80000000u; }
-    else
-        { feclearexcept(FE_ALL_EXCEPT); result = (u32)(int32_t)a; fp_accum_flags(cpu); }
-    WR_RD(result)
+    u32 rm = fp_resolve_rm(ins_word, cpu.csr.data[CSR_FCSR]);
+    fesetround(FE_TONEAREST);
+    WR_RD(SEXT32(fp_to_s32(cpu, freg_read_d(cpu, ins.rs1), rm)))
 })
-imp(fcvt_wu_d, FormatR, { // rv32d: double → unsigned int32 (saturating)
+imp(fcvt_wu_d, FormatR, {
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
-    double a = freg_read_d(cpu, ins.rs1);
-    u32 result;
-    if (std::isnan(a) || a >= 4294967296.0)
-        { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0xFFFFFFFFu; }
-    else if (a < 0.0) {
-        // Negative: round with selected mode; if it rounds up to 0 it's inexact (NX), else invalid (NV)
-        double rounded = std::rint(a);
-        if (rounded >= 0.0) { cpu.csr.data[CSR_FCSR] |= FFLAG_NX; result = (u32)rounded; }
-        else                { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0; }
-    } else
-        { feclearexcept(FE_ALL_EXCEPT); result = (u32)a; fp_accum_flags(cpu); }
-    WR_RD(result)
+    u32 rm = fp_resolve_rm(ins_word, cpu.csr.data[CSR_FCSR]);
+    fesetround(FE_TONEAREST);
+    WR_RD(SEXT32(fp_to_u32(cpu, freg_read_d(cpu, ins.rs1), rm)))
 })
 
 // ---- Integer → FP Conversions (double) ----
@@ -1157,6 +1323,89 @@ imp(fcvt_d_s, FormatR, { // rv32d: single → double (always exact)
     }
 })
 
+#if XLEN == 64
+////////////////////////////////////////////////////////////////
+// RV64F / RV64D: 64-bit integer conversions and moves
+////////////////////////////////////////////////////////////////
+
+// FP → signed 64-bit integer (saturating, sets NV/NX)
+static u64 fp_to_s64(RV32 &cpu, double a, u32 rm)
+{
+    if (std::isnan(a)) { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; return (u64)INT64_MAX; }
+    double r = fp_round_int(a, rm);
+    if (r >= 9223372036854775808.0)  { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; return (u64)INT64_MAX; }
+    if (r < -9223372036854775808.0)  { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; return (u64)INT64_MIN; }
+    if (r != a) cpu.csr.data[CSR_FCSR] |= FFLAG_NX;
+    return (u64)(s64)r;
+}
+
+// FP → unsigned 64-bit integer (saturating, sets NV/NX)
+static u64 fp_to_u64(RV32 &cpu, double a, u32 rm)
+{
+    if (std::isnan(a)) { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; return UINT64_MAX; }
+    double r = fp_round_int(a, rm);
+    if (r >= 18446744073709551616.0) { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; return UINT64_MAX; }
+    if (r < 0.0)                     { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; return 0; }
+    if (r != a) cpu.csr.data[CSR_FCSR] |= FFLAG_NX;
+    return (u64)r;
+}
+
+imp(fcvt_l_s, FormatR, { // rv64f: float → signed int64
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    u32 rm = fp_resolve_rm(ins_word, cpu.csr.data[CSR_FCSR]);
+    fesetround(FE_TONEAREST);
+    WR_RD(fp_to_s64(cpu, (double)freg_read_s(cpu, ins.rs1), rm))
+})
+imp(fcvt_lu_s, FormatR, { // rv64f: float → unsigned int64
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    u32 rm = fp_resolve_rm(ins_word, cpu.csr.data[CSR_FCSR]);
+    fesetround(FE_TONEAREST);
+    WR_RD(fp_to_u64(cpu, (double)freg_read_s(cpu, ins.rs1), rm))
+})
+imp(fcvt_l_d, FormatR, { // rv64d: double → signed int64
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    u32 rm = fp_resolve_rm(ins_word, cpu.csr.data[CSR_FCSR]);
+    fesetround(FE_TONEAREST);
+    WR_RD(fp_to_s64(cpu, freg_read_d(cpu, ins.rs1), rm))
+})
+imp(fcvt_lu_d, FormatR, { // rv64d: double → unsigned int64
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    u32 rm = fp_resolve_rm(ins_word, cpu.csr.data[CSR_FCSR]);
+    fesetround(FE_TONEAREST);
+    WR_RD(fp_to_u64(cpu, freg_read_d(cpu, ins.rs1), rm))
+})
+imp(fcvt_s_l, FormatR, { // rv64f: signed int64 → float
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    feclearexcept(FE_ALL_EXCEPT);
+    freg_write_s(cpu, ins.rd, (float)(s64)cpu.xreg[ins.rs1]);
+    fp_accum_flags(cpu);
+})
+imp(fcvt_s_lu, FormatR, { // rv64f: unsigned int64 → float
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    feclearexcept(FE_ALL_EXCEPT);
+    freg_write_s(cpu, ins.rd, (float)(u64)cpu.xreg[ins.rs1]);
+    fp_accum_flags(cpu);
+})
+imp(fcvt_d_l, FormatR, { // rv64d: signed int64 → double (may be inexact)
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    feclearexcept(FE_ALL_EXCEPT);
+    freg_write_d(cpu, ins.rd, (double)(s64)cpu.xreg[ins.rs1]);
+    fp_accum_flags(cpu);
+})
+imp(fcvt_d_lu, FormatR, { // rv64d: unsigned int64 → double (may be inexact)
+    if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
+    feclearexcept(FE_ALL_EXCEPT);
+    freg_write_d(cpu, ins.rd, (double)(u64)cpu.xreg[ins.rs1]);
+    fp_accum_flags(cpu);
+})
+imp(fmv_x_d, FormatR, { // rv64d: rd(int) = freg[rs1] bits
+    WR_RD(cpu.freg[ins.rs1])
+})
+imp(fmv_d_x, FormatR, { // rv64d: freg[rd] = xreg[rs1] bits
+    cpu.freg[ins.rd] = (u64)cpu.xreg[ins.rs1];
+})
+#endif
+
     ins_ret Emulator::insSelect(u32 ins_word)
 {
     u32 ins_masked;
@@ -1175,6 +1424,16 @@ imp(fcvt_d_s, FormatR, { // rv32d: single → double (always exact)
     {
         // could be CSR instruction
         ins_FormatCSR.value = cpu.getCsr(ins_FormatCSR.csr, &ret);
+#if XLEN == 64
+        // A real CSR instruction (opcode SYSTEM, funct3 != 0) to a CSR we don't implement
+        if (!ret.trap.en && (ins_word & 0x7f) == 0x73 && ((ins_word >> 12) & 7) != 0 &&
+            !cpu.csrImplemented(ins_FormatCSR.csr))
+        {
+            ret.trap.en = true;
+            ret.trap.type = trap_IllegalInstruction;
+            ret.trap.value = ins_word;
+        }
+#endif
     }
 
     ins_masked = ins_word & 0x0000007f;
@@ -1220,6 +1479,12 @@ imp(fcvt_d_s, FormatR, { // rv32d: single → double (always exact)
         run(sltiu, 0x00003013, ins_FormatI)
         run(sw, 0x00002023, ins_FormatS)
         run(xori, 0x00004013, ins_FormatI)
+#if XLEN == 64
+        run(addiw, 0x0000001b, ins_FormatI)
+        run(lwu, 0x00006003, ins_FormatI)
+        run(ld, 0x00003003, ins_FormatI)
+        run(sd, 0x00003023, ins_FormatS)
+#endif
     }
     ins_masked = ins_word & 0xf800707f;
     switch (ins_masked)
@@ -1234,11 +1499,26 @@ imp(fcvt_d_s, FormatR, { // rv32d: single → double (always exact)
         run(amominu_w, 0xc000202f, ins_FormatR)
         run(amomaxu_w, 0xe000202f, ins_FormatR)
         run(sc_w, 0x1800202f, ins_FormatR)
+#if XLEN == 64
+        run(amoswap_d, 0x0800302f, ins_FormatR)
+        run(amoadd_d, 0x0000302f, ins_FormatR)
+        run(amoxor_d, 0x2000302f, ins_FormatR)
+        run(amoand_d, 0x6000302f, ins_FormatR)
+        run(amoor_d, 0x4000302f, ins_FormatR)
+        run(amomin_d, 0x8000302f, ins_FormatR)
+        run(amomax_d, 0xa000302f, ins_FormatR)
+        run(amominu_d, 0xc000302f, ins_FormatR)
+        run(amomaxu_d, 0xe000302f, ins_FormatR)
+        run(sc_d, 0x1800302f, ins_FormatR)
+#endif
     }
     ins_masked = ins_word & 0xf9f0707f;
     switch (ins_masked)
     {
         run(lr_w, 0x1000202f, ins_FormatR)
+#if XLEN == 64
+        run(lr_d, 0x1000302f, ins_FormatR)
+#endif
     }
     ins_masked = ins_word & 0xfc00707f;
     switch (ins_masked)
@@ -1268,6 +1548,21 @@ imp(fcvt_d_s, FormatR, { // rv32d: single → double (always exact)
         run(srl, 0x00005033, ins_FormatR)
         run(sub, 0x40000033, ins_FormatR)
         run(xor, 0x00004033, ins_FormatR)
+#if XLEN == 64
+        run(slliw, 0x0000101b, ins_FormatR)
+        run(srliw, 0x0000501b, ins_FormatR)
+        run(sraiw, 0x4000501b, ins_FormatR)
+        run(addw, 0x0000003b, ins_FormatR)
+        run(subw, 0x4000003b, ins_FormatR)
+        run(sllw, 0x0000103b, ins_FormatR)
+        run(srlw, 0x0000503b, ins_FormatR)
+        run(sraw, 0x4000503b, ins_FormatR)
+        run(mulw, 0x0200003b, ins_FormatR)
+        run(divw, 0x0200403b, ins_FormatR)
+        run(divuw, 0x0200503b, ins_FormatR)
+        run(remw, 0x0200603b, ins_FormatR)
+        run(remuw, 0x0200703b, ins_FormatR)
+#endif
     }
     ins_masked = ins_word & 0xfe007fff;
     switch (ins_masked)
@@ -1310,6 +1605,9 @@ imp(fcvt_d_s, FormatR, { // rv32d: single → double (always exact)
         run(fmv_x_w,  0xe0000053, ins_FormatR)
         run(fclass_s, 0xe0001053, ins_FormatR)
         run(fclass_d, 0xe2001053, ins_FormatR)
+#if XLEN == 64
+        run(fmv_x_d,  0xe2000053, ins_FormatR)
+#endif
     }
     // fsqrt, fcvt, fmv.w.x — match funct7 + rs2 (no funct3)
     ins_masked = ins_word & 0xfff0007f;
@@ -1328,6 +1626,17 @@ imp(fcvt_d_s, FormatR, { // rv32d: single → double (always exact)
         run(fcvt_wu_d, 0xc2100053, ins_FormatR)
         run(fcvt_d_w,  0xd2000053, ins_FormatR)
         run(fcvt_d_wu, 0xd2100053, ins_FormatR)
+#if XLEN == 64
+        run(fcvt_l_s,  0xc0200053, ins_FormatR)
+        run(fcvt_lu_s, 0xc0300053, ins_FormatR)
+        run(fcvt_s_l,  0xd0200053, ins_FormatR)
+        run(fcvt_s_lu, 0xd0300053, ins_FormatR)
+        run(fcvt_l_d,  0xc2200053, ins_FormatR)
+        run(fcvt_lu_d, 0xc2300053, ins_FormatR)
+        run(fcvt_d_l,  0xd2200053, ins_FormatR)
+        run(fcvt_d_lu, 0xd2300053, ins_FormatR)
+        run(fmv_d_x,   0xf2000053, ins_FormatR)
+#endif
     }
     // fsgnj, fmin/max, feq/flt/fle — match funct7 + funct3
     ins_masked = ins_word & 0xfe00707f;
@@ -1423,11 +1732,15 @@ void Emulator::initialize()
 void Emulator::initializeElf(const char *path)
 {
     initialize();
+    memset(memory, 0, MEM_SIZE);
     // Load ELF image
-    if (loadElf(path, strlen(path) + 1, memory, MEM_SIZE) != 0)
+    uint64_t entry = 0x80000000u;
+    tohost_addr = 0;
+    if (loadElf(path, strlen(path) + 1, memory, MEM_SIZE, &entry, &tohost_addr) != 0)
         return;
 
     cpu.init(memory, NULL, debugMode);
+    cpu.pc = (xlen_t)entry;
     elf_file_path = path;
     ready_to_run = true;
 }
@@ -1455,9 +1768,18 @@ void Emulator::initializeBin(const char *path)
         return;
 
     // Place default DTB at end of RAM
+#if XLEN == 64
+    // RV64 image = OpenSBI (fw_jump at 0x80000000) + Linux (0x80200000). OpenSBI grows the
+    // FDT in place (reserved-memory fixups), so leave 1 MiB of room after the DTB.
+    const unsigned char *dtb_data = default_rv64_dtb;
+    uint32_t dtb_size   = (uint32_t)sizeof(default_rv64_dtb);
+    uint32_t dtb_offset = (uint32_t)MEM_SIZE - 0x100000u;
+#else
+    const unsigned char *dtb_data = default64mbdtb;
     uint32_t dtb_size   = (uint32_t)sizeof(default64mbdtb);
     uint32_t dtb_offset = (uint32_t)MEM_SIZE - dtb_size;
-    memcpy(memory + dtb_offset, default64mbdtb, dtb_size);
+#endif
+    memcpy(memory + dtb_offset, dtb_data, dtb_size);
 
     // Patch DTB memory-size field (offset 0x13c contains magic 0x00c0ff03)
     // uint32_t *dtb_u32 = (uint32_t *)(memory + dtb_offset);
@@ -1491,11 +1813,20 @@ void Emulator::emulate()
     if ((cpu.pc & 0x3) == 0)
     {
         // Fetch through MMU
-        u32 phys_pc = cpu.mmuTranslate(&ret, cpu.pc, MMU_ACCESS_FETCH);
+        xlen_t phys_pc = cpu.mmuTranslate(&ret, cpu.pc, MMU_ACCESS_FETCH);
         if (!ret.trap.en)
         {
             ins_word = cpu.memGetWord(phys_pc);
             ret = insSelect(ins_word);
+
+#if XLEN == 64
+            // Any FP register write makes mstatus.FS Dirty so the OS saves FP state on switch
+            {
+                u32 op = ins_word & 0x7f;
+                if (!ret.trap.en && (op == 0x07 || op == 0x43 || op == 0x47 || op == 0x4b || op == 0x4f || op == 0x53))
+                    cpu.fpStateDirty();
+            }
+#endif
 
             if (ret.csr_write && !ret.trap.en)
                 cpu.setCsr(ret.csr_write, ret.csr_val, &ret);
@@ -1542,7 +1873,7 @@ void Emulator::emulate()
 
     // UART tick + external interrupt
     cpu.uartTick();
-    u32 cur_mip = cpu.readCsrRaw(CSR_MIP);
+    xlen_t cur_mip = cpu.readCsrRaw(CSR_MIP);
     if (!(cur_mip & MIP_SEIP))
     {
         if (cpu.uart.interrupting)
@@ -1590,4 +1921,16 @@ void Emulator::emulate()
 
     // Advance PC (ret.pc_val defaults to pc+4)
     cpu.pc = ret.pc_val;
+
+    // ISA-test HTIF exit: a non-zero write to `tohost` finishes the test
+    if (test_mode && tohost_addr && !test_done)
+    {
+        u64 v = XLEN == 64 ? cpu.memGetDword(tohost_addr) : cpu.memGetWord(tohost_addr);
+        if (v != 0)
+        {
+            test_done = true;
+            test_result = (v == 1) ? 0 : v;
+            running = false;
+        }
+    }
 }

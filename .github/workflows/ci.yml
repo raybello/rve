@@ -22,9 +22,9 @@ jobs:
       - name: Install dependencies
         run: sudo apt-get update -y && sudo apt-get install -y libsdl2-dev
 
-      - name: Run ISA tests
+      - name: Run ISA tests (rv32, rv64, rv64 Sv39)
         working-directory: rve
-        run: make isas
+        run: make isas-all
 
   test-net:
     name: Net Pair Test

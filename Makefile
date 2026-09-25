@@ -4,6 +4,10 @@ OUTPUT_DIR = $(ROOT_DIR)/rve/assets/linux
 IMAGE=rve-linux
 CONTAINER_NAME=rve-linux-build
 
+# ARCH=rv32 (default): nommu RV32 kernel.  ARCH=rv64: Sv39 RV64 kernel + OpenSBI
+# (built into rve/assets/linux64/ and run with rve64).  Example: make build ARCH=rv64
+ARCH ?= rv32
+
 all:
 	make -C rve
 
@@ -19,6 +23,23 @@ isa:
 isas:
 	make -C rve isas
 
+isas32:
+	make -C rve isas32
+
+isas64:
+	make -C rve isas64
+
+isas64-v:
+	make -C rve isas64-v
+
+isas-all:
+	make -C rve isas-all
+
+isa-tests64:
+	scripts/build_isa64.sh
+	scripts/build_isa64.sh rve/assets/isa-test-rv64-v --virtual
+	scripts/build_isa64.sh rve/assets/isa-test-rv64-rve --custom
+
 linux:
 	make -C rve linux
 
@@ -26,7 +47,17 @@ linuxn:
 	make -C rve linuxn
 
 lnx:
+ifeq ($(ARCH),rv64)
+	make -C rve lnx64
+else
 	make -C rve lnx
+endif
+
+lnx64:
+	make -C rve lnx64
+
+linuxn64:
+	make -C rve linuxn64
 
 web:
 	make -C rve web
@@ -55,8 +86,16 @@ container:
 # Copy configs and build inside the running container (incremental)
 build:
 	docker exec -u root $(CONTAINER_NAME) bash -c "mkdir -p /ccache/tmp && chmod -R 777 /ccache"
-	docker exec $(CONTAINER_NAME) make -f docker/container.mk build
+	docker exec $(CONTAINER_NAME) make -f docker/container.mk build RVE_ARCH=$(ARCH)
+ifeq ($(ARCH),rv64)
+	make -C rve lnx64
+else
 	make -C rve lnx
+endif
+
+# Save the rv64 kernel .config from the container back into configs/rv64/kernel_config
+config-save64:
+	docker exec $(CONTAINER_NAME) make -f docker/container.mk config-save64
 
 # Stop and remove the container (next 'make container' starts fresh)
 stop:

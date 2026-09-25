@@ -15,6 +15,24 @@ using s32 = int32_t;
 using s16 = int16_t;
 using s8  = int8_t;
 
+// Register width. Build with -DXLEN=64 for RV64 (default is RV32).
+#ifndef XLEN
+#define XLEN 32
+#endif
+#if XLEN == 64
+using xlen_t   = uint64_t;
+using sxlen_t  = int64_t;
+using xlen2_t  = unsigned __int128; // double-width, for MULH*
+using sxlen2_t = __int128;
+#elif XLEN == 32
+using xlen_t   = uint32_t;
+using sxlen_t  = int32_t;
+using xlen2_t  = uint64_t;
+using sxlen2_t = int64_t;
+#else
+#error "XLEN must be 32 or 64"
+#endif
+
 // Clocking options
 enum CLK_SPEED
 {
@@ -32,22 +50,22 @@ typedef struct {
     bool en;        // Indicates if the trap is enabled.
     bool irq;       // Indicates if the trap is an interrupt (true) or exception (false).
     u32 type;      // Specifies the trap type identifier.
-    u32 value;     // Holds additional information related to the trap.
+    xlen_t value;  // Holds additional information related to the trap.
 } Trap;
 
 // Structure representing the result of an instruction execution.
 typedef struct {
-    u32 write_reg; // Register identifier where the result is written.
-    u32 write_val; // Value to write into the specified register.
-    u32 pc_val;    // Program counter value after instruction execution.
-    u32 csr_write; // CSR (Control and Status Register) index to write into.
-    u32 csr_val;   // Value to write into the specified CSR.
+    u32 write_reg;    // Register identifier where the result is written.
+    xlen_t write_val; // Value to write into the specified register.
+    xlen_t pc_val;    // Program counter value after instruction execution.
+    u32 csr_write;    // CSR (Control and Status Register) index to write into.
+    xlen_t csr_val;   // Value to write into the specified CSR.
     Trap trap;      // Contains any trap that occurred during execution.
 } ins_ret;
 
 // Structure representing the state of Control and Status Registers (CSRs).
 typedef struct {
-    u32 data[4096]; // Array holding all CSR values indexed by their IDs.
+    xlen_t data[4096]; // Array holding all CSR values indexed by their IDs.
     u32 privilege;  // Current privilege level of the processor.
 } csr_state;
 
@@ -56,6 +74,7 @@ typedef struct {
     u32 rbr_thr_ier_iir;   // Combined register for receive buffer, THR, IER, and IIR.
     u32 lcr_mcr_lsr_scr;   // Combined register for LCR, MCR, LSR, and SCR.
     bool thre_ip;           // Flag indicating whether the Transmit Holding Register is empty.
+    bool thr_pending;       // A byte (possibly NUL) was written to THR and has not been "transmitted" yet.
     bool interrupting;      // Indicates if an interrupt is currently being triggered.
 } uart_state;
 
@@ -68,10 +87,10 @@ typedef struct {
     u32 mtime_hi;      // Upper 32 bits of machine timer current count.
 } clint_state;
 
-// Structure representing the MMU state (Sv32 page table mode).
+// Structure representing the MMU state (Sv32 on RV32, Sv39 on RV64).
 typedef struct {
-    u32 mode;  // 0 = off, 1 = Sv32
-    u32 ppn;   // Root page-table physical page number
+    u32 mode;  // 0 = off, 1 = on (Sv32 when XLEN=32, Sv39 when XLEN=64)
+    u64 ppn;   // Root page-table physical page number
 } mmu_state;
 
 // Structure representing the network device state.

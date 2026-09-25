@@ -4,8 +4,16 @@ MAKEFLAGS += -j$(shell nproc 2>/dev/null || sysctl -n hw.logicalcpu)
 CXX = g++
 CC  = gcc
 
+# XLEN=32 (default) builds build/rve, XLEN=64 builds build64/rve64
+XLEN ?= 32
+ifeq ($(XLEN),64)
+BUILD_DIR = build64
+EXE = rve64
+CXXFLAGS += -DXLEN=64
+else
 BUILD_DIR = build
 EXE = rve
+endif
 
 SOURCE_DIR = src
 INCLUDE_DIR = include
@@ -26,7 +34,7 @@ $(shell mkdir -p $(BUILD_DIR))
 
 # Source Files
 SOURCES =  $(SOURCE_DIR)/main.cpp
-SOURCES += $(SOURCE_DIR)/rv32.cpp $(SOURCE_DIR)/emu.cpp $(SOURCE_DIR)/loader.cpp $(SOURCE_DIR)/app.cpp $(SOURCE_DIR)/net.cpp
+SOURCES += $(SOURCE_DIR)/rv32.cpp $(SOURCE_DIR)/emu.cpp $(SOURCE_DIR)/loader.cpp $(SOURCE_DIR)/app.cpp $(SOURCE_DIR)/net.cpp $(SOURCE_DIR)/headless.cpp
 # ImGui Files
 SOURCES += $(IMGUI_DIR)/imgui.cpp $(IMGUI_DIR)/imgui_demo.cpp $(IMGUI_DIR)/imgui_draw.cpp $(IMGUI_DIR)/imgui_tables.cpp $(IMGUI_DIR)/imgui_widgets.cpp
 SOURCES += $(IMGUI_DIR)/backends/imgui_impl_sdl2.cpp $(IMGUI_DIR)/backends/imgui_impl_opengl3.cpp
@@ -129,13 +137,41 @@ isa:
 	./$(BUILD_DIR)/$(EXE) $(ISAFLAGS) $(ISA_TEST_DIR)/$(ISA_TEST)
 	@echo =====================================
 
-isas:
+isas-gui:
 	$(MAKE) clean
 	$(MAKE) CXXFLAGS="$(CXXFLAGS) -DRVE_ISA_TEST" $(BUILD_DIR)/$(EXE)
 	@$(foreach test, $(ISA_TEST_FILES), \
 	  echo "=== $(test) ==="; \
 	  ./$(BUILD_DIR)/$(EXE) $(ISAFLAGS) $(ISA_TEST_DIR)/$(test); \
 	)
+
+# Headless ISA regression: prints PASS/FAIL/TIMEOUT per test, exits non-zero on any failure
+ISA_RV64_DIR = $(ASSETS_DIR)/isa-test-rv64
+# rve's own directed RV64 tests (CSR/satp WARL behaviour), see rve/tests/rv64
+ISA_RV64_RVE_DIR = $(ASSETS_DIR)/isa-test-rv64-rve
+# Sv39 virtual-memory (-v-) variants of the rv64 tests
+ISA_RV64_V_DIR = $(ASSETS_DIR)/isa-test-rv64-v
+
+isas32:
+	$(MAKE) XLEN=32 all
+	../scripts/run_isa.sh build/rve $(ISA_TEST_DIR)
+
+isas64:
+	$(MAKE) XLEN=64 all
+	../scripts/run_isa.sh build64/rve64 $(ISA_RV64_DIR)
+	../scripts/run_isa.sh build64/rve64 $(ISA_RV64_RVE_DIR)
+
+isas64-v:
+	$(MAKE) XLEN=64 all
+	../scripts/run_isa.sh build64/rve64 $(ISA_RV64_V_DIR)
+
+isas: isas32
+
+# Serialized on purpose: isas64 and isas64-v share build64/ and MAKEFLAGS enables -j
+isas-all:
+	$(MAKE) -j1 isas32
+	$(MAKE) -j1 isas64
+	$(MAKE) -j1 isas64-v
 
 linux-clean:
 	@echo ============ Cleaning Linux Test ============
@@ -154,6 +190,18 @@ linux: all linux-clean linux-dl
 	@echo ============ Running Linux Test ============
 	./$(BUILD_DIR)/$(EXE) -r -b $(BUILD_DIR)/Image
 
+# RV64 Linux (OpenSBI + Sv39 kernel built by `make build ARCH=rv64`, see docker/container.mk)
+LINUX64_IMAGE = $(ASSETS_DIR)/linux64/Image
+
+lnx64:
+	$(MAKE) XLEN=64 all
+	./build64/rve64 -r -b $(LINUX64_IMAGE)
+
+# headless (UART on stdout / stdin)
+linuxn64:
+	$(MAKE) XLEN=64 all
+	./build64/rve64 -n -b $(LINUX64_IMAGE)
+
 lnx: clean
 	make all && \
 	echo '============ Copying Linux Image ============' && \
@@ -170,4 +218,4 @@ net-test:
 	./$(BUILD_DIR)/net_pair_test
 
 clean:
-	rm -rf $(BUILD_DIR)/*
+	rm -rf build/* build64/*

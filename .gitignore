@@ -14,3 +14,6 @@ dts/sixtyfourmb.dtb
 hello_linux/framebuff
 hello_linux/hello_linux
 hello_linux/pi
+build64/
+# rv64 Linux image (~30 MB): produced by `make build ARCH=rv64`
+rve/assets/linux64/

@@ -46,6 +46,7 @@ bool RV32::init(u8 *memory, u8 *dtb, bool debug_mode, u8 *mtd, u32 mtd_size)
     uart.rbr_thr_ier_iir = 0;
     uart.lcr_mcr_lsr_scr = 0x00600000; // LSR THRE|TEMT both set (0x60 at shift 16)
     uart.thre_ip = false;
+    uart.thr_pending = false;
     uart.interrupting = false;
 
     mmu.mode = MMU_MODE_OFF;
@@ -75,24 +76,24 @@ void RV32::initCSRs()
     {
         csr.data[i] = 0;
     }
-    // RV32AIMSU + F(bit5) + D(bit3)
-    csr.data[CSR_MISA] = 0b01000000000101000001000100101001;
+    // A(0) D(3) F(5) I(8) M(12) S(18) U(20); MXL in the top two bits
+    csr.data[CSR_MISA] = ((xlen_t)MISA_MXL << (XLEN - 2)) | 0x00141129u;
 }
 
 void RV32::dump()
 {
     printf("======================================\n");
-    printf("DUMP: CPU state @%d:\n", clock);
+    printf("DUMP: CPU state @%llu:\n", (unsigned long long)clock);
     for (int i = 0; i < 32; i += 4)
     {
-        printf("DUMP: .x%02d = %08x  .x%02d = %08x  .%02d = %08x  .%02d = %08x\n",
-               i, xreg[i],
-               i + 1, xreg[i + 1],
-               i + 2, xreg[i + 2],
-               i + 3, xreg[i + 3]);
+        printf("DUMP: .x%02d = " XREG_FMT "  .x%02d = " XREG_FMT "  .%02d = " XREG_FMT "  .%02d = " XREG_FMT "\n",
+               i, (XREG_CAST)xreg[i],
+               i + 1, (XREG_CAST)xreg[i + 1],
+               i + 2, (XREG_CAST)xreg[i + 2],
+               i + 3, (XREG_CAST)xreg[i + 3]);
     }
-    printf("DUMP: .pc  = %08x\n", pc);
-    printf("DUMP: next ins: %08x\n", *(u32 *)(mem + (pc & 0x7FFFFFFF)));
+    printf("DUMP: .pc  = " XREG_FMT "\n", (XREG_CAST)pc);
+    printf("DUMP: next ins: %08x\n", memGetWord(pc));
 }
 
 void RV32::tick()
@@ -119,7 +120,7 @@ bool RV32::hasCsrAccessPrivilege(u32 addr)
 }
 
 // SSTATUS, SIE, and SIP are subsets of MSTATUS, MIE, and MIP
-u32 RV32::readCsrRaw(u32 address)
+xlen_t RV32::readCsrRaw(u32 address)
 {
     switch (address)
     {
@@ -129,21 +130,35 @@ u32 RV32::readCsrRaw(u32 address)
         return (csr.data[CSR_FCSR] >> 5) & 0x7u;
     case CSR_FCSR:
         return csr.data[CSR_FCSR] & 0xFFu;
+    case CSR_MSTATUS:
+        return csr.data[CSR_MSTATUS] | MSTATUS_XL_FIXED |
+               (((csr.data[CSR_MSTATUS] >> 13) & 3) == 3 ? MSTATUS_SD_BIT : 0);
     case CSR_SSTATUS:
-        return csr.data[CSR_MSTATUS] & 0x000de162u;
+        return (csr.data[CSR_MSTATUS] & 0x000de162u) | SSTATUS_XL_FIXED |
+               (((csr.data[CSR_MSTATUS] >> 13) & 3) == 3 ? MSTATUS_SD_BIT : 0);
     case CSR_SIE:
         return csr.data[CSR_MIE] & 0x222u;
     case CSR_SIP:
         return csr.data[CSR_MIP] & 0x222u;
     case CSR_MCYCLE:
     case CSR_CYCLE:
-        return clock;
+    case 0xb02: // minstret
+    case 0xc02: // instret
+        return (xlen_t)clock;
     case CSR_TIME:
+#if XLEN == 64
+        return (u64)clint.mtime_lo | ((u64)clint.mtime_hi << 32);
+#else
         return clint.mtime_lo;
+#endif
     case CSR_MHARTID:
         return 0;
     case CSR_SATP:
-        return (mmu.mode << 31) | mmu.ppn;
+#if XLEN == 64
+        return mmu.mode ? (((u64)8 << 60) | mmu.ppn) : 0;
+#else
+        return ((xlen_t)mmu.mode << 31) | (xlen_t)mmu.ppn;
+#endif
     case CSR_NET_TX_BUF_ADDR:
         return 0x11000000u;
     case CSR_NET_RX_BUF_ADDR:
@@ -157,21 +172,27 @@ u32 RV32::readCsrRaw(u32 address)
     }
 }
 
-void RV32::writeCsrRaw(u32 address, u32 value)
+void RV32::writeCsrRaw(u32 address, xlen_t value)
 {
     switch (address)
     {
     case CSR_FFLAGS:
         csr.data[CSR_FCSR] = (csr.data[CSR_FCSR] & ~0x1Fu) | (value & 0x1Fu);
+        fpStateDirty();
         break;
     case CSR_FRM:
         csr.data[CSR_FCSR] = (csr.data[CSR_FCSR] & ~0xE0u) | ((value & 0x7u) << 5);
+        fpStateDirty();
         break;
     case CSR_FCSR:
         csr.data[CSR_FCSR] = value & 0xFFu;
+        fpStateDirty();
+        break;
+    case CSR_MSTATUS:
+        csr.data[CSR_MSTATUS] = value & ~(xlen_t)(MSTATUS_XL_FIXED | MSTATUS_SD_BIT);
         break;
     case CSR_SSTATUS:
-        csr.data[CSR_MSTATUS] &= ~0x000de162u;  // was !0x000de162 (bug: logical NOT → 0)
+        csr.data[CSR_MSTATUS] &= ~(xlen_t)0x000de162u;  // was !0x000de162 (bug: logical NOT → 0)
         csr.data[CSR_MSTATUS] |= value & 0x000de162u;
         break;
     case CSR_SIE:
@@ -200,13 +221,50 @@ void RV32::writeCsrRaw(u32 address, u32 value)
     };
 }
 
-u32 RV32::getCsr(u32 address, ins_ret *ret)
+// mstatus.FS -> Dirty (3) if the FPU is enabled. Supervisors context-switch FP state based on
+// this, so it must be set whenever FP registers or fcsr are modified.
+void RV32::fpStateDirty()
+{
+#if XLEN == 64
+    if ((csr.data[CSR_MSTATUS] >> 13) & 3)
+        csr.data[CSR_MSTATUS] |= (xlen_t)3 << 13;
+#endif
+}
+
+// The set of CSRs rve implements on RV64. Anything else raises illegal-instruction, which is
+// how OpenSBI/Linux detect optional extensions (Sstc menvcfg/stimecmp, hpm counters, ...).
+bool RV32::csrImplemented(u32 a)
+{
+    switch (a)
+    {
+    case CSR_FFLAGS: case CSR_FRM: case CSR_FCSR:
+    case CSR_CYCLE: case CSR_TIME: case 0xc02:
+    case CSR_SSTATUS: case CSR_SIE: case CSR_STVEC: case 0x106 /*scounteren*/:
+    case 0x140 /*sscratch*/: case CSR_SEPC: case CSR_SCAUSE: case CSR_STVAL: case CSR_SIP: case CSR_SATP:
+    case CSR_MSTATUS: case CSR_MISA: case CSR_MEDELEG: case CSR_MIDELEG: case CSR_MIE: case CSR_MTVEC:
+    case 0x306 /*mcounteren*/: case 0x340 /*mscratch*/: case CSR_MEPC: case CSR_MCAUSE: case CSR_MTVAL: case CSR_MIP:
+    case CSR_MCYCLE: case 0xb02 /*minstret*/:
+    case 0xf11: case 0xf12: case 0xf13: case CSR_MHARTID:
+    // rve custom CSRs
+    case CSR_MEMOP_OP: case CSR_MEMOP_SRC: case CSR_MEMOP_DST: case CSR_MEMOP_N:
+    case CSR_PLAYER_ID: case CSR_RNG:
+    case CSR_NET_TX_BUF_ADDR: case CSR_NET_TX_BUF_SIZE_AND_SEND: case CSR_NET_RX_BUF_ADDR: case CSR_NET_RX_BUF_READY:
+        return true;
+    }
+    // PMP: pmpcfg0/2/.../14 (RV64 uses even registers only) and pmpaddr0..15. rve does not
+    // enforce PMP, the registers just hold what firmware writes.
+    if (a >= 0x3a0 && a <= 0x3ae && !(a & 1)) return true;
+    if (a >= 0x3b0 && a <= 0x3bf) return true;
+    return false;
+}
+
+xlen_t RV32::getCsr(u32 address, ins_ret *ret)
 {
     if (hasCsrAccessPrivilege(address))
     {
-        u32 r = readCsrRaw(address);
+        xlen_t r = readCsrRaw(address);
 #ifdef VERBOSE
-        printf("CSR read @%03x = %08x\n", address, r);
+        printf("CSR read @%03x = %llx\n", address, (unsigned long long)r);
 #endif
         return r;
     }
@@ -219,10 +277,10 @@ u32 RV32::getCsr(u32 address, ins_ret *ret)
     }
 }
 
-void RV32::setCsr(u32 address, u32 value, ins_ret *ret)
+void RV32::setCsr(u32 address, xlen_t value, ins_ret *ret)
 {
 #ifdef VERBOSE
-    printf("CSR write @%03x = %08x\n", address, value);
+    printf("CSR write @%03x = %llx\n", address, (unsigned long long)value);
 #endif
     if (hasCsrAccessPrivilege(address))
     {
@@ -265,15 +323,19 @@ bool RV32::handleTrap(ins_ret *ret, bool isInterrupt)
     u32 pos = t.type & 0xFFFF;
 
     u32 new_privilege = ((mdeleg >> pos) & 1) == 0 ? PRIV_MACHINE : (((sdeleg >> pos) & 1) == 0 ? PRIV_SUPERVISOR : PRIV_USER);
+    // Exceptions are never delegated to a less-privileged mode than the one they occur in
+    // (e.g. an ebreak in M-mode stays in M-mode even if medeleg delegates breakpoints).
+    if (!isInterrupt && new_privilege < current_privilege)
+        new_privilege = current_privilege;
 
-    u32 mstatus = readCsrRaw(CSR_MSTATUS);
-    u32 sstatus = readCsrRaw(CSR_SSTATUS);
-    u32 current_status = current_privilege == PRIV_MACHINE ? mstatus : (current_privilege == PRIV_SUPERVISOR ? sstatus : readCsrRaw(CSR_USTATUS));
+    xlen_t mstatus = readCsrRaw(CSR_MSTATUS);
+    xlen_t sstatus = readCsrRaw(CSR_SSTATUS);
+    xlen_t current_status = current_privilege == PRIV_MACHINE ? mstatus : (current_privilege == PRIV_SUPERVISOR ? sstatus : readCsrRaw(CSR_USTATUS));
 
     // check if IRQ should be ignored
     if (isInterrupt)
     {
-        u32 ie = new_privilege == PRIV_MACHINE ? readCsrRaw(CSR_MIE) : (new_privilege == PRIV_SUPERVISOR ? readCsrRaw(CSR_SIE) : readCsrRaw(CSR_UIE));
+        xlen_t ie = new_privilege == PRIV_MACHINE ? readCsrRaw(CSR_MIE) : (new_privilege == PRIV_SUPERVISOR ? readCsrRaw(CSR_SIE) : readCsrRaw(CSR_UIE));
 
         u32 current_mie = (current_status >> 3) & 1;
         u32 current_sie = (current_status >> 1) & 1;
@@ -347,32 +409,33 @@ bool RV32::handleTrap(ins_ret *ret, bool isInterrupt)
 
     // For interrupts, EPC is the PC of the *next* instruction (already in pc_val)
     writeCsrRaw(csr_epc_addr, isInterrupt ? ret->pc_val : pc);
-    writeCsrRaw(csr_cause_addr, t.type);
+    // Interrupt bit lives in the MSB of xcause (bit 31 on RV32, bit 63 on RV64)
+    writeCsrRaw(csr_cause_addr, (t.type & interrupt_offset) ? (((xlen_t)1 << (XLEN - 1)) | pos) : (xlen_t)t.type);
     writeCsrRaw(csr_tval_addr, t.value);
     ret->pc_val = readCsrRaw(csr_tvec_addr);
 
     if ((ret->pc_val & 0x3) != 0)
     {
-        // vectored handler
-        ret->pc_val = (ret->pc_val & ~0x3) + 4 * pos;
+        // vectored handler (interrupts only; synchronous traps use the base address)
+        ret->pc_val = (ret->pc_val & ~(xlen_t)0x3) + (isInterrupt ? 4 * pos : 0);
     }
 
     // NOTE: No user mode interrupt/exception handling!
     if (new_privilege == PRIV_MACHINE)
     {
-        u32 mie = (mstatus >> 3) & 1;
-        u32 new_status = (mstatus & ~0x1888u) | (mie << 7) | (current_privilege << 11);
+        xlen_t mie = (mstatus >> 3) & 1;
+        xlen_t new_status = (mstatus & ~(xlen_t)0x1888u) | (mie << 7) | ((xlen_t)current_privilege << 11);
         writeCsrRaw(CSR_MSTATUS, new_status);
     }
     else
     { // PRIV_SUPERVISOR
-        u32 sie = (sstatus >> 1) & 1;  // bit 1 = SIE (was incorrectly bit 3)
-        u32 new_status = (sstatus & ~0x122u) | (sie << 5) | ((current_privilege & 1) << 8);
+        xlen_t sie = (sstatus >> 1) & 1;  // bit 1 = SIE (was incorrectly bit 3)
+        xlen_t new_status = (sstatus & ~(xlen_t)0x122u) | (sie << 5) | ((xlen_t)(current_privilege & 1) << 8);
         writeCsrRaw(CSR_SSTATUS, new_status);
     }
 
 #ifdef RV32_VERBOSE
-    printf("trap: type=%08x value=%08x (IRQ: %d) moved PC from @%08x to @%08x\n", t.type, t.value, is_interrupt, pc, ret->pc_val);
+    printf("trap: type=%08x value=%llx (IRQ: %d) moved PC from @%llx to @%llx\n", t.type, (unsigned long long)t.value, isInterrupt, (unsigned long long)pc, (unsigned long long)ret->pc_val);
 #endif
     /* debug_single_step = true; */
 
@@ -383,13 +446,13 @@ void RV32::handleIrqAndTrap(ins_ret *ret)
 {
     Trap t = ret->trap;
     u32 mip_reset = MIP_ALL;
-    u32 cur_mip = readCsrRaw(CSR_MIP);
+    xlen_t cur_mip = readCsrRaw(CSR_MIP);
     bool irq = false;
 
     if (!t.en)
     {
         irq = true;
-        u32 mirq = cur_mip & readCsrRaw(CSR_MIE);
+        xlen_t mirq = cur_mip & readCsrRaw(CSR_MIE);
 
         // if/else chain: handle highest-priority IRQ first
 #define HANDLE(mip, ttype) \
@@ -414,7 +477,7 @@ void RV32::handleIrqAndTrap(ins_ret *ret)
         {
             // Timer IRQ (MTIP/STIP) is cleared by guest writing mtimecmp, not here
             if ((mip_reset & (MIP_MTIP | MIP_STIP)) == 0)
-                writeCsrRaw(CSR_MIP, cur_mip & ~mip_reset);
+                writeCsrRaw(CSR_MIP, cur_mip & ~(xlen_t)mip_reset);
         }
     }
 }
@@ -423,9 +486,9 @@ void RV32::handleIrqAndTrap(ins_ret *ret)
 // Memory Functions
 ///////////////////////////////////////
 // little endian, zero extended
-u32 RV32::memGetByte(u32 addr)
+u32 RV32::memGetByte(xlen_t addr)
 {
-    if ((addr & 0x80000000u) == 0)
+    if (addr < 0x80000000u)
     {
         // ---- Low-address MMIO ----
 
@@ -529,33 +592,33 @@ u32 RV32::memGetByte(u32 addr)
         return 0; // unmapped MMIO
     }
 
-    // ---- RAM (bit 31 set) ----
-    u32 phys = addr & 0x7FFFFFFFu;
-    if (phys >= (u32)RV32_MEM_SIZE)
+    // ---- RAM (addresses >= 0x80000000) ----
+    xlen_t phys = addr - 0x80000000u;
+    if (phys >= (xlen_t)RV32_MEM_SIZE)
         return 0;
     return mem[phys];
 }
 
-u32 RV32::memGetHalfWord(u32 addr)
+u32 RV32::memGetHalfWord(xlen_t addr)
 {
-    // Fast path: RAM addresses have bit 31 set — skip MMIO dispatch
-    if (addr & 0x80000000u)
+    // Fast path: RAM addresses (>= 0x80000000) — skip MMIO dispatch
+    if (addr >= 0x80000000u)
     {
-        u32 phys = addr & 0x7FFFFFFFu;
-        if (phys <= (u32)(RV32_MEM_SIZE - 2))
+        xlen_t phys = addr - 0x80000000u;
+        if (phys <= (xlen_t)(RV32_MEM_SIZE - 2))
             return ((u32)mem[phys]) | ((u32)mem[phys + 1] << 8);
         return 0;
     }
     return memGetByte(addr) | ((u32)memGetByte(addr + 1) << 8);
 }
 
-u32 RV32::memGetWord(u32 addr)
+u32 RV32::memGetWord(xlen_t addr)
 {
-    // Fast path: RAM addresses have bit 31 set — skip MMIO dispatch (4x cheaper)
-    if (addr & 0x80000000u)
+    // Fast path: RAM addresses (>= 0x80000000) — skip MMIO dispatch (4x cheaper)
+    if (addr >= 0x80000000u)
     {
-        u32 phys = addr & 0x7FFFFFFFu;
-        if (phys <= (u32)(RV32_MEM_SIZE - 4))
+        xlen_t phys = addr - 0x80000000u;
+        if (phys <= (xlen_t)(RV32_MEM_SIZE - 4))
             return ((u32)mem[phys]) | ((u32)mem[phys + 1] << 8) |
                    ((u32)mem[phys + 2] << 16) | ((u32)mem[phys + 3] << 24);
         return 0;
@@ -566,9 +629,25 @@ u32 RV32::memGetWord(u32 addr)
            ((u32)memGetByte(addr + 3) << 24);
 }
 
-void RV32::memSetByte(u32 addr, u32 val)
+u64 RV32::memGetDword(xlen_t addr)
 {
-    if ((addr & 0x80000000u) == 0)
+    if (addr >= 0x80000000u)
+    {
+        xlen_t phys = addr - 0x80000000u;
+        if (phys <= (xlen_t)(RV32_MEM_SIZE - 8))
+        {
+            u64 v;
+            memcpy(&v, mem + phys, 8); // little-endian host
+            return v;
+        }
+        return 0;
+    }
+    return (u64)memGetWord(addr) | ((u64)memGetWord(addr + 4) << 32);
+}
+
+void RV32::memSetByte(xlen_t addr, u32 val)
+{
+    if (addr < 0x80000000u)
     {
         // ---- Low-address MMIO ----
 
@@ -593,12 +672,17 @@ void RV32::memSetByte(u32 addr, u32 val)
             return;
         }
 
-        // Writing to mtimecmp clears MTIP/STIP (spec requirement)
+        // Writing to mtimecmp clears MTIP (spec requirement). On RV64 STIP is left alone: it is
+        // a software bit that the SBI firmware sets/clears on behalf of the supervisor.
         if ((addr >= 0x02004000u && addr < 0x02004008u) ||
             (addr >= 0x11004000u && addr < 0x11004008u))
         {
-            u32 cur_mip = readCsrRaw(CSR_MIP);
-            writeCsrRaw(CSR_MIP, cur_mip & ~(MIP_MTIP | MIP_STIP));
+            xlen_t cur_mip = readCsrRaw(CSR_MIP);
+#if XLEN == 64
+            writeCsrRaw(CSR_MIP, cur_mip & ~(xlen_t)MIP_MTIP);
+#else
+            writeCsrRaw(CSR_MIP, cur_mip & ~(xlen_t)(MIP_MTIP | MIP_STIP));
+#endif
         }
 
         switch (addr)
@@ -659,6 +743,7 @@ void RV32::memSetByte(u32 addr, u32 val)
         case 0x10000000u:
             if ((UART_GET2(LCR) >> 7) == 0)
             {
+                uart.thr_pending = true;
                 UART_SET1(THR, val);
                 UART_SET2(LSR, (UART_GET2(LSR) & ~LSR_THR_EMPTY));
                 uartUpdateIir();
@@ -685,20 +770,20 @@ void RV32::memSetByte(u32 addr, u32 val)
         return; // unmapped MMIO write — ignore
     }
 
-    // ---- RAM (bit 31 set) ----
-    u32 phys = addr & 0x7FFFFFFFu;
-    if (phys >= (u32)RV32_MEM_SIZE)
+    // ---- RAM (addresses >= 0x80000000) ----
+    xlen_t phys = addr - 0x80000000u;
+    if (phys >= (xlen_t)RV32_MEM_SIZE)
         return;
     mem[phys] = (u8)val;
 }
 
-void RV32::memSetHalfWord(u32 addr, u32 val)
+void RV32::memSetHalfWord(xlen_t addr, u32 val)
 {
-    // Fast path: RAM addresses have bit 31 set — skip MMIO dispatch
-    if (addr & 0x80000000u)
+    // Fast path: RAM addresses (>= 0x80000000) — skip MMIO dispatch
+    if (addr >= 0x80000000u)
     {
-        u32 phys = addr & 0x7FFFFFFFu;
-        if (phys <= (u32)(RV32_MEM_SIZE - 2))
+        xlen_t phys = addr - 0x80000000u;
+        if (phys <= (xlen_t)(RV32_MEM_SIZE - 2))
         {
             mem[phys]     = (u8)(val);
             mem[phys + 1] = (u8)(val >> 8);
@@ -709,13 +794,13 @@ void RV32::memSetHalfWord(u32 addr, u32 val)
     memSetByte(addr + 1, (val >> 8) & 0xFF);
 }
 
-void RV32::memSetWord(u32 addr, u32 val)
+void RV32::memSetWord(xlen_t addr, u32 val)
 {
-    // Fast path: RAM addresses have bit 31 set — skip MMIO dispatch (4x cheaper)
-    if (addr & 0x80000000u)
+    // Fast path: RAM addresses (>= 0x80000000) — skip MMIO dispatch (4x cheaper)
+    if (addr >= 0x80000000u)
     {
-        u32 phys = addr & 0x7FFFFFFFu;
-        if (phys <= (u32)(RV32_MEM_SIZE - 4))
+        xlen_t phys = addr - 0x80000000u;
+        if (phys <= (xlen_t)(RV32_MEM_SIZE - 4))
         {
             mem[phys]     = (u8)(val);
             mem[phys + 1] = (u8)(val >> 8);
@@ -728,6 +813,19 @@ void RV32::memSetWord(u32 addr, u32 val)
     memSetByte(addr + 1, (val >> 8) & 0xFF);
     memSetByte(addr + 2, (val >> 16) & 0xFF);
     memSetByte(addr + 3, val >> 24);
+}
+
+void RV32::memSetDword(xlen_t addr, u64 val)
+{
+    if (addr >= 0x80000000u)
+    {
+        xlen_t phys = addr - 0x80000000u;
+        if (phys <= (xlen_t)(RV32_MEM_SIZE - 8))
+            memcpy(mem + phys, &val, 8); // little-endian host
+        return;
+    }
+    memSetWord(addr, (u32)val);
+    memSetWord(addr + 4, (u32)(val >> 32));
 }
 
 ///////////////////////////////////////
@@ -768,10 +866,14 @@ void RV32::uartTick()
     }
 
     u32 thr = UART_GET1(THR);
-    if (thr != 0)
+    if (uart.thr_pending)
     {
-        printf("%c", (char)thr);
-        fflush(stdout);
+        uart.thr_pending = false;
+        if (thr != 0) // a NUL byte is "transmitted" too (firmware does write them) but prints nothing
+        {
+            printf("%c", (char)thr);
+            fflush(stdout);
+        }
         UART_SET1(THR, 0);
         UART_SET2(LSR, (UART_GET2(LSR) | LSR_THR_EMPTY));
         uartUpdateIir();
@@ -801,13 +903,24 @@ void RV32::kbdPush(u8 keycode, bool release)
 }
 
 ///////////////////////////////////////
-// MMU Functions (Sv32)
+// MMU Functions (Sv32 on RV32, Sv39 on RV64)
 ///////////////////////////////////////
 
-void RV32::mmuUpdate(u32 satp)
+void RV32::mmuUpdate(xlen_t satp)
 {
+#if XLEN == 64
+    // satp.MODE (bits 63:60) is WARL: only Bare (0) and Sv39 (8) are supported.
+    // A write with an unsupported mode leaves satp unchanged, which is how
+    // software probes for Sv48/Sv57 support.
+    u32 mode = (u32)(satp >> 60);
+    if (mode != 0 && mode != 8)
+        return;
+    mmu.mode = mode ? MMU_MODE_SV39 : MMU_MODE_OFF;
+    mmu.ppn  = satp & 0xfffffffffffull; // bits 43:0 = PPN in Sv39
+#else
     mmu.mode = (satp >> 31) & 1;
     mmu.ppn  = satp & 0x3fffffu; // bits 21:0 = PPN in Sv32
+#endif
 }
 
 #define MMU_FAULT(ret_ptr, addr_val, mode_val) \
@@ -818,23 +931,70 @@ void RV32::mmuUpdate(u32 satp)
     (ret_ptr)->trap.value = (addr_val); \
     return 0;
 
-u32 RV32::mmuTranslate(ins_ret *ret, u32 addr, u32 mode)
+xlen_t RV32::mmuTranslate(ins_ret *ret, xlen_t addr, u32 mode)
 {
     if (mmu.mode == MMU_MODE_OFF)
         return addr;
 
     // Determine effective privilege and mstatus flags
-    u32 mstatus = readCsrRaw(CSR_MSTATUS);
+    xlen_t mstatus = readCsrRaw(CSR_MSTATUS);
     u32 sum  = (mstatus >> 18) & 1;
     u32 mxr  = (mstatus >> 19) & 1;
-    u32 priv = ((mstatus >> 17) & 1) ? ((mstatus >> 11) & 3) : csr.privilege;
+    // MPRV only affects loads/stores, never instruction fetch
+    u32 priv = (((mstatus >> 17) & 1) && mode != MMU_ACCESS_FETCH) ? ((mstatus >> 11) & 3) : csr.privilege;
 
-    // Machine mode always uses physical addresses;
-    // M-mode instruction fetch also bypasses paging
-    if (priv == PRIV_MACHINE ||
-        (csr.privilege == PRIV_MACHINE && mode == MMU_ACCESS_FETCH))
+    // Machine mode always uses physical addresses
+    if (priv == PRIV_MACHINE)
         return addr;
 
+#if XLEN == 64
+    // Sv39: bits 63:39 of the virtual address must equal bit 38
+    {
+        s64 top = (s64)addr >> 38;
+        if (top != 0 && top != -1) { MMU_FAULT(ret, addr, mode) }
+    }
+
+    // Three-level Sv39 page-table walk (8-byte PTEs, 9-bit VPN fields)
+    u64 a = mmu.ppn * 4096ull;
+    u64 pte = 0;
+    int level;
+    for (level = 2; level >= 0; level--)
+    {
+        u64 vpn = (addr >> (12 + 9 * level)) & 0x1ff;
+        pte = memGetDword(a + vpn * 8);
+
+        bool v = pte & 1, r = (pte >> 1) & 1, w = (pte >> 2) & 1, x = (pte >> 3) & 1;
+        // Invalid, reserved R/W combination, or reserved bits 63:54 set
+        if (!v || (!r && w) || (pte >> 54) != 0) { MMU_FAULT(ret, addr, mode) }
+
+        if (r || x)
+            break; // leaf PTE
+        if (level == 0) { MMU_FAULT(ret, addr, mode) } // non-leaf at bottom level
+        a = ((pte >> 10) & 0xfffffffffffull) * 4096ull;
+    }
+
+    bool page_r = (pte >> 1) & 1, page_w = (pte >> 2) & 1, page_x = (pte >> 3) & 1;
+    bool page_u = (pte >> 4) & 1, page_a = (pte >> 6) & 1, page_d = (pte >> 7) & 1;
+    u64 ppn = (pte >> 10) & 0xfffffffffffull;
+
+    // Permission check
+    bool perm = (priv == PRIV_USER && page_u) ||
+                (priv == PRIV_SUPERVISOR && (!page_u || (sum && mode != MMU_ACCESS_FETCH)));
+    bool access = (mode == MMU_ACCESS_FETCH && page_x) ||
+                  (mode == MMU_ACCESS_READ  && (page_r || (page_x && mxr))) ||
+                  (mode == MMU_ACCESS_WRITE && page_w);
+    if (!(perm && access)) { MMU_FAULT(ret, addr, mode) }
+
+    // Misaligned superpage: low PPN fields below the leaf level must be zero
+    if (level > 0 && (ppn & ((1ull << (9 * level)) - 1)) != 0) { MMU_FAULT(ret, addr, mode) }
+
+    // Accessed / dirty bits must be set (Svade behaviour)
+    if (!page_a || (mode == MMU_ACCESS_WRITE && !page_d)) { MMU_FAULT(ret, addr, mode) }
+
+    // Physical address: superpages take the low bits from the virtual address
+    u64 offset_mask = (1ull << (12 + 9 * level)) - 1;
+    return ((ppn << 12) & ~offset_mask) | (addr & offset_mask);
+#else
     // Two-level Sv32 page-table walk
     bool super = false;
     u32 page_ppn0 = 0, page_ppn1 = 0;
@@ -891,6 +1051,7 @@ u32 RV32::mmuTranslate(ins_ret *ret, u32 addr, u32 mode)
     pa |= super ? (((addr >> 12) & 0x3ffu) << 12) : (page_ppn0 << 12);
     pa |= page_ppn1 << 22;
     return pa;
+#endif
 }
 #undef MMU_FAULT
 
