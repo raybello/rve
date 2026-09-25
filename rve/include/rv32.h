@@ -1,6 +1,9 @@
 #ifndef RV32IMA_H
 #define RV32IMA_H
 
+#include "netbackend.h"
+#include "plic.h"
+#include "virtio_net.h"
 #include <cstdint>
 #include <stdio.h>
 #include <assert.h>
@@ -256,6 +259,13 @@ public:
     mmu_state mmu;
     // Network device state
     net_state net;
+    // virtio-net + PLIC (external interrupt controller for it)
+    Plic plic;
+    VirtioNet vnet;
+    NullBackend null_backend;
+    bool plic_seip = false; // SEIP currently asserted by the PLIC
+    void setNetBackend(NetBackend *be); // not owned; nullptr restores the null backend
+    void netTick();                     // per-instruction virtio/PLIC servicing (cheap when idle)
     // RTC registers (ds1742 compatible)
     u32 rtc0, rtc1;
     // SYSCON (poweroff/reboot): set when 0x11100000 is written

@@ -56,6 +56,9 @@ bool RV32::init(u8 *memory, u8 *dtb, bool debug_mode, u8 *mtd, u32 mtd_size)
     net.nettx = (u8 *)malloc(4096);
     net.netrx = (u8 *)malloc(4096);
 
+    plic.reset();
+    setNetBackend(nullptr);
+
     rtc0 = 0;
     rtc1 = 0;
     syscon_cmd = 0;
@@ -483,6 +486,49 @@ void RV32::handleIrqAndTrap(ins_ret *ret)
 }
 
 ///////////////////////////////////////
+// virtio-net + PLIC
+///////////////////////////////////////
+void RV32::setNetBackend(NetBackend *be)
+{
+    GuestMem gm;
+    gm.read = [this](uint64_t pa, void *dst, size_t n) {
+        if (pa >= 0x80000000u && pa - 0x80000000u + n <= (uint64_t)RV32_MEM_SIZE)
+            memcpy(dst, mem + (pa - 0x80000000u), n);
+        else
+            memset(dst, 0, n);
+    };
+    gm.write = [this](uint64_t pa, const void *src, size_t n) {
+        if (pa >= 0x80000000u && pa - 0x80000000u + n <= (uint64_t)RV32_MEM_SIZE)
+            memcpy(mem + (pa - 0x80000000u), src, n);
+    };
+    vnet.init(gm, be ? be : &null_backend);
+}
+
+void RV32::netTick()
+{
+    if (!vnet.active()) return;
+    if ((clock & 0x3F) == 0) vnet.tick();
+    plic.setLevel(VIRTIO_NET_IRQ, vnet.irqLevel());
+    bool active = plic.ctxActive(1);
+    xlen_t mip = readCsrRaw(CSR_MIP);
+    if (active && !(mip & MIP_SEIP))
+    {
+        writeCsrRaw(CSR_MIP, mip | MIP_SEIP);
+        plic_seip = true;
+    }
+    else if (!active && plic_seip)
+    {
+        writeCsrRaw(CSR_MIP, mip & ~(xlen_t)MIP_SEIP);
+        plic_seip = false;
+    }
+}
+
+// Word-granular MMIO for the PLIC and the virtio-net window (claim reads have side effects,
+// so these must not be composed from byte accesses).
+static inline bool inVirtio(xlen_t a) { return a >= VIRTIO_NET_BASE && a < VIRTIO_NET_BASE + VIRTIO_NET_SIZE; }
+static inline bool inPlic(xlen_t a) { return a >= PLIC_BASE && a < PLIC_BASE + PLIC_SIZE; }
+
+///////////////////////////////////////
 // Memory Functions
 ///////////////////////////////////////
 // little endian, zero extended
@@ -503,6 +549,10 @@ u32 RV32::memGetByte(xlen_t addr)
         // Network RX DMA buffer at 0x11001000–0x11001fff
         if (addr >= 0x11001000u && addr < 0x11002000u)
             return net.netrx[addr - 0x11001000u];
+
+        // virtio-net config/regs: sub-word reads are extracted from the aligned word (no side effects)
+        if (inVirtio(addr))
+            return (vnet.read((addr - VIRTIO_NET_BASE) & ~3u) >> (8 * (addr & 3))) & 0xFF;
 
         // RTC at 0x03000000–0x030007ff
         if (addr >= RTC_MMIO_BASE && addr < (RTC_MMIO_BASE + RTC_MMIO_SIZE))
@@ -622,6 +672,11 @@ u32 RV32::memGetWord(xlen_t addr)
             return ((u32)mem[phys]) | ((u32)mem[phys + 1] << 8) |
                    ((u32)mem[phys + 2] << 16) | ((u32)mem[phys + 3] << 24);
         return 0;
+    }
+    if ((addr & 3) == 0)
+    {
+        if (inPlic(addr))   return plic.read(addr - PLIC_BASE);
+        if (inVirtio(addr)) return vnet.read(addr - VIRTIO_NET_BASE);
     }
     return memGetByte(addr) |
            ((u32)memGetByte(addr + 1) << 8) |
@@ -808,6 +863,11 @@ void RV32::memSetWord(xlen_t addr, u32 val)
             mem[phys + 3] = (u8)(val >> 24);
         }
         return;
+    }
+    if ((addr & 3) == 0)
+    {
+        if (inPlic(addr))   { plic.write(addr - PLIC_BASE, val); return; }
+        if (inVirtio(addr)) { vnet.write(addr - VIRTIO_NET_BASE, val); return; }
     }
     memSetByte(addr, val & 0xFF);
     memSetByte(addr + 1, (val >> 8) & 0xFF);
