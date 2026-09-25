@@ -703,7 +703,7 @@ void App::createCpuState()
         {
             ImGui::TableNextColumn();
 
-            ImGui::Text("%s: 0x%04X", rv_regs[i], emu.cpu.xreg[i]);
+            ImGui::Text("%s: 0x%04llX", rv_regs[i], (unsigned long long)emu.cpu.xreg[i]);
         }
         ImGui::EndTable();
         HelpMarker("CPU Registers x0-31");
@@ -713,15 +713,15 @@ void App::createCpuState()
     {
         {
             ImGui::TableNextColumn();
-            ImGui::Text("PC: 0x%04X", emu.cpu.pc);
+            ImGui::Text("PC: 0x%04llX", (unsigned long long)emu.cpu.pc);
             ImGui::TableNextColumn();
-            ImGui::Text("Clock: 0x%04X", emu.cpu.clock);
+            ImGui::Text("Clock: 0x%04llX", (unsigned long long)emu.cpu.clock);
             ImGui::TableNextColumn();
             ImGui::Text("DebugMode: %s", emu.debugMode ? "Enabled" : "Disabled");
             ImGui::TableNextColumn();
             ImGui::Text("Rsrv en: 0x%04X", emu.cpu.reservation_en);
             ImGui::TableNextColumn();
-            ImGui::Text("Rsrv addr: 0x%04X", emu.cpu.reservation_addr);
+            ImGui::Text("Rsrv addr: 0x%04llX", (unsigned long long)emu.cpu.reservation_addr);
             ImGui::TableNextColumn();
             ImGui::Text("Running: %s", emu.running ? "Running" : "Halted");
         }
@@ -766,7 +766,7 @@ void App::createDisasm()
             }
 
             // Append the new data at the end
-            disasm_inst(buf[buffer_size - 1], sizeof(buf[buffer_size - 1]), rv32, emu.cpu.pc, emu.cpu.memGetWord(emu.cpu.pc));
+            disasm_inst(buf[buffer_size - 1], sizeof(buf[buffer_size - 1]), XLEN == 64 ? rv64 : rv32, emu.cpu.pc, emu.cpu.memGetWord(emu.cpu.pc));
             prev_pc = emu.cpu.pc;
             pc[buffer_size - 1] = prev_pc;
         }

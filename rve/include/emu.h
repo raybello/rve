@@ -13,13 +13,13 @@ using uint16 = uint16_t;
 using u8 = uint8_t;
 
 // Instruction Decoding
-u32 signExtend(u32 x, u32 b);
+xlen_t signExtend(xlen_t x, u32 b);
 
 typedef struct
 {
     u32 rs1;
     u32 rs2;
-    u32 imm;
+    xlen_t imm;
 } FormatB;
 
 FormatB parse_FormatB(u32 word);
@@ -29,7 +29,7 @@ typedef struct
     u32 csr;
     u32 rs;
     u32 rd;
-    u32 value;
+    xlen_t value;
 } FormatCSR;
 
 FormatCSR parse_FormatCSR(u32 word);
@@ -38,7 +38,7 @@ typedef struct
 {
     u32 rd;
     u32 rs1;
-    u32 imm;
+    xlen_t imm;
 } FormatI;
 
 FormatI parse_FormatI(u32 word);
@@ -46,7 +46,7 @@ FormatI parse_FormatI(u32 word);
 typedef struct
 {
     u32 rd;
-    u32 imm;
+    xlen_t imm;
 } FormatJ;
 
 FormatJ parse_FormatJ(u32 word);
@@ -65,7 +65,7 @@ typedef struct
 {
     u32 rs1;
     u32 rs2;
-    u32 imm;
+    xlen_t imm;
 } FormatS;
 
 FormatS parse_FormatS(u32 word);
@@ -73,7 +73,7 @@ FormatS parse_FormatS(u32 word);
 typedef struct
 {
     u32 rd;
-    u32 imm;
+    xlen_t imm;
 } FormatU;
 
 FormatU parse_FormatU(u32 word);
@@ -210,6 +210,50 @@ public:
     def(wfi, FormatEmpty); // system
     def(xor, FormatR); // rv32i
     def(xori, FormatI); // rv32i
+
+#if XLEN == 64
+    // ---- RV64I / RV64M / RV64A additions ----
+    def(lwu, FormatI);
+    def(ld, FormatI);
+    def(sd, FormatS);
+    def(addiw, FormatI);
+    def(slliw, FormatR);
+    def(srliw, FormatR);
+    def(sraiw, FormatR);
+    def(addw, FormatR);
+    def(subw, FormatR);
+    def(sllw, FormatR);
+    def(srlw, FormatR);
+    def(sraw, FormatR);
+    def(mulw, FormatR);
+    def(divw, FormatR);
+    def(divuw, FormatR);
+    def(remw, FormatR);
+    def(remuw, FormatR);
+    def(lr_d, FormatR);
+    def(sc_d, FormatR);
+    def(amoswap_d, FormatR);
+    def(amoadd_d, FormatR);
+    def(amoxor_d, FormatR);
+    def(amoand_d, FormatR);
+    def(amoor_d, FormatR);
+    def(amomin_d, FormatR);
+    def(amomax_d, FormatR);
+    def(amominu_d, FormatR);
+    def(amomaxu_d, FormatR);
+
+    // ---- RV64F / RV64D additions ----
+    def(fcvt_l_s, FormatR);      // float → signed int64
+    def(fcvt_lu_s, FormatR);     // float → unsigned int64
+    def(fcvt_s_l, FormatR);      // signed int64 → float
+    def(fcvt_s_lu, FormatR);     // unsigned int64 → float
+    def(fcvt_l_d, FormatR);      // double → signed int64
+    def(fcvt_lu_d, FormatR);     // double → unsigned int64
+    def(fcvt_d_l, FormatR);      // signed int64 → double
+    def(fcvt_d_lu, FormatR);     // unsigned int64 → double
+    def(fmv_x_d, FormatR);       // move double bits to integer reg
+    def(fmv_d_x, FormatR);       // move integer bits to double reg
+#endif
 
     // ---- RV32F (single-precision) ----
     def(flw, FormatI);           // fp load word

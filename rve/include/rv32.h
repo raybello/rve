@@ -92,12 +92,28 @@ const u32 CSR_NET_TX_BUF_SIZE_AND_SEND= 0x0c1; // Write = send N bytes from TX b
 const u32 CSR_NET_RX_BUF_ADDR         = 0x0c2; // RX buffer physical address (read-only)
 const u32 CSR_NET_RX_BUF_READY        = 0x0c3; // Write = signal RX buffer is ready
 
+// misa.MXL, and the always-1 XL fields of mstatus/sstatus (RV64 only: SXL=UXL=2)
+#if XLEN == 64
+#define MISA_MXL 2
+#define MSTATUS_XL_FIXED  ((u64)0xA << 32)  // SXL[35:34]=2, UXL[33:32]=2
+#define SSTATUS_XL_FIXED  ((u64)0x2 << 32)  // UXL[33:32]=2
+#define XREG_FMT  "%016llx"
+#define XREG_CAST unsigned long long
+#else
+#define MISA_MXL 1
+#define MSTATUS_XL_FIXED  0
+#define SSTATUS_XL_FIXED  0
+#define XREG_FMT  "%08x"
+#define XREG_CAST unsigned int
+#endif
+
 // RAM size available to the CPU (must match Emulator::MEM_SIZE)
 static const int RV32_MEM_SIZE = 1024 * 1024 * 128; // 128 MiB
 
 // MMU mode constants
 #define MMU_MODE_OFF  0
-#define MMU_MODE_SV32 1
+#define MMU_MODE_SV32 1   // XLEN=32
+#define MMU_MODE_SV39 1   // XLEN=64 (internal "translation on" flag)
 
 // Memory access type constants (used by mmuTranslate)
 #define MMU_ACCESS_FETCH 0
@@ -219,13 +235,13 @@ const u32 LSR_THR_EMPTY = 0x60;       // THRE | TEMT — transmitter fully idle
 class RV32
 {
 public:
-    u32 clock;
+    u64 clock;
     // Integer registers
-    u32 xreg[32];
+    xlen_t xreg[32];
     // Floating-point registers (F/D, NaN-boxed for single-precision)
     u64 freg[32];
     // Program counter
-    u32 pc;
+    xlen_t pc;
     u8 *mem;
     u8 *dtb;
     // MTD (initrd / flash) - optional
@@ -248,7 +264,7 @@ public:
     int32_t start_time_usec;
 
     bool reservation_en;
-    u32 reservation_addr;
+    xlen_t reservation_addr;
 
     // MMIO keyboard ring buffer
     struct KbdEvent { u8 keycode; bool release; };
@@ -271,10 +287,10 @@ public:
 
     // CSR Functions
     bool hasCsrAccessPrivilege(u32 addr);
-    u32 readCsrRaw(u32 address);
-    void writeCsrRaw(u32 address, u32 value);
-    u32 getCsr(u32 address, ins_ret *ret);
-    void setCsr(u32 address, u32 value, ins_ret *ret);
+    xlen_t readCsrRaw(u32 address);
+    void writeCsrRaw(u32 address, xlen_t value);
+    xlen_t getCsr(u32 address, ins_ret *ret);
+    void setCsr(u32 address, xlen_t value, ins_ret *ret);
     void initCSRs();
 
     // Trap Functions
@@ -282,8 +298,8 @@ public:
     void handleIrqAndTrap(ins_ret *ret);
 
     // MMU Functions
-    u32 mmuTranslate(ins_ret *ret, u32 vaddr, u32 mode);
-    void mmuUpdate(u32 satp);
+    xlen_t mmuTranslate(ins_ret *ret, xlen_t vaddr, u32 mode);
+    void mmuUpdate(xlen_t satp);
 
     // RTC Functions
     u8  rtcRead(u32 offset);
@@ -291,13 +307,15 @@ public:
 
     // Memory Functions
     // Getters
-    u32 memGetByte(u32 addr);
-    u32 memGetHalfWord(u32 addr);
-    u32 memGetWord(u32 addr);
+    u32 memGetByte(xlen_t addr);
+    u32 memGetHalfWord(xlen_t addr);
+    u32 memGetWord(xlen_t addr);
+    u64 memGetDword(xlen_t addr);
     // Setters
-    void memSetByte(u32 addr, u32 val);
-    void memSetHalfWord(u32 addr, u32 val);
-    void memSetWord(u32 addr, u32 val);
+    void memSetByte(xlen_t addr, u32 val);
+    void memSetHalfWord(xlen_t addr, u32 val);
+    void memSetWord(xlen_t addr, u32 val);
+    void memSetDword(xlen_t addr, u64 val);
     // UART Functions
     void uartUpdateIir();
     void uartTick();
