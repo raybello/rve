@@ -45,6 +45,7 @@ bool RV32::init(u8 *memory, u8 *dtb, bool debug_mode, u8 *mtd, u32 mtd_size)
     uart.rbr_thr_ier_iir = 0;
     uart.lcr_mcr_lsr_scr = 0x00600000; // LSR THRE|TEMT both set (0x60 at shift 16)
     uart.thre_ip = false;
+    uart.thr_pending = false;
     uart.interrupting = false;
 
     mmu.mode = MMU_MODE_OFF;
@@ -317,6 +318,10 @@ bool RV32::handleTrap(ins_ret *ret, bool isInterrupt)
     u32 pos = t.type & 0xFFFF;
 
     u32 new_privilege = ((mdeleg >> pos) & 1) == 0 ? PRIV_MACHINE : (((sdeleg >> pos) & 1) == 0 ? PRIV_SUPERVISOR : PRIV_USER);
+    // Exceptions are never delegated to a less-privileged mode than the one they occur in
+    // (e.g. an ebreak in M-mode stays in M-mode even if medeleg delegates breakpoints).
+    if (!isInterrupt && new_privilege < current_privilege)
+        new_privilege = current_privilege;
 
     xlen_t mstatus = readCsrRaw(CSR_MSTATUS);
     xlen_t sstatus = readCsrRaw(CSR_SSTATUS);
@@ -733,6 +738,7 @@ void RV32::memSetByte(xlen_t addr, u32 val)
         case 0x10000000u:
             if ((UART_GET2(LCR) >> 7) == 0)
             {
+                uart.thr_pending = true;
                 UART_SET1(THR, val);
                 UART_SET2(LSR, (UART_GET2(LSR) & ~LSR_THR_EMPTY));
                 uartUpdateIir();
@@ -855,10 +861,14 @@ void RV32::uartTick()
     }
 
     u32 thr = UART_GET1(THR);
-    if (thr != 0)
+    if (uart.thr_pending)
     {
-        printf("%c", (char)thr);
-        fflush(stdout);
+        uart.thr_pending = false;
+        if (thr != 0) // a NUL byte is "transmitted" too (firmware does write them) but prints nothing
+        {
+            printf("%c", (char)thr);
+            fflush(stdout);
+        }
         UART_SET1(THR, 0);
         UART_SET2(LSR, (UART_GET2(LSR) | LSR_THR_EMPTY));
         uartUpdateIir();

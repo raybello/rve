@@ -18,10 +18,10 @@ default64mbdtc.h : sixtyfourmb.dtb bintoh
 rve64.dtb : rve64.dts
 	dtc -I dts -O dtb -o $@ $^ -S 4096
 
-default_rv64_dtc.h : rve64.dtb bintoh
-	./bintoh default_rv64_dtb < $< > $@
+default_rv64_dtc.h : rve64.dtb
+	python3 ../scripts/dtb2h.py default_rv64_dtb < $< > $@
 
-rv64: bintoh
+rv64:
 	make default_rv64_dtc.h && \
 	cp -f default_rv64_dtc.h $(OUTPUT_DIR)/rve/include/default_rv64_dtc.h
 

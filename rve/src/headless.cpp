@@ -14,6 +14,7 @@ int runHeadless(int argc, char *argv[])
     const char *bin_file = nullptr;
     const char *elf_file = nullptr;
     uint64_t max_instr = 20000000ull; // ISA-test watchdog
+    uint64_t dump_addr = 0;           // -x <addr>: print 64 bytes at this guest address on exit
     for (int i = 1; i < argc; i++)
     {
         if (strcmp(argv[i], "-b") == 0 && i + 1 < argc)
@@ -24,6 +25,8 @@ int runHeadless(int argc, char *argv[])
             emu.test_mode = true;
         else if (strcmp(argv[i], "-s") == 0)
             emu.debugMode = true; // trace every instruction
+        else if (strcmp(argv[i], "-x") == 0 && i + 1 < argc)
+            dump_addr = strtoull(argv[++i], nullptr, 0);
         else if (strcmp(argv[i], "-c") == 0 && i + 1 < argc)
             max_instr = strtoull(argv[++i], nullptr, 0);
     }
@@ -52,6 +55,20 @@ int runHeadless(int argc, char *argv[])
         uint64_t n = 0;
         while (emu.running && n++ < max_instr)
             emu.emulate();
+        if (dump_addr)
+        {
+            printf("pc=%llx x10=%llx x11=%llx  mem@%llx:", (unsigned long long)emu.cpu.pc,
+                   (unsigned long long)emu.cpu.xreg[10], (unsigned long long)emu.cpu.xreg[11],
+                   (unsigned long long)dump_addr);
+            for (int k = 0; k < 64; k++)
+                printf("%s%02x", (k % 8 == 0) ? "\n  " : " ", emu.cpu.memGetByte(dump_addr + k));
+            printf("\n  priv=%u mstatus=%llx mtvec=%llx mepc=%llx mcause=%llx mtval=%llx mie=%llx mip=%llx medeleg=%llx mideleg=%llx\n",
+                   emu.cpu.csr.privilege, (unsigned long long)emu.cpu.readCsrRaw(CSR_MSTATUS),
+                   (unsigned long long)emu.cpu.readCsrRaw(CSR_MTVEC), (unsigned long long)emu.cpu.readCsrRaw(CSR_MEPC),
+                   (unsigned long long)emu.cpu.readCsrRaw(CSR_MCAUSE), (unsigned long long)emu.cpu.readCsrRaw(CSR_MTVAL),
+                   (unsigned long long)emu.cpu.readCsrRaw(CSR_MIE), (unsigned long long)emu.cpu.readCsrRaw(CSR_MIP),
+                   (unsigned long long)emu.cpu.readCsrRaw(CSR_MEDELEG), (unsigned long long)emu.cpu.readCsrRaw(CSR_MIDELEG));
+        }
         if (!emu.test_done)
         {
             printf("TIMEOUT after %llu instructions\n", (unsigned long long)max_instr);

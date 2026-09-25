@@ -496,9 +496,11 @@ imp(divu, FormatR, { // rv32m
     xlen_t divisor = cpu.xreg[ins.rs2];
     WR_RD(divisor == 0 ? ~(xlen_t)0 : dividend / divisor)
 })
-imp(ebreak, FormatEmpty, {
-    // system
-    // unnecessary?
+imp(ebreak, FormatEmpty, { // system
+    // Breakpoint exception (firmware probes for a semihosting debugger by executing ebreak)
+    ret->trap.en = true;
+    ret->trap.type = trap_Breakpoint;
+    ret->trap.value = cpu.pc;
 })
 void Emulator::emu_ecall(u32 ins_word, ins_ret *ret, FormatEmpty ins) // system
 {

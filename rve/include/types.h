@@ -74,6 +74,7 @@ typedef struct {
     u32 rbr_thr_ier_iir;   // Combined register for receive buffer, THR, IER, and IIR.
     u32 lcr_mcr_lsr_scr;   // Combined register for LCR, MCR, LSR, and SCR.
     bool thre_ip;           // Flag indicating whether the Transmit Holding Register is empty.
+    bool thr_pending;       // A byte (possibly NUL) was written to THR and has not been "transmitted" yet.
     bool interrupting;      // Indicates if an interrupt is currently being triggered.
 } uart_state;
 

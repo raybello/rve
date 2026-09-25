@@ -91,8 +91,10 @@
 			reg-io-width = <0x01>;
 		};
 
+		/* Behaves like the SiFive test finisher: 0x5555 = poweroff, 0x7777 = reboot. OpenSBI's
+		 * sifive_test reset driver and Linux's syscon-poweroff/reboot both use it. */
 		syscon: syscon@11100000 {
-			compatible = "syscon";
+			compatible = "sifive,test1", "sifive,test0", "syscon";
 			reg = <0x00 0x11100000 0x00 0x1000>;
 		};
 
