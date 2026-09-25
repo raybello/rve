@@ -202,7 +202,7 @@ static u32 fp_fclass_d(double d)
 void print_inst(uint64_t pc, uint32_t inst)
 {
     char buf[80] = {0};
-    disasm_inst(buf, sizeof(buf), rv64, pc, inst);
+    disasm_inst(buf, sizeof(buf), XLEN == 64 ? rv64 : rv32, pc, inst);
     printf("%016" PRIx64 ":  %s\n", pc, buf);
 }
 

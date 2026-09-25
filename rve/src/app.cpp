@@ -333,8 +333,13 @@ int App::initializeEmu(int argc, char *argv[])
     // to click Load manually.
     if (!bin_file_name && !elf_file_name)
     {
-        printf("INFO: EMSCRIPTEN auto-boot: /assets/linux/Image\n");
-        emu.initializeBin("/assets/linux/Image");
+#if XLEN == 64
+        const char *web_image = "/assets/linux64/Image"; // OpenSBI + Sv39 kernel
+#else
+        const char *web_image = "/assets/linux/Image";
+#endif
+        printf("INFO: EMSCRIPTEN auto-boot: %s\n", web_image);
+        emu.initializeBin(web_image);
         emu.running = true;
     }
 #endif
@@ -839,10 +844,10 @@ void App::createCpuState()
 
 void App::createDisasm()
 {
-    static u32 prev_pc;
+    static xlen_t prev_pc;
     const int buffer_size = 20;
     static char buf[buffer_size][80];
-    static u32 pc[buffer_size];
+    static xlen_t pc[buffer_size];
 
     ImGuiIO &io = ImGui::GetIO();
     (void)io;
@@ -868,14 +873,21 @@ void App::createDisasm()
             }
 
             // Append the new data at the end
-            disasm_inst(buf[buffer_size - 1], sizeof(buf[buffer_size - 1]), XLEN == 64 ? rv64 : rv32, emu.cpu.pc, emu.cpu.memGetWord(emu.cpu.pc));
+            // pc is a virtual address once the MMU is on (e.g. 0xFFFFFFFF80... for the Sv39 kernel):
+            // translate it as an instruction fetch before reading the word.
+            ins_ret fetch = emu.cpu.insReturnNoop();
+            xlen_t paddr = emu.cpu.mmuTranslate(&fetch, emu.cpu.pc, MMU_ACCESS_FETCH);
+            if (fetch.trap.en)
+                snprintf(buf[buffer_size - 1], sizeof(buf[buffer_size - 1]), "<instruction page fault>");
+            else
+                disasm_inst(buf[buffer_size - 1], sizeof(buf[buffer_size - 1]), XLEN == 64 ? rv64 : rv32, emu.cpu.pc, emu.cpu.memGetWord(paddr));
             prev_pc = emu.cpu.pc;
             pc[buffer_size - 1] = prev_pc;
         }
 
         for (int i = 0; i < buffer_size; i++)
         {
-            ImGui::Text("%08" PRIx32 ":  %s\n", pc[i], buf[i]);
+            ImGui::Text("%0*" PRIx64 ":  %s\n", (int)(XLEN / 4), (u64)pc[i], buf[i]);
         }
 
         ImGui::EndTabItem();
