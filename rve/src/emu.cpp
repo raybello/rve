@@ -1199,33 +1199,60 @@ imp(fmv_w_x, FormatR, { // rv32f: freg[rd] = NaN-box(xreg[rs1])
     cpu.freg[ins.rd] = 0xFFFFFFFF00000000ULL | (u64)(u32)cpu.xreg[ins.rs1];
 })
 
+// Round `a` to an integral value using RISC-V rounding mode `rm` (FRM_*).
+static double fp_round_int(double a, u32 rm)
+{
+    switch (rm)
+    {
+    case FRM_RTZ: return std::trunc(a);
+    case FRM_RDN: return std::floor(a);
+    case FRM_RUP: return std::ceil(a);
+    case FRM_RMM: return std::round(a);       // ties away from zero
+    default:      return std::nearbyint(a);   // RNE (default FP environment)
+    }
+}
+
+static u32 fp_resolve_rm(u32 ins_word, u32 fcsr)
+{
+    u32 rm = (ins_word >> 12) & 0x7u;
+    return rm == FRM_DYN ? (fcsr >> 5) & 0x7u : rm;
+}
+
+// FP → signed 32-bit integer (saturating, sets NV/NX). Explicit rounding rather than a C cast,
+// so the result and NX flag don't depend on how the host compiler lowers the conversion.
+static u32 fp_to_s32(RV32 &cpu, double a, u32 rm)
+{
+    if (std::isnan(a)) { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; return 0x7FFFFFFFu; }
+    double r = fp_round_int(a, rm);
+    if (r >= 2147483648.0)  { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; return 0x7FFFFFFFu; }
+    if (r < -2147483648.0)  { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; return 0x80000000u; }
+    if (r != a) cpu.csr.data[CSR_FCSR] |= FFLAG_NX;
+    return (u32)(int32_t)r;
+}
+
+// FP → unsigned 32-bit integer (saturating, sets NV/NX)
+static u32 fp_to_u32(RV32 &cpu, double a, u32 rm)
+{
+    if (std::isnan(a)) { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; return 0xFFFFFFFFu; }
+    double r = fp_round_int(a, rm);
+    if (r >= 4294967296.0) { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; return 0xFFFFFFFFu; }
+    if (r < 0.0)           { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; return 0; }
+    if (r != a) cpu.csr.data[CSR_FCSR] |= FFLAG_NX;
+    return (u32)r;
+}
+
 // ---- FP → Integer Conversions (single) ----
-imp(fcvt_w_s, FormatR, { // rv32f: float → signed int32 (saturating)
+imp(fcvt_w_s, FormatR, {
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
-    float a = freg_read_s(cpu, ins.rs1);
-    u32 result;
-    if (std::isnan(a) || a >= 2147483648.0f)
-        { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0x7FFFFFFFu; }
-    else if (a < -2147483648.0f)
-        { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0x80000000u; }
-    else
-        { feclearexcept(FE_ALL_EXCEPT); result = (u32)(int32_t)a; fp_accum_flags(cpu); }
-    WR_RD(SEXT32(result))
+    u32 rm = fp_resolve_rm(ins_word, cpu.csr.data[CSR_FCSR]);
+    fesetround(FE_TONEAREST);
+    WR_RD(SEXT32(fp_to_s32(cpu, (double)freg_read_s(cpu, ins.rs1), rm)))
 })
-imp(fcvt_wu_s, FormatR, { // rv32f: float → unsigned int32 (saturating)
+imp(fcvt_wu_s, FormatR, {
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
-    float a = freg_read_s(cpu, ins.rs1);
-    u32 result;
-    if (std::isnan(a) || a >= 4294967296.0f)
-        { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0xFFFFFFFFu; }
-    else if (a < 0.0f) {
-        // Negative: round with selected mode; if it rounds up to 0 it's inexact (NX), else invalid (NV)
-        float rounded = std::rint(a);
-        if (rounded >= 0.0f) { cpu.csr.data[CSR_FCSR] |= FFLAG_NX; result = (u32)rounded; }
-        else                 { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0; }
-    } else
-        { feclearexcept(FE_ALL_EXCEPT); result = (u32)a; fp_accum_flags(cpu); }
-    WR_RD(SEXT32(result))
+    u32 rm = fp_resolve_rm(ins_word, cpu.csr.data[CSR_FCSR]);
+    fesetround(FE_TONEAREST);
+    WR_RD(SEXT32(fp_to_u32(cpu, (double)freg_read_s(cpu, ins.rs1), rm)))
 })
 
 // ---- Integer → FP Conversions (single) ----
@@ -1243,32 +1270,17 @@ imp(fcvt_s_wu, FormatR, { // rv32f: unsigned int32 → float
 })
 
 // ---- FP → Integer Conversions (double) ----
-imp(fcvt_w_d, FormatR, { // rv32d: double → signed int32 (saturating)
+imp(fcvt_w_d, FormatR, {
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
-    double a = freg_read_d(cpu, ins.rs1);
-    u32 result;
-    if (std::isnan(a) || a >= 2147483648.0)
-        { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0x7FFFFFFFu; }
-    else if (a < -2147483648.0)
-        { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0x80000000u; }
-    else
-        { feclearexcept(FE_ALL_EXCEPT); result = (u32)(int32_t)a; fp_accum_flags(cpu); }
-    WR_RD(SEXT32(result))
+    u32 rm = fp_resolve_rm(ins_word, cpu.csr.data[CSR_FCSR]);
+    fesetround(FE_TONEAREST);
+    WR_RD(SEXT32(fp_to_s32(cpu, freg_read_d(cpu, ins.rs1), rm)))
 })
-imp(fcvt_wu_d, FormatR, { // rv32d: double → unsigned int32 (saturating)
+imp(fcvt_wu_d, FormatR, {
     if (!fp_set_rm(ins_word, cpu.csr.data[CSR_FCSR])) FP_ILLEGAL_RM()
-    double a = freg_read_d(cpu, ins.rs1);
-    u32 result;
-    if (std::isnan(a) || a >= 4294967296.0)
-        { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0xFFFFFFFFu; }
-    else if (a < 0.0) {
-        // Negative: round with selected mode; if it rounds up to 0 it's inexact (NX), else invalid (NV)
-        double rounded = std::rint(a);
-        if (rounded >= 0.0) { cpu.csr.data[CSR_FCSR] |= FFLAG_NX; result = (u32)rounded; }
-        else                { cpu.csr.data[CSR_FCSR] |= FFLAG_NV; result = 0; }
-    } else
-        { feclearexcept(FE_ALL_EXCEPT); result = (u32)a; fp_accum_flags(cpu); }
-    WR_RD(SEXT32(result))
+    u32 rm = fp_resolve_rm(ins_word, cpu.csr.data[CSR_FCSR]);
+    fesetround(FE_TONEAREST);
+    WR_RD(SEXT32(fp_to_u32(cpu, freg_read_d(cpu, ins.rs1), rm)))
 })
 
 // ---- Integer → FP Conversions (double) ----
@@ -1315,25 +1327,6 @@ imp(fcvt_d_s, FormatR, { // rv32d: single → double (always exact)
 ////////////////////////////////////////////////////////////////
 // RV64F / RV64D: 64-bit integer conversions and moves
 ////////////////////////////////////////////////////////////////
-
-// Round `a` to an integral value using RISC-V rounding mode `rm` (FRM_*).
-static double fp_round_int(double a, u32 rm)
-{
-    switch (rm)
-    {
-    case FRM_RTZ: return std::trunc(a);
-    case FRM_RDN: return std::floor(a);
-    case FRM_RUP: return std::ceil(a);
-    case FRM_RMM: return std::round(a);       // ties away from zero
-    default:      return std::nearbyint(a);   // RNE (default FP environment)
-    }
-}
-
-static u32 fp_resolve_rm(u32 ins_word, u32 fcsr)
-{
-    u32 rm = (ins_word >> 12) & 0x7u;
-    return rm == FRM_DYN ? (fcsr >> 5) & 0x7u : rm;
-}
 
 // FP → signed 64-bit integer (saturating, sets NV/NX)
 static u64 fp_to_s64(RV32 &cpu, double a, u32 rm)
