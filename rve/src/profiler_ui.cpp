@@ -6,6 +6,7 @@
 #include "imgui.h"
 #include "implot.h"
 #include <cstdio>
+#include <ctime>
 #include <algorithm>
 #include <initializer_list>
 
@@ -463,6 +464,18 @@ void Profiler::draw()
     ImGui::SliderInt("History (s)", &history_s, 5, 120);
     ImGui::SameLine();
     ImGui::Checkbox("Host-time sampling", &sampling);
+    if (ImGui::Button("Export CSV"))
+    {
+        char name[64];
+        time_t now = time(nullptr);
+        strftime(name, sizeof name, "rve-profile-%Y%m%d-%H%M%S.csv", localtime(&now));
+        export_status = exportCsv(name) ? std::string("wrote ") + name : std::string("could not write ") + name;
+    }
+    if (!export_status.empty())
+    {
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", export_status.c_str());
+    }
     ImGui::Separator();
 
     const ProfCounters t = tot();

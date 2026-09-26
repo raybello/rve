@@ -188,6 +188,8 @@ inline uint64_t prof_now_ns()
 }
 
 struct ElfSymbol;
+// Self-consistency of the counters (see ProfCounters). Returns false and fills `report` on a violation.
+bool prof_check(const ProfCounters &c, uint64_t clock, bool sampling, std::string &report);
 const char *prof_class_name(int cls);
 const char *prof_stage_name(int stage);
 const char *prof_region_name(int region);
@@ -223,6 +225,13 @@ public:
 
     // Draw the tabbed window body (profiler_ui.cpp)
     void draw();
+
+    // ---- export ----
+    bool exportCsv(const char *path) const;   // rate history, one row per sample
+    // Totals since power-on + hotspots as JSON (used by the GUI and by the headless --profile flag)
+    std::string summaryJson(const ProfCounters &c, const VirtioNet::Stats &vs, uint64_t clock, double wall_s);
+    void refreshHotspots() { if (hot) computeHotspots(); }
+    std::string export_status;                // last export result, shown next to the button
 
     // ---- state read by the UI ----
     bool paused = false;

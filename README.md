@@ -158,6 +158,46 @@ networking-related files change (or on demand).
 
 ---
 
+## Profiling
+
+Native builds include a real-time profiler (on by default, `make PROFILE=0` compiles it out completely;
+the web build leaves it off unless you pass `PROFILE=1` to `Makefile.emscripten`). Open it from the GUI
+with **Views > Profiler**. It is built on ImPlot and updates a few times a second (sampling period and
+history length are adjustable, **Pause** freezes the charts for inspection, **Reset totals** re-baselines
+the numbers, **Export CSV** dumps the rate history).
+
+| Tab | What it shows |
+|---|---|
+| Overview | MIPS (now / average), instructions retired, loads+stores per 1k instructions, branch-taken %, frame time split into emulation vs UI |
+| Instructions | Instruction mix by class (ALU, MUL, DIV, load, store, branch, JAL/JALR, CSR, atomic, FP, system, fence), counts, shares, rates over time |
+| Memory | Guest reads/writes per second, accesses by width, RAM vs MMIO, MMIO traffic per device, bytes moved, page-table reads |
+| MMU & Traps | Page-table walks and faults by access type, PTE reads per walk, exceptions and interrupts by cause, LR/SC success |
+| Devices | UART bytes, host stdin polls, virtio-net frames and servicing passes |
+| Host time | Sampled cost of each `emulate()` stage (fetch, decode+execute, timers, devices, trap entry) in ns/instruction, and U/S/M privilege residency |
+| Hotspots | Sampled top program counters, top functions (symbolized when an ELF is loaded), hot 4 KiB pages, address-space heat map |
+
+**How it works.** Event counters (`ProfCounters` in `rve/include/profiler.h`) are plain integers bumped
+from the emulator hot path; there are no atomics because the emulator and the UI share one thread.
+Instruction fetch, page-table-walker reads and debugger/UI reads never count as guest data accesses.
+The host-time and hotspot views are *statistical*: one instruction in 1021 (a prime, so it cannot
+lock step with the emulator's own 1024-instruction periodic work) runs a timed copy of `emulate()`
+and records the stage times and the program counter. All other instructions run an untimed copy
+that contains no timing code. The host-time numbers are estimates: stages cost less than the host
+timer tick, so shares converge over seconds rather than frames.
+
+**Overhead.** Measured on Linux boots (Apple silicon, `-O2`) against the pre-profiling build:
+roughly 4-5 % on rv32 and 6-7 % on rv64, where every guest memory access takes a page-table walk
+that is counted. `make PROFILE=0` is within 1-2 % of the old build (run-to-run noise).
+
+**Headless.** The same counters are available without the GUI:
+
+```sh
+./build/rve -n -F -t -c 50000000 -b build/Image --profile            # JSON summary on stderr at exit
+./build/rve -n -F -t -e prog.elf --profile-out prof.json             # ... or to a file (ELF symbols are used)
+./build/rve -n -F -t -e prog.elf --profile-check                     # verify counter invariants, exit 3 on violation
+make prof-test                                                       # unit tests + invariant checks on ISA tests and Linux boots
+```
+
 ## Building Linux with Docker
 
 The Linux kernel image (rv32nommu) is built inside a Docker container using Buildroot.

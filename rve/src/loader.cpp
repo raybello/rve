@@ -275,13 +275,16 @@ const ElfSymbol *findElfSymbol(const std::vector<ElfSymbol> &syms, uint64_t addr
 {
     auto it = std::upper_bound(syms.begin(), syms.end(), addr,
                                [](uint64_t a, const ElfSymbol &s) { return a < s.addr; });
+    // A sized symbol (FUNC) owns [addr, addr+size); a zero-size label (asm labels, linker symbols like
+    // _end) only claims the next 64 KiB so unrelated addresses are not attributed to it.
+    const uint64_t LABEL_REACH = 0x10000;
     while (it != syms.begin())
     {
         --it;
-        if (it->size == 0 || addr < it->addr + it->size)
+        uint64_t off = addr - it->addr;
+        if (it->size ? off < it->size : off < LABEL_REACH)
             return &*it;
-        // a sized symbol that ends before addr: an earlier zero-size label may still cover it
-        if (addr - it->addr > 0x10000)
+        if (off > LABEL_REACH) // everything earlier is farther still
             break;
     }
     return nullptr;
