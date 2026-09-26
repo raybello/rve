@@ -1,4 +1,5 @@
 #include "app.h"
+#include "netsetup.h"
 #include "net.h"
 
 static void HelpMarker(const char *desc)
@@ -15,7 +16,7 @@ static void HelpMarker(const char *desc)
 
 static void showHelp()
 {
-    printf("./rve [parameters]\n\t-e [elf binary]\n\t-m [ram amount]\n\t-f [running image]\n\t-k [kernel command line]\n\t-b [dtb file, or 'disable']\n\t-c instruction count\n\t-s single step with full processor state\n\t-t time division base\n\t-l lock time base to instruction count\n\t-p disable sleep when wfi\n\t-d fail out immediately on all faults\n");
+    printf("./rve [parameters]\n\t-e [elf binary]\n\t-m [ram amount]\n\t-f [running image]\n\t-k [kernel command line]\n\t-b [dtb file, or 'disable']\n\t-c instruction count\n\t-s single step with full processor state\n\t-t time division base\n\t-l lock time base to instruction count\n\t-p disable sleep when wfi\n\t-d fail out immediately on all faults\n\t-F virtio-net on the deterministic fake host (tests)\n\t--no-net disconnect the virtio-net NIC (default: use the host network)\n");
 }
 
 static void applyTheme()
@@ -239,10 +240,15 @@ int App::initializeEmu(int argc, char *argv[])
     const char *elf_file_name = 0;
     const char *bin_file_name = 0;
     const char *dtb_file_name = 0;
+    bool net_fake = false, net_off = false;
 
     // First pass: standalone flags that consume the next argument.
     // -N <path>  open a Unix socket as server (player 0)
     // -M <path>  connect to a Unix socket as client (player 1)
+    for (i = 1; i < argc; i++)
+        if (strcmp(argv[i], "--no-net") == 0)
+            net_off = true;
+
     for (i = 1; i < argc; i++)
     {
         if (strcmp(argv[i], "-N") == 0 && i + 1 < argc)
@@ -258,6 +264,8 @@ int App::initializeEmu(int argc, char *argv[])
             i++;
             continue;
         }
+        if (strcmp(argv[i], "--no-net") == 0)
+            continue;
 
         const char *param = argv[i];
         int param_continue = 0;
@@ -287,6 +295,9 @@ int App::initializeEmu(int argc, char *argv[])
                     break;
                 case 'n': // consumed by main.cpp; ignore here
                     break;
+                case 'F': // virtio-net on the userspace stack with the fake host (tests)
+                    net_fake = true;
+                    break;
                 default:
                     if (param_continue)
                         param_continue = 0;
@@ -311,6 +322,10 @@ int App::initializeEmu(int argc, char *argv[])
         running = false;
         return 1;
     }
+
+    // Networking: the web build uses the browser host, native builds the host's network
+    // (-F: deterministic fake host for tests, --no-net: disconnected).
+    net_attach_usernet(emu.cpu, net_fake, !net_off);
 
     if (elf_file_name)
     {

@@ -26,7 +26,7 @@ DISASM_DIR    = lib/disasm
 
 # Source Files
 SOURCES  = $(SOURCE_DIR)/main.cpp
-SOURCES += $(SOURCE_DIR)/rv32.cpp $(SOURCE_DIR)/emu.cpp $(SOURCE_DIR)/loader.cpp $(SOURCE_DIR)/app.cpp $(SOURCE_DIR)/net.cpp $(SOURCE_DIR)/headless.cpp
+SOURCES += $(SOURCE_DIR)/rv32.cpp $(SOURCE_DIR)/emu.cpp $(SOURCE_DIR)/loader.cpp $(SOURCE_DIR)/app.cpp $(SOURCE_DIR)/net.cpp $(SOURCE_DIR)/headless.cpp $(SOURCE_DIR)/plic.cpp $(SOURCE_DIR)/virtio_net.cpp $(SOURCE_DIR)/usernet.cpp $(SOURCE_DIR)/netsetup.cpp
 # ImGui Files
 SOURCES += $(IMGUI_DIR)/imgui.cpp $(IMGUI_DIR)/imgui_demo.cpp $(IMGUI_DIR)/imgui_draw.cpp $(IMGUI_DIR)/imgui_tables.cpp $(IMGUI_DIR)/imgui_widgets.cpp
 SOURCES += $(IMGUI_DIR)/backends/imgui_impl_sdl2.cpp $(IMGUI_DIR)/backends/imgui_impl_opengl3.cpp
@@ -100,6 +100,8 @@ CPPFLAGS += -I$(IMPLOT_DIR) -I$(DISASM_DIR)
 #CPPFLAGS += -g
 CPPFLAGS += -Wall -Wformat -Os $(EMS)
 CXXFLAGS += -std=c++17
+# track header dependencies so editing a header rebuilds the objects that include it
+CXXFLAGS += -MMD -MP
 LDFLAGS += --shell-file $(IMGUI_DIR)/examples/libs/emscripten/shell_minimal.html
 LDFLAGS += $(EMS)
 
@@ -145,7 +147,7 @@ $(EXE): $(OBJS)
 ##   make -f Makefile.emscripten XLEN=64 isas-wasm    (RV64, -p- tests)
 ##---------------------------------------------------------------------
 ISA_JS = $(WEB_DIR)/isa.js
-ISA_OBJS = $(addprefix $(WEB_DIR)/, rv32.o emu.o loader.o net.o headless.o wasm_isa_main.o disasm.o)
+ISA_OBJS = $(addprefix $(WEB_DIR)/, rv32.o emu.o loader.o net.o headless.o plic.o virtio_net.o usernet.o netsetup.o wasm_isa_main.o disasm.o)
 
 $(ISA_JS): $(ISA_OBJS)
 	$(CXX) -o $@ $(ISA_OBJS) -s ENVIRONMENT=node -s NODERAWFS=1 -s EXIT_RUNTIME=1 \
@@ -160,7 +162,9 @@ ISA_TEST_DIR = $(ASSETS_DIR)/isa-test-rv64
 endif
 
 isas-wasm: $(ISA_JS)
-	../scripts/run_isa.sh "node $(ISA_JS)" $(ISA_TEST_DIR)
+	SKIPFILE=../scripts/isa_skip_wasm.txt ../scripts/run_isa.sh "node $(ISA_JS)" $(ISA_TEST_DIR)
 
 clean:
 	rm -rf $(WEB_DIR)
+
+-include $(wildcard $(WEB_DIR)/*.d)

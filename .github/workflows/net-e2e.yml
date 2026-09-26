@@ -1,0 +1,80 @@
+name: Guest network end-to-end
+
+# Boots the real rv64 Linux image (built from source in Docker, ~25 min cold) with the userspace
+# network stack on the deterministic fake host and drives the guest shell: DHCP, DNS, ping and an
+# HTTP GET. Runs when networking-relevant files change, or on demand.
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'configs/rv64/**'
+      - 'configs/rootfsoverlay/**'
+      - 'dts/rve64.dts'
+      - 'docker/**'
+      - 'rve/src/virtio_net.cpp'
+      - 'rve/src/plic.cpp'
+      - 'rve/src/usernet.cpp'
+      - 'rve/src/nativehost.cpp'
+      - 'rve/include/virtio_net.h'
+      - 'rve/include/usernet.h'
+      - 'rve/include/nativehost.h'
+      - 'scripts/net_e2e.mjs'
+      - '.github/workflows/net-e2e.yml'
+
+jobs:
+  net-e2e:
+    name: rv64 Linux network e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: docker
+          file: docker/Dockerfile
+          load: true
+          tags: rve-linux:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max,ignore-error=true
+
+      - name: Cache Buildroot downloads
+        uses: actions/cache@v4
+        with:
+          path: .buildroot-dl
+          key: buildroot-dl-rv64-${{ hashFiles('configs/rv64/buildroot_defconfig') }}
+          restore-keys: buildroot-dl-
+
+      - name: Prepare build directories
+        run: |
+          mkdir -p .ccache .buildroot-dl rve/assets/linux64
+          chmod 777 .ccache .buildroot-dl rve/assets/linux64
+
+      - name: Build the rv64 Linux image
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace/project \
+            -v ${{ github.workspace }}/.ccache:/ccache \
+            -v ${{ github.workspace }}/.buildroot-dl:/opt/buildroot/dl \
+            -w /workspace/project \
+            rve-linux:latest \
+            bash -c "mkdir -p /ccache/tmp && chmod -R 777 /ccache && make -f docker/container.mk build RVE_ARCH=rv64"
+
+      - name: Build the emulator
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y libsdl2-dev
+          sudo chown -R "$USER:$USER" rve/assets/linux64 || true
+          make -C rve XLEN=64 all
+
+      - name: Run the guest network test (fake host)
+        run: node scripts/net_e2e.mjs rve/build64/rve64 rve/assets/linux64/Image
+
+      - name: Run the guest network test (native host network, loopback servers)
+        run: node scripts/net_e2e.mjs --host rve/build64/rve64 rve/assets/linux64/Image

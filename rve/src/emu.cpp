@@ -1871,6 +1871,9 @@ void Emulator::emulate()
         cpu.csr.data[CSR_MIP] |= MIP_MTIP;
     }
 
+    // virtio-net RX delivery + PLIC → SEIP
+    cpu.netTick();
+
     // UART tick + external interrupt
     cpu.uartTick();
     xlen_t cur_mip = cpu.readCsrRaw(CSR_MIP);

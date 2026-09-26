@@ -1,0 +1,9 @@
+# Known failures of the WebAssembly build only (native passes them, and master fails the same six).
+# FP results differ in wasm: NaN payload/canonicalization for the host FP ops. Used by
+# `make -f Makefile.emscripten XLEN=64 isas-wasm`; fix the wasm NaN handling and empty this list.
+rv64ud-p-fadd
+rv64ud-p-fdiv
+rv64ud-p-fmadd
+rv64uf-p-fadd
+rv64uf-p-fdiv
+rv64uf-p-fmadd

@@ -116,6 +116,46 @@ cd rve && make -f Makefile.emscripten XLEN=64   # writes rve/web64/
 cp web64/index.{html,js,wasm,data} ../docs/demo/
 ```
 
+### Networking in the web build
+
+The RV64 guest has a virtio-net NIC (`virtio-mmio` at `0x10002000`, PLIC source 1) wired to a userspace
+network stack that lives inside the emulator (`rve/src/usernet.cpp`). Because a browser page can only use
+`fetch`, the stack is deliberately limited (guest `10.0.2.15`, gateway `10.0.2.2`, DNS `10.0.2.3`):
+
+| Works | How |
+|-------|-----|
+| DHCP (`udhcpc`, runs at boot), ARP | emulated locally |
+| DNS (`nslookup`, `ping name`) | forwarded as DNS-over-HTTPS (Cloudflare, falling back to Google) |
+| `ping` | answered locally for the gateway and for hosts DNS has resolved. It is **not** a real ICMP round trip; other addresses get "host unreachable" |
+| `wget http://host/path` | TCP on port 80 is terminated in the stack; the HTTP request is replayed with `fetch("https://host/path")`. Only hosts that send CORS headers work, anything else returns a 502 explaining why |
+
+Not supported in the browser: HTTPS from the guest, ssh and any other TCP/UDP.
+
+### Networking in native builds
+
+Native builds (GUI and headless) plug the same virtio-net NIC into the machine's real network
+(`rve/src/nativehost.cpp`), so there are no browser limits:
+
+| Guest does | Host does |
+|------------|-----------|
+| any TCP connection (ssh, HTTP on any port, ...) | proxied byte-for-byte through a real socket |
+| DNS (`nslookup`, name lookups) | system resolver (`getaddrinfo`); `localhost` is shown as `10.0.2.2` |
+| `ping` | real ICMP echo via an unprivileged ICMP socket |
+| talking to `10.0.2.2` | reaches services on the host's loopback (e.g. `wget http://10.0.2.2:8000/`) |
+
+It is on by default. `--no-net` disconnects the NIC, `-F` selects the deterministic fake host the tests use.
+Guest UDP other than DNS is not forwarded, and the stock image has no TLS client, so use plain HTTP/ssh from the guest.
+
+**Tests** (also run in CI):
+```sh
+make -C rve net-test        # virtio-net device, PLIC, network stack and native-host (real loopback sockets) tests (+ the Unix-socket pair test)
+make -C rve isas64          # includes rve's guest-driven virtio-net test (rv64mi-p-virtio-net)
+node scripts/net_e2e.mjs          # boots the rv64 Linux image and checks DHCP, DNS, ping and wget (needs rve/assets/linux64/Image)
+node scripts/net_e2e.mjs --host   # same, on the machine's real network against local echo/HTTP servers (E2E_INTERNET=1 adds example.com and 8.8.8.8)
+```
+The `net_e2e` job in `.github/workflows/net-e2e.yml` builds the rv64 image from source first, so it only runs when
+networking-related files change (or on demand).
+
 ---
 
 ## Building Linux with Docker

@@ -34,7 +34,7 @@ $(shell mkdir -p $(BUILD_DIR))
 
 # Source Files
 SOURCES =  $(SOURCE_DIR)/main.cpp
-SOURCES += $(SOURCE_DIR)/rv32.cpp $(SOURCE_DIR)/emu.cpp $(SOURCE_DIR)/loader.cpp $(SOURCE_DIR)/app.cpp $(SOURCE_DIR)/net.cpp $(SOURCE_DIR)/headless.cpp
+SOURCES += $(SOURCE_DIR)/rv32.cpp $(SOURCE_DIR)/emu.cpp $(SOURCE_DIR)/loader.cpp $(SOURCE_DIR)/app.cpp $(SOURCE_DIR)/net.cpp $(SOURCE_DIR)/headless.cpp $(SOURCE_DIR)/plic.cpp $(SOURCE_DIR)/virtio_net.cpp $(SOURCE_DIR)/usernet.cpp $(SOURCE_DIR)/nativehost.cpp $(SOURCE_DIR)/netsetup.cpp
 # ImGui Files
 SOURCES += $(IMGUI_DIR)/imgui.cpp $(IMGUI_DIR)/imgui_demo.cpp $(IMGUI_DIR)/imgui_draw.cpp $(IMGUI_DIR)/imgui_tables.cpp $(IMGUI_DIR)/imgui_widgets.cpp
 SOURCES += $(IMGUI_DIR)/backends/imgui_impl_sdl2.cpp $(IMGUI_DIR)/backends/imgui_impl_opengl3.cpp
@@ -55,6 +55,8 @@ UNAME_S := $(shell uname -s)
 
 # Compiler include 
 CXXFLAGS += -I$(SOURCE_DIR) -I$(INCLUDE_DIR)
+# track header dependencies so editing a header rebuilds the objects that include it
+CXXFLAGS += -MMD -MP
 CXXFLAGS += -I$(IMGUI_DIR) -I$(IMGUI_DIR)/backends -I$(IMGUI_DIR)/examples/libs/emscripten
 CXXFLAGS += -I$(IMPLOT_DIR) -I$(DISASM_DIR)
 
@@ -216,6 +218,17 @@ net-test:
 	$(CXX) $(CXXFLAGS) -o $(BUILD_DIR)/net_pair_test \
 		$(SOURCE_DIR)/net.cpp tests/net_pair_test.cpp
 	./$(BUILD_DIR)/net_pair_test
+	$(CXX) $(CXXFLAGS) -I$(INCLUDE_DIR) -o $(BUILD_DIR)/virtio_net_test \
+		$(SOURCE_DIR)/virtio_net.cpp $(SOURCE_DIR)/plic.cpp tests/virtio_net_test.cpp
+	./$(BUILD_DIR)/virtio_net_test
+	$(CXX) $(CXXFLAGS) -I$(INCLUDE_DIR) -Itests -o $(BUILD_DIR)/usernet_test \
+		$(SOURCE_DIR)/usernet.cpp tests/usernet_test.cpp
+	./$(BUILD_DIR)/usernet_test
+	$(CXX) $(CXXFLAGS) -I$(INCLUDE_DIR) -Itests -pthread -o $(BUILD_DIR)/nativehost_test \
+		$(SOURCE_DIR)/usernet.cpp $(SOURCE_DIR)/nativehost.cpp tests/nativehost_test.cpp
+	./$(BUILD_DIR)/nativehost_test
 
 clean:
 	rm -rf build/* build64/*
+
+-include $(wildcard $(BUILD_DIR)/*.d)
