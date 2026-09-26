@@ -1,7 +1,8 @@
 /*
  * framebuff.c – multi-pattern framebuffer renderer
  *
- * Usage: ./framebuff <1-10>
+ * Usage: ./framebuff <1-10 | all>
+ *   all  run patterns 1-10 in order, one second apart (also -a / --all)
  *   1   SMPTE colour bars
  *   2   HSV gradient
  *   3   Mandelbrot set
@@ -417,20 +418,54 @@ static void pat_lissajous(void)
 /* ================================================================== */
 /* main                                                                 */
 /* ================================================================== */
+static const char *names[] = {
+    "", "SMPTE bars", "HSV gradient", "Mandelbrot set", "Plasma",
+    "3D cube", "Rainbow rings", "HSV colour wheel",
+    "Sierpinski triangle", "Julia set", "Lissajous",
+};
+
+/* Render one pattern (1-10) into g_buf and push it to the framebuffer */
+static void render_pattern(int pat, int fd, int size)
+{
+    switch (pat) {
+    case  1: pat_smpte();      break;
+    case  2: pat_gradient();   break;
+    case  3: pat_mandelbrot(); break;
+    case  4: pat_plasma();     break;
+    case  5: pat_cube_anim(fd, size); break;
+    case  6: pat_rings();      break;
+    case  7: pat_wheel();      break;
+    case  8: pat_sierpinski(); break;
+    case  9: pat_julia();      break;
+    case 10: pat_lissajous();  break;
+    }
+
+    printf("framebuff: %s rendered (%dx%d)\n", names[pat], g_w, g_h);
+    lseek(fd, 0, SEEK_SET);
+    write(fd, g_buf, size);
+}
+
+static int is_all_flag(const char *a)
+{
+    return strcmp(a, "all") == 0 || strcmp(a, "-a") == 0 || strcmp(a, "--all") == 0;
+}
+
 int main(int argc, char *argv[])
 {
     if (argc < 2) {
-        printf("Usage: framebuff <1-10>\n"
+        printf("Usage: framebuff <1-10 | all>\n"
                "  1  SMPTE bars          6  Rainbow rings\n"
                "  2  HSV gradient        7  HSV colour wheel\n"
                "  3  Mandelbrot set      8  Sierpinski triangle\n"
                "  4  Plasma              9  Julia set\n"
-               "  5  3D cube            10  Lissajous\n");
+               "  5  3D cube            10  Lissajous\n"
+               "  all (-a, --all)  run 1-10 in order, 1 second apart\n");
         return 1;
     }
 
-    int pat = atoi(argv[1]);
-    if (pat < 1 || pat > 10) { printf("Pattern must be 1-10\n"); return 1; }
+    int all = is_all_flag(argv[1]);
+    int pat = all ? 0 : atoi(argv[1]);
+    if (!all && (pat < 1 || pat > 10)) { printf("Pattern must be 1-10 or all\n"); return 1; }
 
     int fd = open("/dev/fb0", O_RDWR);
     if (fd < 0) { printf("framebuff: open /dev/fb0 failed\n"); return 1; }
@@ -447,27 +482,14 @@ int main(int argc, char *argv[])
     g_buf = malloc(size);
     if (!g_buf) { printf("framebuff: malloc failed\n"); close(fd); return 1; }
 
-    switch (pat) {
-    case  1: pat_smpte();      break;
-    case  2: pat_gradient();   break;
-    case  3: pat_mandelbrot(); break;
-    case  4: pat_plasma();     break;
-    case  5: pat_cube_anim(fd, size); break;
-    case  6: pat_rings();      break;
-    case  7: pat_wheel();      break;
-    case  8: pat_sierpinski(); break;
-    case  9: pat_julia();      break;
-    case 10: pat_lissajous();  break;
+    if (all) {
+        for (int p = 1; p <= 10; p++) {
+            render_pattern(p, fd, size);
+            if (p < 10) sleep(1);   /* 1 second between patterns */
+        }
+    } else {
+        render_pattern(pat, fd, size);
     }
-
-    static const char *names[] = {
-        "", "SMPTE bars", "HSV gradient", "Mandelbrot set", "Plasma",
-        "3D cube", "Rainbow rings", "HSV colour wheel",
-        "Sierpinski triangle", "Julia set", "Lissajous",
-    };
-    printf("framebuff: %s rendered (%dx%d)\n", names[pat], g_w, g_h);
-    lseek(fd, 0, SEEK_SET);
-    write(fd, g_buf, size);
 
     free(g_buf);
     close(fd);
