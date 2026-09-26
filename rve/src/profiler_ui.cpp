@@ -241,11 +241,17 @@ static void tabMmuTraps(const Profiler &p, const ProfCounters &t)
 {
     uint64_t walks = t.mmu_walks[0] + t.mmu_walks[1] + t.mmu_walks[2];
     if (walks == 0)
-        ImGui::TextDisabled("No page-table walks yet: translation is off (Bare) or the hart is in M-mode.");
+        ImGui::TextDisabled("No page-table walks yet: translation is off (Bare), the hart is in M-mode, or everything hit the TLB.");
     linePlot(p, "MMU activity", "/s", {{"walks", &p.walk_rate}, {"PTE reads", &p.ptw_rate}, {"page faults", &p.fault_rate}}, 170);
     ImGui::Text("Walks  fetch: %llu   load: %llu   store: %llu      Page faults  fetch: %llu   load: %llu   store: %llu",
                 (unsigned long long)t.mmu_walks[0], (unsigned long long)t.mmu_walks[1], (unsigned long long)t.mmu_walks[2],
                 (unsigned long long)t.mmu_faults[0], (unsigned long long)t.mmu_faults[1], (unsigned long long)t.mmu_faults[2]);
+    uint64_t hits = t.tlb_hits[0] + t.tlb_hits[1] + t.tlb_hits[2];
+    if (walks || hits)
+        ImGui::Text("Software TLB: %llu hits, %llu misses (walks) - %.2f %% hit rate   fetch %.2f %%  load %.2f %%  store %.2f %%",
+                    (unsigned long long)hits, (unsigned long long)walks, pct(hits, hits + walks),
+                    pct(t.tlb_hits[0], t.tlb_hits[0] + t.mmu_walks[0]), pct(t.tlb_hits[1], t.tlb_hits[1] + t.mmu_walks[1]),
+                    pct(t.tlb_hits[2], t.tlb_hits[2] + t.mmu_walks[2]));
     if (walks)
         ImGui::Text("PTE reads per walk: %.2f", (double)t.ptw_reads / (double)walks);
 

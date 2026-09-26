@@ -480,6 +480,7 @@ std::string Profiler::summaryJson(const ProfCounters &c, const VirtioNet::Stats 
     jsonArr(o, "mmio_writes", c.mmio[1], PREG_COUNT, prof_region_name);
     jsonArr(o, "mmu_walks", c.mmu_walks, 3, accessName, false);
     jsonArr(o, "mmu_faults", c.mmu_faults, 3, accessName, false);
+    jsonArr(o, "tlb_hits", c.tlb_hits, 3, accessName, false);
     snprintf(b, sizeof b, "  \"pte_reads\": %llu,\n", (unsigned long long)c.ptw_reads);
     o += b;
     jsonArr(o, "exceptions", c.traps, 16, prof_exception_name);

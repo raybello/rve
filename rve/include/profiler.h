@@ -69,9 +69,9 @@ enum ProfStage : uint8_t
     PSTAGE_COUNT
 };
 
-// One instruction in PROF_SAMPLE_PERIOD is timed stage by stage. The period is prime so it can never
+// One instruction in PROF_SAMPLE_PERIOD is timed stage by stage (about 8 timer reads, so the period is kept long). The period is prime so it can never
 // lock step with the emulator's own periodic work (mtime refresh, stdin poll: every 1024 instructions).
-static const uint32_t PROF_SAMPLE_PERIOD = 1021;
+static const uint32_t PROF_SAMPLE_PERIOD = 4093;
 
 // Sampled program-counter histogram (one PC per timed sample). Open-addressing hash, allocated on first use.
 struct ProfHotspots
@@ -158,6 +158,7 @@ struct ProfCounters
     uint64_t mmu_walks[3] = {};     // page-table walks by access type (fetch / read / write)
     uint64_t mmu_faults[3] = {};    // page faults by access type
     uint64_t ptw_reads = 0;         // PTE loads issued by the walker
+    uint64_t tlb_hits[3] = {};      // translations served by the software TLB (no walk)
 
     // Traps taken, indexed by cause code (0..15)
     uint64_t traps[16] = {};

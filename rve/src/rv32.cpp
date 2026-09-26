@@ -55,6 +55,7 @@ bool RV32::init(u8 *memory, u8 *dtb, bool debug_mode, u8 *mtd, u32 mtd_size)
 
     mmu.mode = MMU_MODE_OFF;
     mmu.ppn  = 0;
+    tlbFlush();
 
     net.rx_ready = 0;
     net.nettx = (u8 *)malloc(4096);
@@ -211,6 +212,7 @@ void RV32::writeCsrRaw(u32 address, xlen_t value)
     case CSR_SIP:
         csr.data[CSR_MIP] &= ~0x222u;
         csr.data[CSR_MIP] |= value & 0x222u;
+        net_dirty = true; // the guest may have cleared SEIP, which netTick() re-asserts
         break;
     case CSR_MIDELEG:
         csr.data[address] = value & 0x666u; // from qemu
@@ -223,6 +225,10 @@ void RV32::writeCsrRaw(u32 address, xlen_t value)
         break;
     case CSR_NET_RX_BUF_READY:
         net.rx_ready = value;
+        break;
+    case CSR_MIP:
+        csr.data[address] = value;
+        net_dirty = true;
         break;
     default:
         csr.data[address] = value;
@@ -451,8 +457,13 @@ bool RV32::handleTrap(ins_ret *ret, bool isInterrupt)
     return true;
 }
 
-void RV32::handleIrqAndTrap(ins_ret *ret)
+__attribute__((noinline)) void RV32::handleIrqAndTrap(ins_ret *ret)
 {
+    // Fast exit: no exception raised and no pending interrupt is enabled, so none of the
+    // HANDLE() cases below can match (csr.data[] is what readCsrRaw() returns for MIP/MIE).
+    if (!ret->trap.en && !(csr.data[CSR_MIP] & csr.data[CSR_MIE]))
+        return;
+
     Trap t = ret->trap;
     u32 mip_reset = MIP_ALL;
     xlen_t cur_mip = readCsrRaw(CSR_MIP);
@@ -512,10 +523,11 @@ void RV32::setNetBackend(NetBackend *be)
     vnet.init(gm, be ? be : &null_backend);
 }
 
-void RV32::netTick()
+__attribute__((noinline)) void RV32::netTick()
 {
     if (!vnet.active()) return;
-    if ((clock & 0x3F) == 0) { PROF_INC(prof.vnet_ticks); vnet.tick(); }
+    net_dirty = false;
+    if ((clock & 0x3FF) == 0) { PROF_INC(prof.vnet_ticks); vnet.tick(); } // poll the backend for received frames
     plic.setLevel(VIRTIO_NET_IRQ, vnet.irqLevel());
     bool active = plic.ctxActive(1);
     xlen_t mip = readCsrRaw(CSR_MIP);
@@ -535,6 +547,20 @@ void RV32::netTick()
 // so these must not be composed from byte accesses).
 static inline bool inVirtio(xlen_t a) { return a >= VIRTIO_NET_BASE && a < VIRTIO_NET_BASE + VIRTIO_NET_SIZE; }
 static inline bool inPlic(xlen_t a) { return a >= PLIC_BASE && a < PLIC_BASE + PLIC_SIZE; }
+
+// Guest RAM is little-endian. On a little-endian host a memcpy compiles to a single (unaligned) load/store;
+// the byte-wise fallback keeps big-endian hosts correct.
+#if defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+static inline u32 loadLE32(const u8 *p) { u32 v; memcpy(&v, p, 4); return v; }
+static inline u32 loadLE16(const u8 *p) { u16 v; memcpy(&v, p, 2); return v; }
+static inline void storeLE32(u8 *p, u32 v) { memcpy(p, &v, 4); }
+static inline void storeLE16(u8 *p, u16 v) { memcpy(p, &v, 2); }
+#else
+static inline u32 loadLE32(const u8 *p) { return (u32)p[0] | ((u32)p[1] << 8) | ((u32)p[2] << 16) | ((u32)p[3] << 24); }
+static inline u32 loadLE16(const u8 *p) { return (u32)p[0] | ((u32)p[1] << 8); }
+static inline void storeLE32(u8 *p, u32 v) { p[0] = (u8)v; p[1] = (u8)(v >> 8); p[2] = (u8)(v >> 16); p[3] = (u8)(v >> 24); }
+static inline void storeLE16(u8 *p, u16 v) { p[0] = (u8)v; p[1] = (u8)(v >> 8); }
+#endif
 
 #ifdef RVE_PROFILE
 // Which MMIO window an address belongs to (profiling only; mirrors the dispatch below)
@@ -705,7 +731,7 @@ u32 RV32::memGetHalfWord(xlen_t addr)
     {
         xlen_t phys = addr - 0x80000000u;
         if (phys <= (xlen_t)(RV32_MEM_SIZE - 2))
-            return ((u32)mem[phys]) | ((u32)mem[phys + 1] << 8);
+            return loadLE16(mem + phys);
         return 0;
     }
     PROF_MMIO(0, addr);
@@ -720,8 +746,7 @@ u32 RV32::peekWord(xlen_t addr)
     {
         xlen_t phys = addr - 0x80000000u;
         if (phys <= (xlen_t)(RV32_MEM_SIZE - 4))
-            return ((u32)mem[phys]) | ((u32)mem[phys + 1] << 8) |
-                   ((u32)mem[phys + 2] << 16) | ((u32)mem[phys + 3] << 24);
+            return loadLE32(mem + phys);
         return 0;
     }
     return memGetWordSlow(addr);
@@ -751,8 +776,7 @@ u32 RV32::memGetWord(xlen_t addr)
     {
         xlen_t phys = addr - 0x80000000u;
         if (phys <= (xlen_t)(RV32_MEM_SIZE - 4))
-            return ((u32)mem[phys]) | ((u32)mem[phys + 1] << 8) |
-                   ((u32)mem[phys + 2] << 16) | ((u32)mem[phys + 3] << 24);
+            return loadLE32(mem + phys);
         return 0;
     }
     PROF_MMIO(0, addr);
@@ -764,8 +788,8 @@ u32 RV32::memGetWordSlow(xlen_t addr)
 {
     if ((addr & 3) == 0)
     {
-        if (inPlic(addr))   return plic.read(addr - PLIC_BASE);
-        if (inVirtio(addr)) return vnet.read(addr - VIRTIO_NET_BASE);
+        if (inPlic(addr))   { net_dirty = true; return plic.read(addr - PLIC_BASE); }
+        if (inVirtio(addr)) { net_dirty = true; return vnet.read(addr - VIRTIO_NET_BASE); }
     }
     return memGetByteRaw(addr) |
            ((u32)memGetByteRaw(addr + 1) << 8) |
@@ -946,8 +970,7 @@ void RV32::memSetHalfWord(xlen_t addr, u32 val)
         xlen_t phys = addr - 0x80000000u;
         if (phys <= (xlen_t)(RV32_MEM_SIZE - 2))
         {
-            mem[phys]     = (u8)(val);
-            mem[phys + 1] = (u8)(val >> 8);
+            storeLE16(mem + phys, (u16)val);
         }
         return;
     }
@@ -965,10 +988,7 @@ void RV32::memSetWord(xlen_t addr, u32 val)
         xlen_t phys = addr - 0x80000000u;
         if (phys <= (xlen_t)(RV32_MEM_SIZE - 4))
         {
-            mem[phys]     = (u8)(val);
-            mem[phys + 1] = (u8)(val >> 8);
-            mem[phys + 2] = (u8)(val >> 16);
-            mem[phys + 3] = (u8)(val >> 24);
+            storeLE32(mem + phys, val);
         }
         return;
     }
@@ -980,8 +1000,8 @@ void RV32::memSetWordSlow(xlen_t addr, u32 val)
 {
     if ((addr & 3) == 0)
     {
-        if (inPlic(addr))   { plic.write(addr - PLIC_BASE, val); return; }
-        if (inVirtio(addr)) { vnet.write(addr - VIRTIO_NET_BASE, val); return; }
+        if (inPlic(addr))   { net_dirty = true; plic.write(addr - PLIC_BASE, val); return; }
+        if (inVirtio(addr)) { net_dirty = true; vnet.write(addr - VIRTIO_NET_BASE, val); return; }
     }
     memSetByteRaw(addr, val & 0xFF);
     memSetByteRaw(addr + 1, (val >> 8) & 0xFF);
@@ -1014,33 +1034,42 @@ void RV32::uartUpdateIir()
     UART_SET1(IIR, (rx_ip ? IIR_RD_AVAILABLE : (thre_ip ? IIR_THR_EMPTY : IIR_NO_INTERRUPT)));
 }
 
-void RV32::uartTick()
+__attribute__((noinline)) void RV32::uartTick()
 {
     bool rx_ip = false;
 
-    if ((clock % 0x400) == 0 && UART_GET1(RBR) == 0)
+    if (stdin_poll_due) // raised at most once per millisecond by Emulator::emulate()
     {
-#ifndef __EMSCRIPTEN__
-        int byteswaiting = 0;
-        PROF_INC(prof.stdin_polls);
-        ioctl(STDIN_FILENO, FIONREAD, &byteswaiting);
-        if (byteswaiting > 0)
+        stdin_poll_due = false;
+        if (uart_out_dirty)
         {
-            char c;
-            if (read(STDIN_FILENO, &c, 1) == 1)
+            fflush(stdout); // batched output: flushed once per poll tick instead of once per character
+            uart_out_dirty = false;
+        }
+        if (UART_GET1(RBR) == 0)
+        {
+#ifndef __EMSCRIPTEN__
+            int byteswaiting = 0;
+            PROF_INC(prof.stdin_polls);
+            ioctl(STDIN_FILENO, FIONREAD, &byteswaiting);
+            if (byteswaiting > 0)
             {
-                u32 value = (u8)c;
-                PROF_INC(prof.uart_rx_bytes);
-                UART_SET1(RBR, value);
-                UART_SET2(LSR, (UART_GET2(LSR) | LSR_DATA_AVAILABLE));
-                uartUpdateIir();
-                if ((UART_GET1(IER) & IER_RXINT_BIT) != 0)
+                char c;
+                if (read(STDIN_FILENO, &c, 1) == 1)
                 {
-                    rx_ip = true;
+                    u32 value = (u8)c;
+                    PROF_INC(prof.uart_rx_bytes);
+                    UART_SET1(RBR, value);
+                    UART_SET2(LSR, (UART_GET2(LSR) | LSR_DATA_AVAILABLE));
+                    uartUpdateIir();
+                    if ((UART_GET1(IER) & IER_RXINT_BIT) != 0)
+                    {
+                        rx_ip = true;
+                    }
                 }
             }
-        }
 #endif
+        }
     }
 
     u32 thr = UART_GET1(THR);
@@ -1050,8 +1079,8 @@ void RV32::uartTick()
         if (thr != 0) // a NUL byte is "transmitted" too (firmware does write them) but prints nothing
         {
             PROF_INC(prof.uart_tx_bytes);
-            printf("%c", (char)thr);
-            fflush(stdout);
+            putchar((char)thr);
+            uart_out_dirty = true;
         }
         UART_SET1(THR, 0);
         UART_SET2(LSR, (UART_GET2(LSR) | LSR_THR_EMPTY));
@@ -1087,6 +1116,8 @@ void RV32::kbdPush(u8 keycode, bool release)
 
 void RV32::mmuUpdate(xlen_t satp)
 {
+    tlbFlush(); // any satp write (even one that changes nothing) may retarget the page tables
+
 #if XLEN == 64
     // satp.MODE (bits 63:60) is WARL: only Bare (0) and Sv39 (8) are supported.
     // A write with an unsupported mode leaves satp unchanged, which is how
@@ -1111,22 +1142,30 @@ void RV32::mmuUpdate(xlen_t satp)
     PROF_INC(prof.mmu_faults[(mode_val)]); \
     return 0;
 
-xlen_t RV32::mmuTranslate(ins_ret *ret, xlen_t addr, u32 mode)
+void RV32::tlbFlush()
 {
-    if (mmu.mode == MMU_MODE_OFF)
-        return addr;
+    for (auto &arr : tlb)
+        for (auto &e : arr)
+            e.ctx = TLB_INVALID;
+}
 
-    // Determine effective privilege and mstatus flags
-    xlen_t mstatus = readCsrRaw(CSR_MSTATUS);
-    u32 sum  = (mstatus >> 18) & 1;
-    u32 mxr  = (mstatus >> 19) & 1;
-    // MPRV only affects loads/stores, never instruction fetch
-    u32 priv = (((mstatus >> 17) & 1) && mode != MMU_ACCESS_FETCH) ? ((mstatus >> 11) & 3) : csr.privilege;
+// TLB miss (the hit path is inline in mmuTranslate): walk the page tables and cache a successful translation
+__attribute__((noinline)) xlen_t RV32::mmuTranslateMiss(ins_ret *ret, xlen_t addr, u32 mode, u32 priv, u32 sum, u32 mxr, u32 ctx)
+{
+    xlen_t vpn = addr >> 12;
+    TlbEntry &e = tlb[mode][vpn & ((1u << TLB_BITS) - 1)];
+    xlen_t pa = mmuWalk(ret, addr, mode, priv, sum, mxr);
+    if (!ret->trap.en)
+    {
+        e.vpn = vpn;
+        e.ctx = ctx;
+        e.pbase = (u64)pa & ~(u64)0xfff;
+    }
+    return pa;
+}
 
-    // Machine mode always uses physical addresses
-    if (priv == PRIV_MACHINE)
-        return addr;
-
+__attribute__((noinline)) xlen_t RV32::mmuWalk(ins_ret *ret, xlen_t addr, u32 mode, u32 priv, u32 sum, u32 mxr)
+{
     PROF_INC(prof.mmu_walks[mode]);
 
 #if XLEN == 64

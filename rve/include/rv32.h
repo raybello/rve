@@ -265,6 +265,9 @@ public:
     VirtioNet vnet;
     NullBackend null_backend;
     bool plic_seip = false; // SEIP currently asserted by the PLIC
+    // Set when anything netTick() depends on may have changed (guest access to the PLIC or virtio-net registers, a
+    // write to mip/sip); netTick() then re-evaluates the interrupt line. Otherwise it only runs on the polling tick.
+    bool net_dirty = true;
     void setNetBackend(NetBackend *be); // not owned; nullptr restores the null backend
     void netTick();                     // per-instruction virtio/PLIC servicing (cheap when idle)
     // RTC registers (ds1742 compatible)
@@ -275,6 +278,13 @@ public:
     // to avoid float precision loss that would make mtime negative → UB on u32 cast)
     int64_t start_time_sec;
     int32_t start_time_usec;
+
+    // Host-terminal polling is rate limited by wall time (see Emulator::emulate): the mtime refresh that runs every
+    // 1024 instructions raises stdin_poll_due at most once per millisecond. A FIONREAD syscall costs microseconds,
+    // so polling on every 1024th instruction at 50 MIPS was a quarter of total run time.
+    bool stdin_poll_due = false;
+    bool uart_out_dirty = false;      // UART output written to stdio but not yet flushed (flushed on the poll tick)
+    int64_t last_poll_us = 0;
 
     bool reservation_en;
     xlen_t reservation_addr;
@@ -319,9 +329,74 @@ public:
     bool handleTrap(ins_ret *ret, bool isInterrupt);
     void handleIrqAndTrap(ins_ret *ret);
 
+    // Software TLB: direct-mapped, one array per access type (fetch / read / write). Entries are only
+    // inserted after a walk that passed every permission and A/D check, so a hit can never grant more
+    // than the walk would. `ctx` records the privilege/SUM/MXR the check was made under, so privilege
+    // changes need no flush; satp writes and sfence.vma flush everything.
+    static const int TLB_BITS = 8;
+    static const u32 TLB_INVALID = 0xffffffffu;
+    struct TlbEntry
+    {
+        xlen_t vpn;   // virtual page number (full vaddr >> 12)
+        u32 ctx;      // priv | SUM << 2 | MXR << 3, or TLB_INVALID
+        u64 pbase;    // physical address of the page
+    };
+    TlbEntry tlb[3][1 << TLB_BITS];
+
+    // Could an interrupt be taken right now? Conservative (never false when handleTrap() would accept one), so
+    // the exact but slow handleIrqAndTrap() only runs when there is a real chance. An interrupt is deliverable to
+    // a target privilege above the current one, or equal to it with that level's global enable bit set.
+    inline bool irqPossible() const
+    {
+        xlen_t mirq = csr.data[CSR_MIP] & csr.data[CSR_MIE];
+        if (!mirq)
+            return false;
+        xlen_t deleg = csr.data[CSR_MIDELEG];
+        xlen_t status = csr.data[CSR_MSTATUS];
+        u32 priv = csr.privilege;
+        if ((mirq & ~deleg) && (priv < PRIV_MACHINE || (status & 0x8)))      // M-targeted: needs mstatus.MIE in M-mode
+            return true;
+        if ((mirq & deleg) && (priv < PRIV_SUPERVISOR || (priv == PRIV_SUPERVISOR && (status & 0x2)) ||
+                               csr.data[CSR_SIDELEG] != 0))                 // S-targeted: needs sstatus.SIE in S-mode
+            return true;
+        return false;
+    }
+
     // MMU Functions
-    xlen_t mmuTranslate(ins_ret *ret, xlen_t vaddr, u32 mode);
+    // Translation off (Bare) is the common case for nommu Linux and bare-metal, and a software-TLB hit is the common
+    // case with the MMU on: both stay inline. Only a TLB miss goes out of line to the walker.
+    inline xlen_t mmuTranslate(ins_ret *ret, xlen_t vaddr, u32 mode)
+    {
+        if (mmu.mode == MMU_MODE_OFF)
+            return vaddr;
+        // (csr.data[] holds the bits we need; readCsrRaw() only adds the fixed XL/SD bits on top)
+        xlen_t mstatus = csr.data[CSR_MSTATUS];
+        u32 sum  = (mstatus >> 18) & 1;
+        u32 mxr  = (mstatus >> 19) & 1;
+        // MPRV only affects loads/stores, never instruction fetch
+        u32 priv = (((mstatus >> 17) & 1) && mode != MMU_ACCESS_FETCH) ? ((mstatus >> 11) & 3) : csr.privilege;
+        // Machine mode always uses physical addresses
+        if (priv == PRIV_MACHINE)
+            return vaddr;
+        u32 ctx = priv | (sum << 2) | (mxr << 3);
+        xlen_t vpn = vaddr >> 12;
+        const TlbEntry &e = tlb[mode][vpn & ((1u << TLB_BITS) - 1)];
+        if (e.ctx == ctx && e.vpn == vpn)
+        {
+            PROF_INC(prof.tlb_hits[mode]);
+            return (xlen_t)(e.pbase | (vaddr & 0xfffu));
+        }
+        return mmuTranslateMiss(ret, vaddr, mode, priv, sum, mxr, ctx);
+    }
+    xlen_t mmuTranslateMiss(ins_ret *ret, xlen_t vaddr, u32 mode, u32 priv, u32 sum, u32 mxr, u32 ctx);
+    xlen_t mmuWalk(ins_ret *ret, xlen_t vaddr, u32 mode, u32 priv, u32 sum, u32 mxr); // page-table walk
     void mmuUpdate(xlen_t satp);
+
+    // Software TLB: direct-mapped, one array per access type (fetch / read / write). Entries are only
+    // inserted after a walk that passed every permission and A/D check, so a hit can never grant more
+    // than the walk would. `ctx` records the privilege/SUM/MXR the check was made under, so privilege
+    // changes need no flush; satp writes and sfence.vma flush everything.
+    void tlbFlush();
 
     // RTC Functions
     u8  rtcRead(u32 offset);

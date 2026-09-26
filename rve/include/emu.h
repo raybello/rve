@@ -96,7 +96,7 @@ class Emulator
 public:
     int MEM_SIZE = 1024 * 1024 * 128; // 128MiB
 
-    uint8_t *memory;
+    uint8_t *memory = nullptr;
     RV32 cpu;
 
     // Symbols of the loaded ELF (profiler hotspot names); empty for raw images
@@ -139,7 +139,13 @@ public:
     void initializeElfDts(const char *elf_file, const char *dts_file);
     void emulate(); // formerly cpu_tick
     template <bool SAMPLE> void emulateImpl(); // SAMPLE: also time each stage (profiling)
+    // Out-of-line cold paths of emulateImpl()
+    void refreshTimers();
+    void serviceExternalIrq();
+    bool handleSyscon();
+    void pollTohost();
     ins_ret insSelect(u32 ins_word);
+    bool fastDecode(u32 ins_word, ins_ret &ret); // hottest instructions, inline in emulateImpl()
 
     // File utilities
     u8 getMmapPtr(const char *path);

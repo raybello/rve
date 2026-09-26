@@ -96,8 +96,14 @@ ifeq ($(OS), Windows_NT)
 	CFLAGS = $(CXXFLAGS)
 endif
 
-# C & C++ Compiler flags
-CXXFLAGS += -g -O2 -Wall -Wformat
+# C & C++ Compiler flags. LTO lets the tiny memory/CSR fast paths
+# inline across translation units (-O3 adds nothing on top); `make LTO=0` restores the old flags.
+OPT ?= -O2
+LTO ?= 1
+CXXFLAGS += -g $(OPT) -Wall -Wformat
+ifeq ($(LTO),1)
+CXXFLAGS += -flto
+endif
 CCFLAGS  := $(CXXFLAGS)
 CXXFLAGS += -std=c++17
 

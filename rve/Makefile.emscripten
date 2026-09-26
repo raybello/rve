@@ -104,7 +104,7 @@ CPPFLAGS += -I$(SOURCE_DIR) -I$(INCLUDE_DIR)
 CPPFLAGS += -I$(IMGUI_DIR) -I$(IMGUI_DIR)/backends -I$(IMGUI_DIR)/examples/libs/emscripten
 CPPFLAGS += -I$(IMPLOT_DIR) -I$(DISASM_DIR)
 #CPPFLAGS += -g
-CPPFLAGS += -Wall -Wformat -Os $(EMS)
+CPPFLAGS += -Wall -Wformat -O2 $(EMS)
 CXXFLAGS += -std=c++17
 # track header dependencies so editing a header rebuilds the objects that include it
 CXXFLAGS += -MMD -MP
