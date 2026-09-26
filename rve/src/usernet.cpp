@@ -90,6 +90,46 @@ int FakeHost::http(const std::string &method, const std::string &url, const std:
     return ev.id;
 }
 
+int FakeHost::tcpOpen(uint32_t, uint16_t port)
+{
+    if (port != 7) return 0; // refused
+    int id = next_++;
+    socks_[id] = Sock();
+    return id;
+}
+int FakeHost::tcpStatus(int id) { return socks_.count(id) ? 1 : -1; }
+long FakeHost::tcpRecv(int id, uint8_t *buf, size_t max)
+{
+    auto it = socks_.find(id);
+    if (it == socks_.end()) return -2;
+    Sock &s = it->second;
+    if (s.echo.empty()) return s.wr_shut ? -1 : 0;
+    size_t n = std::min(max, s.echo.size());
+    memcpy(buf, s.echo.data(), n);
+    s.echo.erase(s.echo.begin(), s.echo.begin() + n);
+    return (long)n;
+}
+long FakeHost::tcpSend(int id, const uint8_t *data, size_t n)
+{
+    auto it = socks_.find(id);
+    if (it == socks_.end()) return -1;
+    it->second.echo.insert(it->second.echo.end(), data, data + n);
+    return (long)n;
+}
+void FakeHost::tcpShutdownWrite(int id) { if (socks_.count(id)) socks_[id].wr_shut = true; }
+void FakeHost::tcpClose(int id) { socks_.erase(id); }
+int FakeHost::ping(uint32_t ip)
+{
+    int id = next_++;
+    pings_[id] = ip;
+    return id;
+}
+int FakeHost::pingResult(int id)
+{
+    auto it = pings_.find(id);
+    return it == pings_.end() ? -1 : (it->second == 0x08080808 ? 1 : -1);
+}
+
 bool FakeHost::poll(Event &ev)
 {
     if (done_.empty()) return false;
@@ -133,18 +173,39 @@ bool UserNetBackend::poll(std::vector<uint8_t> &frame)
                 if (kv.second.host_id == ev.id) { finishHttp(kv.second, ev); break; }
         }
     }
+    uint64_t tnow = nowMs();
+    bool due = !host_ || tnow - last_pump_ms_ >= host_->pollIntervalMs(); // syscall-heavy hosts are polled at their own pace
+    if (due) last_pump_ms_ = tnow;
+    for (auto it = pings_.begin(); it != pings_.end() && due;)
+    {
+        int r = host_->pingResult(it->id);
+        if (r == 1) { sendEchoReply(*it); it = pings_.erase(it); }
+        else if (r < 0 || nowMs() - it->t0 > 4000)
+        {
+            // Destination unreachable: original IP header + first 8 bytes are not kept; quote the ICMP header
+            std::vector<uint8_t> q(8 + 28, 0);
+            q[0] = 3; q[1] = 1;
+            q[8] = 0x45; wr16(&q[10], 28); q[16] = 64; q[17] = 1;
+            wr32(&q[20], it->src); wr32(&q[24], it->dst);
+            memcpy(&q[28], it->icmp.data(), std::min<size_t>(8, it->icmp.size()));
+            wr16(&q[2], ipChecksum(q.data(), q.size()));
+            sendIp(1, GW_IP, it->src, q.data(), q.size());
+            it = pings_.erase(it);
+        }
+        else ++it;
+    }
     if (dns_pending_.empty() && !dns_deferred_.empty())
     {
         for (auto &q : dns_deferred_) sendDnsReply(q, {}, 0);
         dns_deferred_.clear();
     }
-    if (!conns_.empty())
+    if (!conns_.empty() && due)
     {
-        uint64_t now = nowMs();
+        uint64_t now = tnow;
         for (auto it = conns_.begin(); it != conns_.end();)
         {
             pump(it->second, now);
-            if (it->second.state == Conn::CLOSED) it = conns_.erase(it);
+            if (it->second.state == Conn::CLOSED) { release(it->second); it = conns_.erase(it); }
             else ++it;
         }
     }
@@ -244,7 +305,13 @@ void UserNetBackend::handleIcmp(const uint8_t *ip, size_t iplen, uint32_t src, u
     const uint8_t *ic = ip + ihl;
     size_t n = iplen - ihl;
     if (ic[0] != 8) return; // echo request only
-    bool known = dst == GW_IP || dst == DNS_IP || ip_name_.count(dst);
+    bool local = dst == GW_IP || dst == DNS_IP;
+    if (!local && host_ && host_->hostNetwork())
+    {
+        int id = host_->ping(dst);
+        if (id) { pings_.push_back({id, std::vector<uint8_t>(ic, ic + n), src, dst, nowMs()}); return; }
+    }
+    bool known = local || ip_name_.count(dst);
     if (known)
     {
         std::vector<uint8_t> r(ic, ic + n);
@@ -262,6 +329,14 @@ void UserNetBackend::handleIcmp(const uint8_t *ip, size_t iplen, uint32_t src, u
         wr16(&r[2], ipChecksum(r.data(), r.size()));
         sendIp(1, GW_IP, src, r.data(), r.size());
     }
+}
+
+void UserNetBackend::sendEchoReply(const PendingPing &p)
+{
+    std::vector<uint8_t> r(p.icmp);
+    r[0] = 0; r[2] = r[3] = 0;
+    wr16(&r[2], ipChecksum(r.data(), r.size()));
+    sendIp(1, p.dst, p.src, r.data(), r.size());
 }
 
 // ---- UDP: DHCP and DNS -----------------------------------------------------------------------
@@ -399,16 +474,26 @@ void UserNetBackend::handleTcp(const uint8_t *ip, size_t iplen, uint32_t src, ui
     uint64_t key = connKey(sport, dst, dport);
     auto it = conns_.find(key);
 
-    if (flags & 0x04) { if (it != conns_.end()) conns_.erase(it); return; } // RST
+    if (flags & 0x04) { if (it != conns_.end()) { release(it->second); conns_.erase(it); } return; } // RST
+    bool hostnet = host_ && host_->hostNetwork();
     if (it == conns_.end())
     {
-        if ((flags & 0x12) == 0x02 && dport == 80)
+        if ((flags & 0x12) == 0x02 && (hostnet || dport == 80))
         {
             Conn c;
             c.ip = dst; c.port = dport; c.gport = sport;
             c.rcv_nxt = seq + 1;
             c.snd_una = c.snd_nxt = isn_;
             isn_ += 0x10000;
+            if (hostnet)
+            {
+                c.raw = true;
+                c.tcp_id = host_->tcpOpen(dst, dport);
+                if (!c.tcp_id) { sendRst(src, sport, dst, dport, 0, seq + 1, true); return; } // refused
+                c.connecting = true; // SYN-ACK is sent from pump() once the host connect finishes
+                conns_[key] = c;
+                return;
+            }
             Conn &cc = conns_[key] = c;
             sendTcp(cc, 0x12, nullptr, 0, cc.snd_nxt);
             cc.snd_nxt++;
@@ -418,27 +503,48 @@ void UserNetBackend::handleTcp(const uint8_t *ip, size_t iplen, uint32_t src, ui
         return;
     }
     Conn &c = it->second;
-    if (flags & 0x02) return; // retransmitted SYN: our SYN-ACK is already queued/sent
+    if (flags & 0x02) return; // retransmitted SYN: our SYN-ACK is already queued/sent (or pending)
+    if (c.connecting) return;
 
     if ((flags & 0x10) && (int32_t)(ack - c.snd_una) > 0 && (int32_t)(c.snd_nxt - ack) >= 0)
     {
         c.snd_una = ack;
         if (c.state == Conn::SYN_RCVD) c.state = Conn::ESTABLISHED;
+        // drop acknowledged response bytes so a long-lived stream doesn't grow without bound
+        uint32_t acked = c.snd_una - c.resp_base;
+        if (acked > 0 && acked <= c.resp_sent)
+        {
+            c.resp.erase(c.resp.begin(), c.resp.begin() + acked);
+            c.resp_base += acked;
+            c.resp_sent -= acked;
+        }
     }
     bool need_ack = false;
     if (dlen)
     {
         if (seq == c.rcv_nxt)
         {
-            c.req.insert(c.req.end(), data, data + dlen);
-            c.rcv_nxt += (uint32_t)dlen;
+            if (c.raw)
+            {
+                // back-pressure: stop consuming (the guest retransmits) while the host is behind
+                if (c.to_host.size() < 256 * 1024)
+                {
+                    c.to_host.insert(c.to_host.end(), data, data + dlen);
+                    c.rcv_nxt += (uint32_t)dlen;
+                }
+            }
+            else
+            {
+                c.req.insert(c.req.end(), data, data + dlen);
+                c.rcv_nxt += (uint32_t)dlen;
+            }
         }
         need_ack = true; // ack in-order data, or re-ack (dup ack) for out-of-order/retransmits
     }
-    if ((flags & 0x01) && seq + dlen == c.rcv_nxt) { c.rcv_nxt++; need_ack = true; }
+    if ((flags & 0x01) && seq + dlen == c.rcv_nxt) { c.rcv_nxt++; need_ack = true; c.guest_fin = true; }
     if (need_ack) sendTcp(c, 0x10, nullptr, 0, c.snd_nxt);
-    if (c.state == Conn::ESTABLISHED) tryHttp(c);
-    if (c.fin_queued && c.snd_una == c.snd_nxt) c.state = Conn::CLOSED;
+    if (c.state == Conn::ESTABLISHED && !c.raw) tryHttp(c);
+    if (c.fin_queued && c.snd_una == c.snd_nxt && (!c.raw || c.guest_fin)) c.state = Conn::CLOSED;
 }
 
 void UserNetBackend::tryHttp(Conn &c)
@@ -513,13 +619,63 @@ void UserNetBackend::finishHttp(Conn &c, const HostIO::Event &ev)
     c.resp_base = c.snd_nxt;
     c.resp_sent = 0;
     c.host_id = 0;
+    c.fin_wanted = true;
     pump(c, nowMs());
+}
+
+void UserNetBackend::release(Conn &c)
+{
+    if (c.raw && c.tcp_id && host_) host_->tcpClose(c.tcp_id);
+    c.tcp_id = 0;
+}
+
+// Raw (host network) mode: move bytes between the guest-facing buffers and the host socket.
+void UserNetBackend::pumpRaw(Conn &c)
+{
+    if (c.connecting)
+    {
+        int st = host_->tcpStatus(c.tcp_id);
+        if (st == 0) return;
+        if (st < 0)
+        {
+            sendRst(GUEST_IP, c.gport, c.ip, c.port, 0, c.rcv_nxt, true);
+            c.state = Conn::CLOSED;
+            return;
+        }
+        c.connecting = false;
+        sendTcp(c, 0x12, nullptr, 0, c.snd_nxt); // SYN-ACK
+        c.snd_nxt++;
+        c.resp_base = c.snd_nxt;
+        return;
+    }
+    if (c.state != Conn::ESTABLISHED) return;
+    // guest -> host
+    while (!c.to_host.empty())
+    {
+        long n = host_->tcpSend(c.tcp_id, c.to_host.data(), c.to_host.size());
+        if (n < 0) { sendRst(GUEST_IP, c.gport, c.ip, c.port, c.snd_nxt, c.rcv_nxt, true); c.state = Conn::CLOSED; return; }
+        if (n == 0) break;
+        c.to_host.erase(c.to_host.begin(), c.to_host.begin() + n);
+    }
+    if (c.guest_fin && c.to_host.empty() && !c.shut_sent) { host_->tcpShutdownWrite(c.tcp_id); c.shut_sent = true; }
+    // host -> guest (bounded read-ahead)
+    uint8_t buf[16384];
+    while (!c.fin_wanted && c.resp.size() < 64 * 1024)
+    {
+        long n = host_->tcpRecv(c.tcp_id, buf, sizeof buf);
+        if (n > 0) c.resp.insert(c.resp.end(), buf, buf + n);
+        else if (n == -1) c.fin_wanted = true;
+        else if (n < -1) { sendRst(GUEST_IP, c.gport, c.ip, c.port, c.snd_nxt, c.rcv_nxt, true); c.state = Conn::CLOSED; return; }
+        else break;
+    }
 }
 
 // Send new response data within the window; retransmit (go-back-N) after 500 ms of silence.
 void UserNetBackend::pump(Conn &c, uint64_t now)
 {
-    if (c.state != Conn::ESTABLISHED || c.resp.empty()) return;
+    if (c.raw) pumpRaw(c);
+    if (c.state != Conn::ESTABLISHED) return;
+    if (!c.fin_wanted && c.resp.empty()) return;
     uint32_t inflight = c.resp_base + (uint32_t)c.resp_sent + (c.fin_queued ? 1 : 0) - c.snd_una;
     if (inflight > 0 && now - c.last_tx_ms > 500)
     {
@@ -537,11 +693,11 @@ void UserNetBackend::pump(Conn &c, uint64_t now)
         inflight += (uint32_t)n;
         c.snd_nxt = c.resp_base + (uint32_t)c.resp_sent;
     }
-    if (c.resp_sent == c.resp.size() && !c.fin_queued)
+    if (c.fin_wanted && c.resp_sent == c.resp.size() && !c.fin_queued)
     {
         sendTcp(c, 0x11, nullptr, 0, c.snd_nxt);
         c.snd_nxt++;
         c.fin_queued = true;
     }
-    if (c.fin_queued && c.snd_una == c.snd_nxt) c.state = Conn::CLOSED;
+    if (c.fin_queued && c.snd_una == c.snd_nxt && (!c.raw || c.guest_fin)) c.state = Conn::CLOSED;
 }

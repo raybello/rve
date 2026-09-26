@@ -15,8 +15,10 @@ on:
       - 'rve/src/virtio_net.cpp'
       - 'rve/src/plic.cpp'
       - 'rve/src/usernet.cpp'
+      - 'rve/src/nativehost.cpp'
       - 'rve/include/virtio_net.h'
       - 'rve/include/usernet.h'
+      - 'rve/include/nativehost.h'
       - 'scripts/net_e2e.mjs'
       - '.github/workflows/net-e2e.yml'
 
@@ -71,5 +73,8 @@ jobs:
           sudo chown -R "$USER:$USER" rve/assets/linux64 || true
           make -C rve XLEN=64 all
 
-      - name: Run the guest network test
+      - name: Run the guest network test (fake host)
         run: node scripts/net_e2e.mjs rve/build64/rve64 rve/assets/linux64/Image
+
+      - name: Run the guest network test (native host network, loopback servers)
+        run: node scripts/net_e2e.mjs --host rve/build64/rve64 rve/assets/linux64/Image

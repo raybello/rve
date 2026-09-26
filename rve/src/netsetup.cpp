@@ -1,5 +1,8 @@
 #include "netsetup.h"
 #include "usernet.h"
+#ifndef __EMSCRIPTEN__
+#include "nativehost.h"
+#endif
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -112,14 +115,20 @@ EMSCRIPTEN_KEEPALIVE void rve_net_http_done(int id, int status, char *ctype, uin
 }
 #endif
 
-void net_attach_usernet(RV32 &cpu, bool fake)
+void net_attach_usernet(RV32 &cpu, bool fake, bool enable)
 {
     static FakeHost fake_host;
     HostIO *host = nullptr;
     if (fake) host = &fake_host;
+    else if (enable)
+    {
 #ifdef __EMSCRIPTEN__
-    else host = &WebHost::get();
+        host = &WebHost::get();
+#else
+        static NativeHost native_host;
+        host = &native_host;
 #endif
+    }
     if (!host) return;
     static UserNetBackend backend(host);
     cpu.setNetBackend(&backend);

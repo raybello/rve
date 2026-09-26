@@ -1,79 +1,7 @@
 // Feeds hand-built Ethernet frames into the userspace network stack (with FakeHost) and checks
 // the replies, including IP/TCP/UDP checksums, like the guest kernel would.
+#include "netframes.h"
 #include "usernet.h"
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <string>
-
-#define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); exit(1); } } while (0)
-typedef std::vector<uint8_t> Bytes;
-
-static const uint8_t GMAC[6] = {0x52, 0x54, 0x00, 0x12, 0x34, 0x56};
-static const uint32_t GIP = 0x0a00020f, GW = 0x0a000202, DNS = 0x0a000203;
-static uint16_t r16(const uint8_t *p) { return p[0] << 8 | p[1]; }
-static uint32_t r32(const uint8_t *p) { return (uint32_t)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3]; }
-static void w16(Bytes &b, size_t o, uint16_t v) { b[o] = v >> 8; b[o + 1] = (uint8_t)v; }
-static void w32(Bytes &b, size_t o, uint32_t v) { for (int i = 0; i < 4; i++) b[o + i] = v >> (24 - 8 * i); }
-
-static uint16_t sum16(const uint8_t *p, size_t n, uint32_t s = 0)
-{
-    for (; n > 1; p += 2, n -= 2) s += r16(p);
-    if (n) s += p[0] << 8;
-    while (s >> 16) s = (s & 0xffff) + (s >> 16);
-    return (uint16_t)s;
-}
-
-static Bytes eth(uint16_t type, const Bytes &payload)
-{
-    Bytes f(14 + payload.size());
-    memset(f.data(), 0xff, 6);
-    memcpy(&f[6], GMAC, 6);
-    w16(f, 12, type);
-    memcpy(&f[14], payload.data(), payload.size());
-    return f;
-}
-static Bytes ip4(uint8_t proto, uint32_t src, uint32_t dst, const Bytes &l4)
-{
-    Bytes p(20 + l4.size());
-    p[0] = 0x45; w16(p, 2, (uint16_t)p.size()); p[8] = 64; p[9] = proto;
-    w32(p, 12, src); w32(p, 16, dst);
-    memcpy(&p[20], l4.data(), l4.size());
-    return eth(0x0800, p);
-}
-static Bytes udp(uint32_t src, uint16_t sp, uint32_t dst, uint16_t dp, const Bytes &d)
-{
-    Bytes u(8 + d.size());
-    w16(u, 0, sp); w16(u, 2, dp); w16(u, 4, (uint16_t)u.size());
-    memcpy(&u[8], d.data(), d.size());
-    return ip4(17, src, dst, u);
-}
-static Bytes tcp(uint16_t sp, uint32_t dst, uint16_t dp, uint32_t seq, uint32_t ack, uint8_t flags, const std::string &data = "")
-{
-    Bytes t(20 + data.size());
-    w16(t, 0, sp); w16(t, 2, dp); w32(t, 4, seq); w32(t, 8, ack);
-    t[12] = 5 << 4; t[13] = flags; w16(t, 14, 0xffff);
-    memcpy(&t[20], data.data(), data.size());
-    return ip4(6, GIP, dst, t);
-}
-
-// Verify the IPv4 header checksum and (for TCP/UDP) the pseudo-header checksum of a frame we sent.
-static void checkChecksums(const Bytes &f)
-{
-    if (r16(&f[12]) != 0x0800) return;
-    const uint8_t *ip = &f[14];
-    CHECK(sum16(ip, 20) == 0xffff);
-    uint8_t proto = ip[9];
-    size_t n = r16(ip + 2) - 20;
-    if (proto == 6 || proto == 17)
-    {
-        uint8_t ph[12];
-        memcpy(ph, ip + 12, 8); ph[8] = 0; ph[9] = proto; ph[10] = n >> 8; ph[11] = (uint8_t)n;
-        CHECK(sum16(ip + 20, n, sum16(ph, 12)) == 0xffff);
-    }
-    if (proto == 1) CHECK(sum16(ip + 20, n) == 0xffff);
-}
-
 static std::vector<Bytes> drain(UserNetBackend &be)
 {
     std::vector<Bytes> v;
@@ -212,6 +140,60 @@ int main()
         be.send(syn2.data(), syn2.size());
         auto r2 = drain(be);
         CHECK(r2.size() == 1 && (r2[0][14 + 20 + 13] & 0x12) == 0x12);
+    }
+
+    // ---- host-network mode (FakeHost raw): transparent TCP proxy + forwarded ping ----
+    {
+        FakeHost rawHost(true);
+        UserNetBackend rb(&rawHost);
+        const uint32_t SRV = 0x5db8d822;
+        // refused port -> RST, no SYN-ACK
+        Bytes bad = tcp(51000, SRV, 8080, 10, 0, 0x02);
+        rb.send(bad.data(), bad.size());
+        auto r0 = drain(rb);
+        CHECK(r0.size() == 1 && (r0[0][14 + 20 + 13] & 0x04));
+
+        // echo service on port 7: handshake completes once the host connect is up (on poll)
+        uint32_t seq = 2000;
+        Bytes syn = tcp(51001, SRV, 7, seq, 0, 0x02);
+        rb.send(syn.data(), syn.size());
+        auto r1 = drain(rb);
+        CHECK(r1.size() == 1 && (r1[0][14 + 20 + 13] & 0x12) == 0x12);
+        uint32_t isn = r32(&r1[0][14 + 20 + 4]);
+        seq++;
+        Bytes ack = tcp(51001, SRV, 7, seq, isn + 1, 0x10);
+        rb.send(ack.data(), ack.size());
+        CHECK(drain(rb).empty());
+        std::string msg = "hello over a real-ish socket";
+        Bytes d = tcp(51001, SRV, 7, seq, isn + 1, 0x18, msg);
+        rb.send(d.data(), d.size());
+        seq += (uint32_t)msg.size();
+        std::string got;
+        for (auto &f : drain(rb))
+        {
+            const uint8_t *t = &f[14 + 20];
+            size_t hl = (t[12] >> 4) * 4, dl = r16(&f[14 + 2]) - 20 - hl;
+            got.append((const char *)t + hl, dl);
+        }
+        CHECK(got == msg); // echoed by the fake host through the proxy
+        // guest half-closes: host sees EOF and the stack sends FIN
+        Bytes fin = tcp(51001, SRV, 7, seq, isn + 1 + (uint32_t)msg.size(), 0x11);
+        rb.send(fin.data(), fin.size());
+        bool sawFin = false;
+        for (auto &f : drain(rb)) if (f[14 + 20 + 13] & 1) sawFin = true;
+        CHECK(sawFin);
+
+        // ping is forwarded to the host: 8.8.8.8 answers, 9.9.9.9 is unreachable
+        Bytes e(12, 0);
+        e[0] = 8; w16(e, 4, 0x55); w16(e, 6, 1);
+        Bytes p1 = ip4(1, GIP, 0x08080808, e);
+        rb.send(p1.data(), p1.size());
+        auto pr = drain(rb);
+        CHECK(pr.size() == 1 && pr[0][14 + 20] == 0 && r16(&pr[0][14 + 20 + 4]) == 0x55);
+        Bytes p2 = ip4(1, GIP, 0x09090909, e);
+        rb.send(p2.data(), p2.size());
+        auto pu = drain(rb);
+        CHECK(pu.size() == 1 && pu[0][14 + 20] == 3);
     }
 
     printf("usernet_test: OK\n");

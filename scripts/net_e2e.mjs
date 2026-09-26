@@ -1,14 +1,34 @@
 #!/usr/bin/env node
 // End-to-end network test: boots the rv64 Linux image headless with the userspace network stack
 // wired to the deterministic FakeHost (-F) and drives the guest shell over stdin/stdout.
-//   node scripts/net_e2e.mjs [path/to/rve64] [path/to/Image]
-// Everything is local and offline: "*.test" names resolve to 93.184.216.34 and HTTP requests get
-// a canned 200 body, so the assertions are exact.
+//   node scripts/net_e2e.mjs [--host] [path/to/rve64] [path/to/Image]
+// Default (fake host): everything is local and offline. "*.test" names resolve to 93.184.216.34
+// and HTTP requests get a canned 200 body, so the assertions are exact.
+// --host: the emulator uses the machine's real network (native NativeHost). The guest reaches
+// servers started by this script on the host's loopback through the gateway address 10.0.2.2.
 import { spawn } from 'node:child_process';
 
-const bin = process.argv[2] ?? 'rve/build64/rve64';
-const image = process.argv[3] ?? 'rve/assets/linux64/Image';
-const child = spawn(bin, ['-n', '-F', '-b', image], { stdio: ['pipe', 'pipe', 'inherit'] });
+import net from 'node:net';
+import http from 'node:http';
+
+const args = process.argv.slice(2);
+const hostMode = args[0] === '--host';
+if (hostMode) args.shift();
+const bin = args[0] ?? 'rve/build64/rve64';
+const image = args[1] ?? 'rve/assets/linux64/Image';
+
+// Host-side test servers (host mode): a TCP echo server and an HTTP server on loopback.
+let echoPort = 0, httpPort = 0;
+const servers = [];
+if (hostMode) {
+  const echo = net.createServer((s) => s.pipe(s));
+  const web = http.createServer((req, res) => { res.end(`host http: ${req.method} ${req.url}\n`); });
+  await new Promise((r) => echo.listen(0, '127.0.0.1', r));
+  await new Promise((r) => web.listen(0, '127.0.0.1', r));
+  echoPort = echo.address().port; httpPort = web.address().port;
+  servers.push(echo, web);
+}
+const child = spawn(bin, hostMode ? ['-n', '-b', image] : ['-n', '-F', '-b', image], { stdio: ['pipe', 'pipe', 'inherit'] });
 
 let buf = '';
 let waiter = null;
@@ -56,16 +76,31 @@ try {
   }
   expect('eth0 got a DHCP lease (10.0.2.15)', out, /inet 10\.0\.2\.15\/24/);
   expect('default route via gateway', await sh('ip route'), /default via 10\.0\.2\.2/);
+  if (hostMode) {
+    expect('DNS: localhost resolves to the gateway', await sh('nslookup localhost 10.0.2.3'), /10\.0\.2\.2/);
+    expect('ping the gateway', await sh('ping -c 2 -W 3 10.0.2.2 2>&1'), /2 packets received|0% packet loss/);
+    expect('TCP echo through the proxy', await sh(`echo rve-net-ok | nc 10.0.2.2 ${echoPort} 2>&1`), /rve-net-ok/);
+    expect('HTTP to a host server (any port)', await sh(`wget -qO- http://10.0.2.2:${httpPort}/hello 2>&1`), /host http: GET \/hello/);
+    if (process.env.E2E_INTERNET) {   // optional: needs real internet access from this machine
+      expect('DNS: example.com (system resolver)', await sh('nslookup example.com 10.0.2.3'), /Address:\s+\d+\.\d+\.\d+\.\d+/);
+      expect('real ICMP ping 8.8.8.8', await sh('ping -c 2 -W 4 8.8.8.8 2>&1', 30000), /2 packets received|0% packet loss/);
+      expect('HTTP GET http://example.com/', await sh('wget -qO- http://example.com/ 2>&1', 60000), /Example Domain/);
+    }
+    expect('closed port is refused', await sh('echo | nc 10.0.2.2 1 2>&1; echo rc=$?'), /refused|rc=[1-9]/i);
+  } else {
   expect('DNS: foo.test resolves', await sh('nslookup foo.test 10.0.2.3'), /93\.184\.216\.34/);
+
   expect('DNS: unknown name fails', await sh('nslookup nx.example 10.0.2.3 2>&1'), /NXDOMAIN|can't resolve|not found|No answer/i);
   expect('ping resolved host', await sh('ping -c 2 -W 3 foo.test 2>&1'), /2 packets received|0% packet loss/);
   expect('ping unresolved host is unreachable', await sh('ping -c 1 -W 2 8.8.8.8 2>&1'), /unreachable|100% packet loss/i);
   expect('HTTP GET bridged to host', await sh('wget -qO- http://foo.test/hello 2>&1'), /fake host: GET https:\/\/foo\.test\/hello/);
   expect('TCP to an unsupported port is refused', await sh('echo | nc 93.184.216.34 22 2>&1; echo rc=$?'), /refused|rc=[1-9]/i);
+  }
 } catch (e) {
   failed++;
   console.error(`\nERROR: ${e.message}`);
 }
 child.kill();
+for (const sv of servers) sv.close();
 console.log(failed ? `\nnet_e2e: ${failed} failure(s)` : '\nnet_e2e: all passed');
 process.exit(failed ? 1 : 0);

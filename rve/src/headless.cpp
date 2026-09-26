@@ -12,6 +12,7 @@
 //   -s <path>    Unix socket, act as server (player 0)
 //   -S <path>    Unix socket, connect as client (player 1)
 //   -F           virtio-net backed by the userspace stack with the deterministic fake host (tests)
+//   --no-net     disconnect the virtio-net NIC (by default native builds use the host's network)
 //   -t           ISA-test mode: exit 0 = pass, 1 = fail, 2 = timeout;  -c <n> sets the watchdog
 //   -T           trace every instruction;  -x <addr> dump CPU state + memory on exit (test mode)
 // The emulator's captureKeyboardInput() (called from Emulator::initialize()) puts the
@@ -24,7 +25,7 @@ int runHeadless(int argc, char *argv[])
     const char *elf_file = nullptr;
     uint64_t max_instr = 20000000ull; // ISA-test watchdog
     const char *net_server = nullptr;
-    bool net_fake = false;
+    bool net_fake = false, net_off = false;
     const char *net_client = nullptr;
     uint64_t dump_addr = 0;           // -x <addr>: print 64 bytes at this guest address on exit
     for (int i = 1; i < argc; i++)
@@ -37,6 +38,8 @@ int runHeadless(int argc, char *argv[])
             emu.test_mode = true;
         else if (strcmp(argv[i], "-F") == 0)
             net_fake = true;
+        else if (strcmp(argv[i], "--no-net") == 0)
+            net_off = true;
         else if (strcmp(argv[i], "-T") == 0)
             emu.debugMode = true; // trace every instruction
         else if (strcmp(argv[i], "-s") == 0 && i + 1 < argc)
@@ -55,8 +58,7 @@ int runHeadless(int argc, char *argv[])
         return 1;
     }
 
-    if (net_fake)
-        net_attach_usernet(emu.cpu, true);
+    net_attach_usernet(emu.cpu, net_fake, !net_off);
 
     if (net_server)
         net_init(net_server, /*server=*/true);
