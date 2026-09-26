@@ -39,6 +39,7 @@ struct AppSettings
     bool show_terminal_window = true;
     bool show_cpu_state = true;
     bool show_disasm = true;
+    bool show_profiler = false;         // Profiling metrics (ImPlot)
 
     // Emulator settings
 };
@@ -88,6 +89,7 @@ public:
     void createTerminal();
     void createCpuState();
     void createDisasm();
+    void createProfiler();
 };
 
 #endif 

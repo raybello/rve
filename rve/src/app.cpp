@@ -598,6 +598,9 @@ void App::drawUI()
 
     if (settings.show_disasm)
         createDisasm();
+
+    if (settings.show_profiler)
+        createProfiler();
 }
 
 void App::renderLoop()
@@ -666,6 +669,7 @@ void App::createMenubar()
             ImGui::MenuItem("Plot Demo Window", NULL, &settings.show_plot_demo_window);
             ImGui::MenuItem("CPU State", NULL, &settings.show_cpu_state);
             ImGui::MenuItem("Disassembler", NULL, &settings.show_disasm);
+            ImGui::MenuItem("Profiler", NULL, &settings.show_profiler);
             ImGui::EndMenu();
         }
         ImGuiIO &io = ImGui::GetIO();
@@ -915,6 +919,23 @@ void App::createDisasm()
     }
     ImGui::EndTabBar();
 
+    ImGui::End();
+}
+
+void App::createProfiler()
+{
+    ImGuiIO &io = ImGui::GetIO();
+    ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.25f, io.DisplaySize.y * 0.25f), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin("Profiler", &settings.show_profiler))
+    {
+#ifdef RVE_PROFILE
+        ImGui::TextDisabled("Profiling enabled");
+#else
+        ImGui::TextWrapped("This build was compiled without profiling. Rebuild with `make PROFILE=1`.");
+#endif
+    }
     ImGui::End();
 }
 

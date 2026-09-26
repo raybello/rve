@@ -14,6 +14,7 @@
 #include <sys/time.h>
 
 #include "types.h"
+#include "profiler.h"
 
 using u32   = uint32_t;
 using uint16 = uint16_t;
@@ -285,6 +286,11 @@ public:
     void kbdPush(u8 keycode, bool release);
 
     bool debug_single_step;
+
+#ifdef RVE_PROFILE
+    // Event counters bumped from the hot path; reset together with the CPU (cpu = RV32())
+    ProfCounters prof;
+#endif
 
     RV32();
     ~RV32();

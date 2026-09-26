@@ -94,6 +94,12 @@ endif
 ## FINAL BUILD FLAGS
 ##---------------------------------------------------------------------
 
+# Emulator profiling is off by default for the web build (`make -f Makefile.emscripten PROFILE=1` to enable)
+PROFILE ?= 0
+ifeq ($(PROFILE),1)
+CPPFLAGS += -DRVE_PROFILE
+endif
+
 CPPFLAGS += -I$(SOURCE_DIR) -I$(INCLUDE_DIR)
 CPPFLAGS += -I$(IMGUI_DIR) -I$(IMGUI_DIR)/backends -I$(IMGUI_DIR)/examples/libs/emscripten
 CPPFLAGS += -I$(IMPLOT_DIR) -I$(DISASM_DIR)

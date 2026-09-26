@@ -32,6 +32,12 @@ ISA_TEST_FILES = $(filter-out %.dump, $(notdir $(wildcard $(ISA_TEST_DIR)/*)))
 # Create build directory if it doesn't exist
 $(shell mkdir -p $(BUILD_DIR))
 
+# Emulator profiling (counters + the Profiler window): on by default, `make PROFILE=0` compiles it out
+PROFILE ?= 1
+ifeq ($(PROFILE),1)
+CXXFLAGS += -DRVE_PROFILE
+endif
+
 # Source Files
 SOURCES =  $(SOURCE_DIR)/main.cpp
 SOURCES += $(SOURCE_DIR)/rv32.cpp $(SOURCE_DIR)/emu.cpp $(SOURCE_DIR)/loader.cpp $(SOURCE_DIR)/app.cpp $(SOURCE_DIR)/net.cpp $(SOURCE_DIR)/headless.cpp $(SOURCE_DIR)/plic.cpp $(SOURCE_DIR)/virtio_net.cpp $(SOURCE_DIR)/usernet.cpp $(SOURCE_DIR)/nativehost.cpp $(SOURCE_DIR)/netsetup.cpp
@@ -94,6 +100,11 @@ endif
 CXXFLAGS += -g -O2 -Wall -Wformat
 CCFLAGS  := $(CXXFLAGS)
 CXXFLAGS += -std=c++17
+
+# Rebuild everything when the compile flags change (e.g. PROFILE=0 <-> 1): -MMD only tracks headers
+FLAGS_STAMP = $(BUILD_DIR)/.cxxflags
+$(shell echo '$(CXXFLAGS)' | cmp -s - $(FLAGS_STAMP) 2>/dev/null || echo '$(CXXFLAGS)' > $(FLAGS_STAMP))
+$(OBJS): $(FLAGS_STAMP)
 
 # Build rules
 $(BUILD_DIR)/%.o: %.cpp
