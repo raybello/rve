@@ -25,6 +25,7 @@
 #include "file_dialog.h"
 // RISC core
 #include "emu.h"
+#include "profiler.h"
 
 struct AppSettings
 {
@@ -63,6 +64,9 @@ class App
     Emulator emu;
     ImGui::FileBrowser elfFileDialog;
     ImGui::FileBrowser linuxFileDialog;
+#ifdef RVE_PROFILE
+    Profiler profiler;
+#endif
 
     // Framebuffer texture
     GLuint fb_texture_id = 0;

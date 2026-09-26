@@ -615,11 +615,21 @@ void App::renderLoop()
     while (running)
 #endif
     {
+#ifdef RVE_PROFILE
+        uint64_t t_frame = prof_now_ns();
+#endif
         stepEmu();
+#ifdef RVE_PROFILE
+        uint64_t t_emu = prof_now_ns();
+        profiler.update(emu.cpu.prof, emu.cpu.vnet.stats, emu.running);
+#endif
         handleEvents();
         beginRender();
         drawUI();
         endRender();
+#ifdef RVE_PROFILE
+        profiler.frameDone((double)(prof_now_ns() - t_frame) * 1e-6, (double)(t_emu - t_frame) * 1e-6);
+#endif
     }
 #ifdef __EMSCRIPTEN__
     while (0); };
@@ -932,7 +942,7 @@ void App::createProfiler()
     if (ImGui::Begin("Profiler", &settings.show_profiler))
     {
 #ifdef RVE_PROFILE
-        ImGui::TextDisabled("Profiling enabled");
+        profiler.draw();
 #else
         ImGui::TextWrapped("This build was compiled without profiling. Rebuild with `make PROFILE=1`.");
 #endif

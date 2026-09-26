@@ -13,8 +13,11 @@
 //                     (profiler.cpp) and draws them with ImPlot (profiler_ui.cpp)
 
 #include <cstdint>
+#include <chrono>
+#include <vector>
 
 #ifdef RVE_PROFILE
+#include "virtio_net.h"
 
 // Instruction classes (what the guest executed, one bucket per instruction)
 enum ProfInsClass : uint8_t
@@ -119,6 +122,82 @@ struct ProfCounters
     uint64_t uart_tx_bytes = 0, uart_rx_bytes = 0;
     uint64_t stdin_polls = 0;       // FIONREAD polls of the host terminal
     uint64_t vnet_ticks = 0;        // virtio RX servicing passes
+};
+
+// Every counter is a uint64_t, so snapshots can be diffed element-wise
+static_assert(sizeof(ProfCounters) % sizeof(uint64_t) == 0, "ProfCounters must be plain uint64_t fields");
+
+inline uint64_t prof_now_ns()
+{
+    return (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
+               std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+const char *prof_class_name(int cls);
+const char *prof_region_name(int region);
+const char *prof_exception_name(int cause);
+const char *prof_interrupt_name(int cause);
+
+// Fixed-size ring of (x, y) samples laid out the way ImPlot's `offset` parameter wants them
+struct ProfSeries
+{
+    std::vector<float> x, y;
+    int cap = 0, count = 0, next = 0;
+    void init(int capacity);
+    void clear() { count = 0; next = 0; }
+    void push(float xv, float yv);
+    int offset() const { return count < cap ? 0 : next; }
+    float last() const { return count ? y[(next + cap - 1) % cap] : 0.0f; }
+    float maxValue() const;
+};
+
+// GUI-side view of the counters: snapshots them a few times a second, turns deltas into rates and
+// keeps the history the charts draw. Lives entirely on the UI thread (the emulator is single-threaded).
+class Profiler
+{
+public:
+    Profiler();
+
+    // Call once per rendered frame; samples at most every `interval_ms`.
+    void update(const ProfCounters &c, const VirtioNet::Stats &vs, bool running);
+    // Wall time of one UI frame and how much of it was spent emulating
+    void frameDone(double frame_ms, double emu_ms);
+    // Zero the displayed totals and history (the emulator's own counters keep running)
+    void reset();
+
+    // Draw the tabbed window body (profiler_ui.cpp)
+    void draw();
+
+    // ---- state read by the UI ----
+    bool paused = false;
+    int interval_ms = 100;       // sampling period
+    int history_s = 30;          // visible x-range
+
+    ProfCounters cur{}, base{};  // latest snapshot / snapshot at the last reset
+    VirtioNet::Stats vcur{}, vbase{};
+    ProfCounters tot() const;    // cur - base
+    uint64_t totalInsns() const; // executed instructions since reset
+    double mips_now = 0, mips_avg = 0;
+    bool running = false;
+    double t_now = 0;            // seconds since the profiler started (x axis)
+
+    ProfSeries mips, frame_ms, emu_ms, ui_ms;
+    ProfSeries cls_rate[PIC_COUNT];                 // instructions/s by class
+    ProfSeries rd_rate, wr_rate, mmio_rate;         // guest data accesses/s
+    ProfSeries walk_rate, ptw_rate, fault_rate;     // MMU
+    ProfSeries trap_rate, irq_rate;
+    ProfSeries uart_tx_rate, uart_rx_rate;
+    ProfSeries vnet_tx_rate, vnet_rx_rate;
+
+private:
+    void pushSample(double dt, const ProfCounters &d, const VirtioNet::Stats &dv, uint64_t dinsns);
+    void clearHistory();
+    uint64_t t_start_ns = 0, t_last_ns = 0;
+    ProfCounters prev{};
+    VirtioNet::Stats vprev{};
+    double frame_sum = 0, emu_sum = 0;
+    int frame_n = 0;
+    double run_secs = 0;         // wall time in which the guest actually retired instructions
 };
 
 // Scope guard for UI/debugger code that calls into the CPU (memGetWord, mmuTranslate, ...): whatever
