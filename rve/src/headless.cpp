@@ -5,6 +5,7 @@
 #include "netsetup.h"
 #include <cstring>
 #include <cstdlib>
+#include <chrono>
 
 // Headless emulation loop.
 // Flags:
@@ -15,6 +16,9 @@
 //   --no-net     disconnect the virtio-net NIC (by default native builds use the host's network)
 //   -t           ISA-test mode: exit 0 = pass, 1 = fail, 2 = timeout;  -c <n> sets the watchdog
 //   -T           trace every instruction;  -x <addr> dump CPU state + memory on exit (test mode)
+//   --profile              print a JSON profiling summary (counters, host-time split, hotspots) to stderr at exit
+//   --profile-out <file>   write that JSON to a file instead
+//   --profile-check        verify the profiler's counter invariants at exit; exit status 3 if one is violated
 // The emulator's captureKeyboardInput() (called from Emulator::initialize()) puts the
 // terminal into raw mode so every keystroke is immediately visible to the guest OS.
 int runHeadless(int argc, char *argv[])
@@ -28,6 +32,8 @@ int runHeadless(int argc, char *argv[])
     bool net_fake = false, net_off = false;
     const char *net_client = nullptr;
     uint64_t dump_addr = 0;           // -x <addr>: print 64 bytes at this guest address on exit
+    bool prof_print = false, prof_check_flag = false;
+    const char *prof_out = nullptr;
     for (int i = 1; i < argc; i++)
     {
         if (strcmp(argv[i], "-b") == 0 && i + 1 < argc)
@@ -40,6 +46,12 @@ int runHeadless(int argc, char *argv[])
             net_fake = true;
         else if (strcmp(argv[i], "--no-net") == 0)
             net_off = true;
+        else if (strcmp(argv[i], "--profile") == 0)
+            prof_print = true;
+        else if (strcmp(argv[i], "--profile-out") == 0 && i + 1 < argc)
+            prof_out = argv[++i];
+        else if (strcmp(argv[i], "--profile-check") == 0)
+            prof_check_flag = true;
         else if (strcmp(argv[i], "-T") == 0)
             emu.debugMode = true; // trace every instruction
         else if (strcmp(argv[i], "-s") == 0 && i + 1 < argc)
@@ -77,6 +89,44 @@ int runHeadless(int argc, char *argv[])
 
     emu.running = true;
 
+    // Emits the requested profiling output and folds a failed invariant check into the exit status
+    auto t_start = std::chrono::steady_clock::now();
+    auto finish = [&](int rc) {
+        (void)t_start;
+        if (!prof_print && !prof_out && !prof_check_flag)
+            return rc;
+#ifdef RVE_PROFILE
+        double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - t_start).count();
+        if (prof_check_flag)
+        {
+            std::string report;
+            if (!prof_check(emu.cpu.prof, emu.cpu.clock, emu.cpu.prof_sampling, report))
+            {
+                fprintf(stderr, "PROFILE CHECK FAILED:\n%s", report.c_str());
+                return 3;
+            }
+            fprintf(stderr, "profile check ok (%llu instructions)\n", (unsigned long long)emu.cpu.clock);
+        }
+        if (prof_print || prof_out)
+        {
+            Profiler p;
+            p.attach(&emu.cpu.prof_hot, &emu.symbols);
+            std::string json = p.summaryJson(emu.cpu.prof, emu.cpu.vnet.stats, emu.cpu.clock, wall);
+            if (prof_out)
+            {
+                FILE *f = fopen(prof_out, "w");
+                if (f) { fputs(json.c_str(), f); fclose(f); }
+                else fprintf(stderr, "ERRO: cannot write %s\n", prof_out);
+            }
+            else
+                fputs(json.c_str(), stderr);
+        }
+#else
+        fprintf(stderr, "WARN: built without profiling (PROFILE=0); --profile flags ignored\n");
+#endif
+        return rc;
+    };
+
     if (emu.test_mode)
     {
         // ISA-test run: exit 0 = pass, 1 = fail, 2 = timeout
@@ -100,15 +150,15 @@ int runHeadless(int argc, char *argv[])
         if (!emu.test_done)
         {
             printf("TIMEOUT after %llu instructions\n", (unsigned long long)max_instr);
-            return 2;
+            return finish(2);
         }
         if (emu.test_result != 0)
         {
             // riscv-tests encode a failure as (test case number << 1) | 1
             printf("FAILED test case %llu\n", (unsigned long long)(emu.test_result >> 1));
-            return 1;
+            return finish(1);
         }
-        return 0;
+        return finish(0);
     }
 
     // Run as fast as possible
@@ -116,5 +166,5 @@ int runHeadless(int argc, char *argv[])
     while (emu.running)
         emu.emulate();
 
-    return 0;
+    return finish(0);
 }

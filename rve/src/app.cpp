@@ -598,6 +598,9 @@ void App::drawUI()
 
     if (settings.show_disasm)
         createDisasm();
+
+    if (settings.show_profiler)
+        createProfiler();
 }
 
 void App::renderLoop()
@@ -612,11 +615,25 @@ void App::renderLoop()
     while (running)
 #endif
     {
+#ifdef RVE_PROFILE
+        uint64_t t_frame = prof_now_ns();
+#endif
+#ifdef RVE_PROFILE
+        emu.cpu.prof_sampling = profiler.sampling;
+        profiler.attach(&emu.cpu.prof_hot, &emu.symbols);
+#endif
         stepEmu();
+#ifdef RVE_PROFILE
+        uint64_t t_emu = prof_now_ns();
+        profiler.update(emu.cpu.prof, emu.cpu.vnet.stats, emu.running);
+#endif
         handleEvents();
         beginRender();
         drawUI();
         endRender();
+#ifdef RVE_PROFILE
+        profiler.frameDone((double)(prof_now_ns() - t_frame) * 1e-6, (double)(t_emu - t_frame) * 1e-6);
+#endif
     }
 #ifdef __EMSCRIPTEN__
     while (0); };
@@ -666,6 +683,7 @@ void App::createMenubar()
             ImGui::MenuItem("Plot Demo Window", NULL, &settings.show_plot_demo_window);
             ImGui::MenuItem("CPU State", NULL, &settings.show_cpu_state);
             ImGui::MenuItem("Disassembler", NULL, &settings.show_disasm);
+            ImGui::MenuItem("Profiler", NULL, &settings.show_profiler);
             ImGui::EndMenu();
         }
         ImGuiIO &io = ImGui::GetIO();
@@ -890,6 +908,7 @@ void App::createDisasm()
             // Append the new data at the end
             // pc is a virtual address once the MMU is on (e.g. 0xFFFFFFFF80... for the Sv39 kernel):
             // translate it as an instruction fetch before reading the word.
+            PROF_QUIET(emu.cpu); // debugger reads are not guest traffic
             ins_ret fetch = emu.cpu.insReturnNoop();
             xlen_t paddr = emu.cpu.mmuTranslate(&fetch, emu.cpu.pc, MMU_ACCESS_FETCH);
             if (fetch.trap.en)
@@ -915,6 +934,23 @@ void App::createDisasm()
     }
     ImGui::EndTabBar();
 
+    ImGui::End();
+}
+
+void App::createProfiler()
+{
+    ImGuiIO &io = ImGui::GetIO();
+    ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.25f, io.DisplaySize.y * 0.25f), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin("Profiler", &settings.show_profiler))
+    {
+#ifdef RVE_PROFILE
+        profiler.draw();
+#else
+        ImGui::TextWrapped("This build was compiled without profiling. Rebuild with `make PROFILE=1`.");
+#endif
+    }
     ImGui::End();
 }
 

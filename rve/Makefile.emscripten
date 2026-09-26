@@ -26,7 +26,7 @@ DISASM_DIR    = lib/disasm
 
 # Source Files
 SOURCES  = $(SOURCE_DIR)/main.cpp
-SOURCES += $(SOURCE_DIR)/rv32.cpp $(SOURCE_DIR)/emu.cpp $(SOURCE_DIR)/loader.cpp $(SOURCE_DIR)/app.cpp $(SOURCE_DIR)/net.cpp $(SOURCE_DIR)/headless.cpp $(SOURCE_DIR)/plic.cpp $(SOURCE_DIR)/virtio_net.cpp $(SOURCE_DIR)/usernet.cpp $(SOURCE_DIR)/netsetup.cpp
+SOURCES += $(SOURCE_DIR)/rv32.cpp $(SOURCE_DIR)/emu.cpp $(SOURCE_DIR)/loader.cpp $(SOURCE_DIR)/app.cpp $(SOURCE_DIR)/net.cpp $(SOURCE_DIR)/headless.cpp $(SOURCE_DIR)/plic.cpp $(SOURCE_DIR)/virtio_net.cpp $(SOURCE_DIR)/usernet.cpp $(SOURCE_DIR)/netsetup.cpp $(SOURCE_DIR)/profiler.cpp $(SOURCE_DIR)/profiler_ui.cpp
 # ImGui Files
 SOURCES += $(IMGUI_DIR)/imgui.cpp $(IMGUI_DIR)/imgui_demo.cpp $(IMGUI_DIR)/imgui_draw.cpp $(IMGUI_DIR)/imgui_tables.cpp $(IMGUI_DIR)/imgui_widgets.cpp
 SOURCES += $(IMGUI_DIR)/backends/imgui_impl_sdl2.cpp $(IMGUI_DIR)/backends/imgui_impl_opengl3.cpp
@@ -94,11 +94,17 @@ endif
 ## FINAL BUILD FLAGS
 ##---------------------------------------------------------------------
 
+# Emulator profiling is off by default for the web build (`make -f Makefile.emscripten PROFILE=1` to enable)
+PROFILE ?= 0
+ifeq ($(PROFILE),1)
+CPPFLAGS += -DRVE_PROFILE
+endif
+
 CPPFLAGS += -I$(SOURCE_DIR) -I$(INCLUDE_DIR)
 CPPFLAGS += -I$(IMGUI_DIR) -I$(IMGUI_DIR)/backends -I$(IMGUI_DIR)/examples/libs/emscripten
 CPPFLAGS += -I$(IMPLOT_DIR) -I$(DISASM_DIR)
 #CPPFLAGS += -g
-CPPFLAGS += -Wall -Wformat -Os $(EMS)
+CPPFLAGS += -Wall -Wformat -O2 $(EMS)
 CXXFLAGS += -std=c++17
 # track header dependencies so editing a header rebuilds the objects that include it
 CXXFLAGS += -MMD -MP

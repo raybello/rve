@@ -40,6 +40,18 @@ int loadLinuxImage(const char *path, uint64_t path_len, uint8_t *data, uint64_t 
 // https : // stackoverflow.com/questions/13908276/loading-elf-file-in-c-in-user-space
 int loadElf(const char *path, uint64_t path_len, uint8_t *data, uint64_t data_len, uint64_t *entry = nullptr, uint64_t *tohost = nullptr);
 
+// Function/label symbols of an ELF (for symbolizing profiler hotspots), sorted by address.
+struct ElfSymbol
+{
+    uint64_t addr;
+    uint64_t size;
+    std::string name;
+};
+// Returns 0 on success (possibly with no symbols, e.g. a stripped ELF), non-zero if the file is unusable.
+int loadElfSymbols(const char *path, std::vector<ElfSymbol> &out);
+// Nearest symbol at or before `addr` (and within its size when it has one); nullptr if none.
+const ElfSymbol *findElfSymbol(const std::vector<ElfSymbol> &syms, uint64_t addr);
+
 // Function to load a binary file from the specified file path into the provided memory buffer.
 // Parameters:
 // - path: A pointer to a constant character array indicating the file path of the binary file.

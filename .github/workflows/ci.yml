@@ -26,6 +26,26 @@ jobs:
         working-directory: rve
         run: make isas-all
 
+  test-profiler:
+    name: Profiler Tests (unit + counter invariants)
+    if: github.event_name == 'push' || github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: sudo apt-get update -y && sudo apt-get install -y libsdl2-dev
+
+      - name: Run profiler tests
+        working-directory: rve
+        run: make prof-test
+
+      - name: The build still works with profiling compiled out
+        working-directory: rve
+        run: make PROFILE=0 isas32
+
   test-net:
     name: Net Tests (pair, virtio-net, userspace stack)
     if: github.event_name == 'push' || github.event.action != 'closed'

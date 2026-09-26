@@ -30,6 +30,9 @@ public:
     bool irqLevel() const { return intStatus_ != 0; }
     bool active() const { return (status_ & 4) != 0; } // DRIVER_OK
 
+    // Traffic totals since power-on (read by the profiler; cheap, updated once per frame)
+    struct Stats { uint64_t tx_frames = 0, tx_bytes = 0, rx_frames = 0, rx_bytes = 0; } stats;
+
 private:
     struct Queue
     {

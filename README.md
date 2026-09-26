@@ -158,6 +158,76 @@ networking-related files change (or on demand).
 
 ---
 
+## Profiling
+
+Native builds include a real-time profiler (on by default, `make PROFILE=0` compiles it out completely;
+the web build leaves it off unless you pass `PROFILE=1` to `Makefile.emscripten`). Open it from the GUI
+with **Views > Profiler**. It is built on ImPlot and updates a few times a second (sampling period and
+history length are adjustable, **Pause** freezes the charts for inspection, **Reset totals** re-baselines
+the numbers, **Export CSV** dumps the rate history).
+
+| Tab | What it shows |
+|---|---|
+| Overview | MIPS (now / average), instructions retired, loads+stores per 1k instructions, branch-taken %, frame time split into emulation vs UI |
+| Instructions | Instruction mix by class (ALU, MUL, DIV, load, store, branch, JAL/JALR, CSR, atomic, FP, system, fence), counts, shares, rates over time |
+| Memory | Guest reads/writes per second, accesses by width, RAM vs MMIO, MMIO traffic per device, bytes moved, page-table reads |
+| MMU & Traps | Page-table walks and faults by access type, PTE reads per walk, exceptions and interrupts by cause, LR/SC success |
+| Devices | UART bytes, host stdin polls, virtio-net frames and servicing passes |
+| Host time | Sampled cost of each `emulate()` stage (fetch, decode+execute, timers, devices, trap entry) in ns/instruction, and U/S/M privilege residency |
+| Hotspots | Sampled top program counters, top functions (symbolized when an ELF is loaded), hot 4 KiB pages, address-space heat map |
+
+**How it works.** Event counters (`ProfCounters` in `rve/include/profiler.h`) are plain integers bumped
+from the emulator hot path; there are no atomics because the emulator and the UI share one thread.
+Instruction fetch, page-table-walker reads and debugger/UI reads never count as guest data accesses.
+The host-time and hotspot views are *statistical*: one instruction in 4093 (a prime, so it cannot
+lock step with the emulator's own 1024-instruction periodic work) runs a timed copy of `emulate()`
+and records the stage times and the program counter. All other instructions run an untimed copy
+that contains no timing code. The host-time numbers are estimates and should be read as *shares*, not absolute
+nanoseconds: the timed copy runs once per 4093 instructions, so its code is cold in the instruction cache and
+each stage looks slower than it is on the untimed path, and the stages cost less than the host timer tick.
+
+**Overhead.** With everything on, roughly 4 % on an rv32 Linux boot and 5-8 % on rv64 (where every guest memory
+access is translated and counted). `make PROFILE=0` compiles all of it out.
+
+**Headless.** The same counters are available without the GUI:
+
+```sh
+./build/rve -n -F -t -c 50000000 -b build/Image --profile            # JSON summary on stderr at exit
+./build/rve -n -F -t -e prog.elf --profile-out prof.json             # ... or to a file (ELF symbols are used)
+./build/rve -n -F -t -e prog.elf --profile-check                     # verify counter invariants, exit 3 on violation
+make prof-test                                                       # unit tests + invariant checks on ISA tests and Linux boots
+```
+
+## Performance
+
+The interpreter was profiled with the profiler above plus Instruments, and optimised without changing behaviour
+(all ISA suites, the network tests, byte-identical console output for Linux boots and identical CPU/RAM state after
+3M instructions on both cores). What changed, roughly in order of payoff:
+
+- **Link-time optimisation** (`make LTO=0` to disable): lets the tiny memory/CSR fast paths inline across files.
+- **Device/interrupt servicing off the per-instruction path**: idle UART, virtio-net and interrupt checks are a few
+  flag tests, and their bodies (syscalls, stdio, network) are out of line so they no longer bloat the interpreter loop.
+  The host-terminal poll (`ioctl`) is rate limited to once per millisecond of wall time and UART output is flushed on
+  that tick instead of once per character. virtio-net/PLIC state is re-evaluated only when the guest touches it.
+  Interrupt delivery is only attempted when an interrupt could actually be taken (`RV32::irqPossible()`).
+- **Software TLB** for the MMU (rv64 Sv39 / rv32 Sv32): direct-mapped per access type, flushed on `satp` writes and
+  `sfence.vma`, tagged with privilege/SUM/MXR, filled only after a fully checked walk. 99.9 % hit rate on a Linux boot.
+- **Inline fast path** in `emulate()` for the hottest integer instructions (same handlers and encodings as `insSelect`),
+  opcode-first decode for the rest, `memcpy` word accesses, lazily committed guest RAM.
+
+Measured on Apple silicon (`-O2`, best of several runs, Linux boots with the fake network host, profiling compiled in):
+
+| Workload | Before | After | Speed-up |
+|---|---|---|---|
+| rv32 nommu Linux boot (30M instructions) | 0.86 s | 0.45 s | 1.9x |
+| rv64 OpenSBI + Sv39 Linux boot (60M instructions) | 2.24 s | 0.99 s | 2.3x |
+| rv64 Linux, 250M instructions (boot + idle userland) | 19 MIPS | 59 MIPS | 3.1x |
+| Start-up (`-c 1`), rv32 / rv64 | 19 / 27 ms | 10 / 18 ms | |
+
+With `make PROFILE=0` the same builds reach 0.43 s, 0.94 s and 64 MIPS. `make prof-test`,
+`./build/rve -n -t -c N -b Image --profile` (JSON with wall time and MIPS) and the profiler window are the tools to
+re-measure with. See `rve/Perf.md` for the plan and what is left.
+
 ## Building Linux with Docker
 
 The Linux kernel image (rv32nommu) is built inside a Docker container using Buildroot.

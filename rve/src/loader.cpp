@@ -1,5 +1,6 @@
 
 #include "loader.h"
+#include <algorithm>
 
 
 int loadLinuxImage(const char *path, uint64_t path_len, uint8_t *data, uint64_t data_len)
@@ -186,6 +187,107 @@ int loadElf(const char *path, uint64_t path_len, uint8_t *data, uint64_t data_le
         }
     }
     return 0;
+}
+
+int loadElfSymbols(const char *path, std::vector<ElfSymbol> &out)
+{
+    out.clear();
+    std::ifstream file(path, std::ios::binary);
+    if (!file.is_open())
+        return 1;
+    std::vector<uint8_t> img((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    if (img.size() < EI_NIDENT || memcmp(img.data(), ELFMAG, SELFMAG) != 0)
+        return 2;
+    bool is64 = img[EI_CLASS] == ELFCLASS64;
+    if (!is64 && img[EI_CLASS] != ELFCLASS32)
+        return 3;
+
+    uint64_t e_shoff;
+    uint32_t e_shnum, e_shentsize;
+    if (is64)
+    {
+        if (img.size() < sizeof(Elf64_Ehdr)) return 2;
+        Elf64_Ehdr eh; memcpy(&eh, img.data(), sizeof(eh));
+        e_shoff = eh.e_shoff; e_shnum = eh.e_shnum; e_shentsize = eh.e_shentsize;
+    }
+    else
+    {
+        if (img.size() < sizeof(Elf32_Ehdr)) return 2;
+        Elf32_Ehdr eh; memcpy(&eh, img.data(), sizeof(eh));
+        e_shoff = eh.e_shoff; e_shnum = eh.e_shnum; e_shentsize = eh.e_shentsize;
+    }
+
+    struct Sh { uint32_t type, link; uint64_t off, size, entsize; };
+    auto shdr = [&](uint32_t idx, Sh &sh) {
+        uint64_t o = e_shoff + (uint64_t)idx * e_shentsize;
+        if (is64)
+        {
+            if (o + sizeof(Elf64_Shdr) > img.size()) return false;
+            Elf64_Shdr h; memcpy(&h, img.data() + o, sizeof(h));
+            sh = {h.sh_type, h.sh_link, h.sh_offset, h.sh_size, h.sh_entsize};
+        }
+        else
+        {
+            if (o + sizeof(Elf32_Shdr) > img.size()) return false;
+            Elf32_Shdr h; memcpy(&h, img.data() + o, sizeof(h));
+            sh = {h.sh_type, h.sh_link, h.sh_offset, h.sh_size, h.sh_entsize};
+        }
+        return true;
+    };
+
+    for (uint32_t i = 0; i < e_shnum; i++)
+    {
+        Sh sym, str;
+        if (!shdr(i, sym) || sym.type != SHT_SYMTAB || sym.entsize == 0 || !shdr(sym.link, str))
+            continue;
+        for (uint64_t k = 0; k < sym.size / sym.entsize; k++)
+        {
+            uint64_t so = sym.off + k * sym.entsize;
+            uint32_t name; uint64_t value, size; uint8_t info; uint16_t shndx;
+            if (is64)
+            {
+                if (so + sizeof(Elf64_Sym) > img.size()) break;
+                Elf64_Sym s; memcpy(&s, img.data() + so, sizeof(s));
+                name = s.st_name; value = s.st_value; size = s.st_size; info = s.st_info; shndx = s.st_shndx;
+            }
+            else
+            {
+                if (so + sizeof(Elf32_Sym) > img.size()) break;
+                Elf32_Sym s; memcpy(&s, img.data() + so, sizeof(s));
+                name = s.st_name; value = s.st_value; size = s.st_size; info = s.st_info; shndx = s.st_shndx;
+            }
+            uint8_t type = info & 0xf; // 0 NOTYPE (asm labels), 2 FUNC
+            if (shndx == 0 || (type != 0 && type != 2) || str.off + name >= img.size())
+                continue;
+            const char *nm = (const char *)img.data() + str.off + name;
+            size_t maxlen = img.size() - (str.off + name);
+            size_t len = strnlen(nm, maxlen);
+            if (len == 0 || nm[0] == '$' || nm[0] == '.') // mapping symbols, local labels
+                continue;
+            out.push_back({value, size, std::string(nm, len)});
+        }
+    }
+    std::stable_sort(out.begin(), out.end(), [](const ElfSymbol &a, const ElfSymbol &b) { return a.addr < b.addr; });
+    return 0;
+}
+
+const ElfSymbol *findElfSymbol(const std::vector<ElfSymbol> &syms, uint64_t addr)
+{
+    auto it = std::upper_bound(syms.begin(), syms.end(), addr,
+                               [](uint64_t a, const ElfSymbol &s) { return a < s.addr; });
+    // A sized symbol (FUNC) owns [addr, addr+size); a zero-size label (asm labels, linker symbols like
+    // _end) only claims the next 64 KiB so unrelated addresses are not attributed to it.
+    const uint64_t LABEL_REACH = 0x10000;
+    while (it != syms.begin())
+    {
+        --it;
+        uint64_t off = addr - it->addr;
+        if (it->size ? off < it->size : off < LABEL_REACH)
+            return &*it;
+        if (off > LABEL_REACH) // everything earlier is farther still
+            break;
+    }
+    return nullptr;
 }
 
 int loadBinary(const char *path, uint64_t path_len, uint8_t *data, uint64_t data_len)

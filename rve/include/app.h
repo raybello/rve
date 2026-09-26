@@ -25,6 +25,7 @@
 #include "file_dialog.h"
 // RISC core
 #include "emu.h"
+#include "profiler.h"
 
 struct AppSettings
 {
@@ -39,6 +40,7 @@ struct AppSettings
     bool show_terminal_window = true;
     bool show_cpu_state = true;
     bool show_disasm = true;
+    bool show_profiler = false;         // Profiling metrics (ImPlot)
 
     // Emulator settings
 };
@@ -62,6 +64,9 @@ class App
     Emulator emu;
     ImGui::FileBrowser elfFileDialog;
     ImGui::FileBrowser linuxFileDialog;
+#ifdef RVE_PROFILE
+    Profiler profiler;
+#endif
 
     // Framebuffer texture
     GLuint fb_texture_id = 0;
@@ -88,6 +93,7 @@ public:
     void createTerminal();
     void createCpuState();
     void createDisasm();
+    void createProfiler();
 };
 
 #endif 

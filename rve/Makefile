@@ -32,9 +32,15 @@ ISA_TEST_FILES = $(filter-out %.dump, $(notdir $(wildcard $(ISA_TEST_DIR)/*)))
 # Create build directory if it doesn't exist
 $(shell mkdir -p $(BUILD_DIR))
 
+# Emulator profiling (counters + the Profiler window): on by default, `make PROFILE=0` compiles it out
+PROFILE ?= 1
+ifeq ($(PROFILE),1)
+CXXFLAGS += -DRVE_PROFILE
+endif
+
 # Source Files
 SOURCES =  $(SOURCE_DIR)/main.cpp
-SOURCES += $(SOURCE_DIR)/rv32.cpp $(SOURCE_DIR)/emu.cpp $(SOURCE_DIR)/loader.cpp $(SOURCE_DIR)/app.cpp $(SOURCE_DIR)/net.cpp $(SOURCE_DIR)/headless.cpp $(SOURCE_DIR)/plic.cpp $(SOURCE_DIR)/virtio_net.cpp $(SOURCE_DIR)/usernet.cpp $(SOURCE_DIR)/nativehost.cpp $(SOURCE_DIR)/netsetup.cpp
+SOURCES += $(SOURCE_DIR)/rv32.cpp $(SOURCE_DIR)/emu.cpp $(SOURCE_DIR)/loader.cpp $(SOURCE_DIR)/app.cpp $(SOURCE_DIR)/net.cpp $(SOURCE_DIR)/headless.cpp $(SOURCE_DIR)/plic.cpp $(SOURCE_DIR)/virtio_net.cpp $(SOURCE_DIR)/usernet.cpp $(SOURCE_DIR)/nativehost.cpp $(SOURCE_DIR)/netsetup.cpp $(SOURCE_DIR)/profiler.cpp $(SOURCE_DIR)/profiler_ui.cpp
 # ImGui Files
 SOURCES += $(IMGUI_DIR)/imgui.cpp $(IMGUI_DIR)/imgui_demo.cpp $(IMGUI_DIR)/imgui_draw.cpp $(IMGUI_DIR)/imgui_tables.cpp $(IMGUI_DIR)/imgui_widgets.cpp
 SOURCES += $(IMGUI_DIR)/backends/imgui_impl_sdl2.cpp $(IMGUI_DIR)/backends/imgui_impl_opengl3.cpp
@@ -90,10 +96,21 @@ ifeq ($(OS), Windows_NT)
 	CFLAGS = $(CXXFLAGS)
 endif
 
-# C & C++ Compiler flags
-CXXFLAGS += -g -O2 -Wall -Wformat
+# C & C++ Compiler flags. LTO lets the tiny memory/CSR fast paths
+# inline across translation units (-O3 adds nothing on top); `make LTO=0` restores the old flags.
+OPT ?= -O2
+LTO ?= 1
+CXXFLAGS += -g $(OPT) -Wall -Wformat
+ifeq ($(LTO),1)
+CXXFLAGS += -flto
+endif
 CCFLAGS  := $(CXXFLAGS)
 CXXFLAGS += -std=c++17
+
+# Rebuild everything when the compile flags change (e.g. PROFILE=0 <-> 1): -MMD only tracks headers
+FLAGS_STAMP = $(BUILD_DIR)/.cxxflags
+$(shell echo '$(CXXFLAGS)' | cmp -s - $(FLAGS_STAMP) 2>/dev/null || echo '$(CXXFLAGS)' > $(FLAGS_STAMP))
+$(OBJS): $(FLAGS_STAMP)
 
 # Build rules
 $(BUILD_DIR)/%.o: %.cpp
@@ -213,6 +230,36 @@ lnx: clean
 
 rerun: clean
 	make run
+
+# Profiler: unit tests (classification, hotspot table, ring buffer, invariants, ELF symbols) plus
+# counter-invariant checks on real guest runs (ISA tests at both XLENs, an Sv39 test, Linux boots).
+ifeq ($(PROFILE),1)
+prof-test:
+	$(CXX) $(CXXFLAGS) -o $(BUILD_DIR)/profiler_test \
+		$(SOURCE_DIR)/profiler.cpp $(SOURCE_DIR)/loader.cpp tests/profiler_test.cpp
+	./$(BUILD_DIR)/profiler_test $(ISA_TEST_DIR)/rv32ui-p-add
+	$(MAKE) XLEN=32 all
+	$(MAKE) XLEN=64 all
+	@for t in rv32ui-p-add rv32um-p-mul rv32ua-p-lrsc rv32mi-p-csr rv32ui-p-lw; do \
+	  ./build/rve -n -F -t --profile-check -e $(ISA_TEST_DIR)/$$t >/dev/null 2>$(BUILD_DIR)/prof.err || { cat $(BUILD_DIR)/prof.err; echo "prof-check failed: $$t"; exit 1; }; done
+	@for t in rv64ui-p-add rv64ua-p-lrsc rv64um-p-mulw; do \
+	  ./build64/rve64 -n -F -t --profile-check -e $(ISA_RV64_DIR)/$$t >/dev/null 2>$(BUILD_DIR)/prof.err || { cat $(BUILD_DIR)/prof.err; echo "prof-check failed: $$t"; exit 1; }; done
+	@for t in rv64ui-v-add rv64ui-v-ld rv64ua-v-lrsc; do \
+	  ./build64/rve64 -n -F -t --profile-check --profile-out $(BUILD_DIR)/prof.json -e $(ISA_RV64_V_DIR)/$$t >/dev/null 2>$(BUILD_DIR)/prof.err || { cat $(BUILD_DIR)/prof.err; echo "prof-check failed: $$t"; exit 1; }; done
+	@grep -q '"mmu_walks": {"fetch": [1-9]' $(BUILD_DIR)/prof.json || { echo "expected Sv39 page-table walks in the -v- run"; exit 1; }
+	@echo "Linux rv32 boot (25M instructions)..."
+	@test -f $(BUILD_DIR)/Image || { echo "  (skipped: no $(BUILD_DIR)/Image, run 'make linux-dl')"; exit 0; }; \
+	  ./build/rve -n -F -t -c 25000000 --profile-check -b $(BUILD_DIR)/Image >/dev/null 2>$(BUILD_DIR)/prof.err; rc=$$?; \
+	  [ $$rc -eq 2 ] || [ $$rc -eq 0 ] || { cat $(BUILD_DIR)/prof.err; echo "prof-check failed: rv32 Linux (rc=$$rc)"; exit 1; }
+	@echo "Linux rv64 boot (25M instructions)..."
+	@test -f $(LINUX64_IMAGE) || { echo "  (skipped: no $(LINUX64_IMAGE))"; exit 0; }; \
+	  ./build64/rve64 -n -F -t -c 25000000 --profile-check -b $(LINUX64_IMAGE) >/dev/null 2>$(BUILD_DIR)/prof.err; rc=$$?; \
+	  [ $$rc -eq 2 ] || [ $$rc -eq 0 ] || { cat $(BUILD_DIR)/prof.err; echo "prof-check failed: rv64 Linux (rc=$$rc)"; exit 1; }
+	@echo "prof-test: OK"
+else
+prof-test:
+	@echo "prof-test needs PROFILE=1"
+endif
 
 net-test:
 	$(CXX) $(CXXFLAGS) -o $(BUILD_DIR)/net_pair_test \

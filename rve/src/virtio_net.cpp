@@ -130,7 +130,11 @@ void VirtioNet::processTx()
             mem_.read(c.addr, buf.data() + at, c.len);
         }
         if (buf.size() > VIRTIO_NET_HDR_LEN)
+        {
+            stats.tx_frames++;
+            stats.tx_bytes += buf.size() - VIRTIO_NET_HDR_LEN;
             be_->send(buf.data() + VIRTIO_NET_HDR_LEN, buf.size() - VIRTIO_NET_HDR_LEN);
+        }
         pushUsed(q, head, 0);
     }
 }
@@ -153,6 +157,8 @@ bool VirtioNet::deliver(const std::vector<uint8_t> &frame)
         mem_.write(c.addr, pkt.data() + off, n);
         off += n;
     }
+    stats.rx_frames++;
+    stats.rx_bytes += frame.size();
     pushUsed(q, head, (uint32_t)off);
     return true;
 }

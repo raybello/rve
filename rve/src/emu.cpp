@@ -422,36 +422,42 @@ imp(beq, FormatB, { // rv32i
     if (cpu.xreg[ins.rs1] == cpu.xreg[ins.rs2])
     {
         WR_PC(cpu.pc + ins.imm);
+        PROF_INC(cpu.prof.branch_taken);
     }
 })
 imp(bge, FormatB, { // rv32i
     if (AS_SIGNED(cpu.xreg[ins.rs1]) >= AS_SIGNED(cpu.xreg[ins.rs2]))
     {
         WR_PC(cpu.pc + ins.imm);
+        PROF_INC(cpu.prof.branch_taken);
     }
 })
 imp(bgeu, FormatB, { // rv32i
     if (cpu.xreg[ins.rs1] >= cpu.xreg[ins.rs2])
     {
         WR_PC(cpu.pc + ins.imm);
+        PROF_INC(cpu.prof.branch_taken);
     }
 })
 imp(blt, FormatB, { // rv32i
     if (AS_SIGNED(cpu.xreg[ins.rs1]) < AS_SIGNED(cpu.xreg[ins.rs2]))
     {
         WR_PC(cpu.pc + ins.imm);
+        PROF_INC(cpu.prof.branch_taken);
     }
 })
 imp(bltu, FormatB, { // rv32i
     if (cpu.xreg[ins.rs1] < cpu.xreg[ins.rs2])
     {
         WR_PC(cpu.pc + ins.imm);
+        PROF_INC(cpu.prof.branch_taken);
     }
 })
 imp(bne, FormatB, { // rv32i
     if (cpu.xreg[ins.rs1] != cpu.xreg[ins.rs2])
     {
         WR_PC(cpu.pc + ins.imm);
+        PROF_INC(cpu.prof.branch_taken);
     }
 })
 imp(csrrc, FormatCSR, { // system
@@ -672,6 +678,7 @@ imp(sc_w, FormatR, { // rv32a
     if (ret->trap.en) return;
     bool ok = cpu.reservation_en && cpu.reservation_addr == addr;
     cpu.reservation_en = false; // a reservation is consumed by any SC
+    PROF_INC(ok ? cpu.prof.sc_ok : cpu.prof.sc_fail);
     if (ok)
     {
         cpu.memSetWord(addr, (u32)cpu.xreg[ins.rs2]);
@@ -683,8 +690,8 @@ imp(sc_w, FormatR, { // rv32a
     }
 })
 imp(sfence_vma, FormatEmpty, {
-    // system
-    // skip
+    // system: flush the software TLB (whatever the address/ASID operands, a full flush is always correct)
+    cpu.tlbFlush();
 })
 imp(sh, FormatS, { // rv32i
     xlen_t addr = cpu.mmuTranslate(ret, cpu.xreg[ins.rs1] + ins.imm, MMU_ACCESS_WRITE);
@@ -864,6 +871,7 @@ imp(sc_d, FormatR, { // rv64a
     if (ret->trap.en) return;
     bool ok = cpu.reservation_en && cpu.reservation_addr == addr;
     cpu.reservation_en = false; // a reservation is consumed by any SC
+    PROF_INC(ok ? cpu.prof.sc_ok : cpu.prof.sc_fail);
     if (ok)
     {
         cpu.memSetDword(addr, cpu.xreg[ins.rs2]);
@@ -1411,14 +1419,15 @@ imp(fmv_d_x, FormatR, { // rv64d: freg[rd] = xreg[rs1] bits
     u32 ins_masked;
     ins_ret ret = cpu.insReturnNoop();
 
-    FormatR ins_FormatR = parse_FormatR(ins_word);
-    FormatI ins_FormatI = parse_FormatI(ins_word);
-    FormatS ins_FormatS = parse_FormatS(ins_word);
-    FormatU ins_FormatU = parse_FormatU(ins_word);
-    FormatJ ins_FormatJ = parse_FormatJ(ins_word);
-    FormatB ins_FormatB = parse_FormatB(ins_word);
+    // Operand fields are extracted only by the handler's own format (the run() cases name one of these)
+#define ins_FormatR parse_FormatR(ins_word)
+#define ins_FormatI parse_FormatI(ins_word)
+#define ins_FormatS parse_FormatS(ins_word)
+#define ins_FormatU parse_FormatU(ins_word)
+#define ins_FormatJ parse_FormatJ(ins_word)
+#define ins_FormatB parse_FormatB(ins_word)
+#define ins_FormatEmpty parse_FormatEmpty(ins_word)
     FormatCSR ins_FormatCSR = parse_FormatCSR(ins_word);
-    FormatEmpty ins_FormatEmpty = parse_FormatEmpty(ins_word);
 
     if ((ins_word & 0x00000073) == 0x00000073)
     {
@@ -1436,253 +1445,498 @@ imp(fmv_d_x, FormatR, { // rv64d: freg[rd] = xreg[rs1] bits
 #endif
     }
 
-    ins_masked = ins_word & 0x0000007f;
-    switch (ins_masked)
+    // Dispatch on the major opcode first: only the mask/switch blocks that can hold an instruction with
+    // this opcode are consulted, in the same order (and with the same cases) as the original block chain.
+    switch (ins_word & 0x7f)
     {
-        run(auipc, 0x00000017, ins_FormatU)
-        run(jal, 0x0000006f, ins_FormatJ)
-        run(lui, 0x00000037, ins_FormatU)
-    }
-    ins_masked = ins_word & 0x0000707f;
-    switch (ins_masked)
+    case 0x03:
     {
-        run(addi, 0x00000013, ins_FormatI)
-        run(andi, 0x00007013, ins_FormatI)
-        run(beq, 0x00000063, ins_FormatB)
-        run(bge, 0x00005063, ins_FormatB)
-        run(bgeu, 0x00007063, ins_FormatB)
-        run(blt, 0x00004063, ins_FormatB)
-        run(bltu, 0x00006063, ins_FormatB)
-        run(bne, 0x00001063, ins_FormatB)
-        run(csrrc, 0x00003073, ins_FormatCSR)
-        run(csrrci, 0x00007073, ins_FormatCSR)
-        run(csrrs, 0x00002073, ins_FormatCSR)
-        run(csrrsi, 0x00006073, ins_FormatCSR)
-        run(csrrw, 0x00001073, ins_FormatCSR)
-        run(csrrwi, 0x00005073, ins_FormatCSR)
-        run(fence, 0x0000000f, ins_FormatEmpty)
-        run(fence_i, 0x0000100f, ins_FormatEmpty)
-        run(jalr, 0x00000067, ins_FormatI)
-        run(lb, 0x00000003, ins_FormatI)
-        run(lbu, 0x00004003, ins_FormatI)
-        run(lh, 0x00001003, ins_FormatI)
-        run(lhu, 0x00005003, ins_FormatI)
-        run(lw, 0x00002003, ins_FormatI)
-        run(flw, 0x00002007, ins_FormatI) // rv32f
-        run(fld, 0x00003007, ins_FormatI) // rv32d
-        run(ori, 0x00006013, ins_FormatI)
-        run(sb, 0x00000023, ins_FormatS)
-        run(sh, 0x00001023, ins_FormatS)
-        run(fsw, 0x00002027, ins_FormatS) // rv32f
-        run(fsd, 0x00003027, ins_FormatS) // rv32d
-        run(slti, 0x00002013, ins_FormatI)
-        run(sltiu, 0x00003013, ins_FormatI)
-        run(sw, 0x00002023, ins_FormatS)
-        run(xori, 0x00004013, ins_FormatI)
-#if XLEN == 64
-        run(addiw, 0x0000001b, ins_FormatI)
-        run(lwu, 0x00006003, ins_FormatI)
-        run(ld, 0x00003003, ins_FormatI)
-        run(sd, 0x00003023, ins_FormatS)
-#endif
-    }
-    ins_masked = ins_word & 0xf800707f;
-    switch (ins_masked)
-    {
-        run(amoswap_w, 0x0800202f, ins_FormatR)
-        run(amoadd_w, 0x0000202f, ins_FormatR)
-        run(amoxor_w, 0x2000202f, ins_FormatR)
-        run(amoand_w, 0x6000202f, ins_FormatR)
-        run(amoor_w, 0x4000202f, ins_FormatR)
-        run(amomin_w, 0x8000202f, ins_FormatR)
-        run(amomax_w, 0xa000202f, ins_FormatR)
-        run(amominu_w, 0xc000202f, ins_FormatR)
-        run(amomaxu_w, 0xe000202f, ins_FormatR)
-        run(sc_w, 0x1800202f, ins_FormatR)
-#if XLEN == 64
-        run(amoswap_d, 0x0800302f, ins_FormatR)
-        run(amoadd_d, 0x0000302f, ins_FormatR)
-        run(amoxor_d, 0x2000302f, ins_FormatR)
-        run(amoand_d, 0x6000302f, ins_FormatR)
-        run(amoor_d, 0x4000302f, ins_FormatR)
-        run(amomin_d, 0x8000302f, ins_FormatR)
-        run(amomax_d, 0xa000302f, ins_FormatR)
-        run(amominu_d, 0xc000302f, ins_FormatR)
-        run(amomaxu_d, 0xe000302f, ins_FormatR)
-        run(sc_d, 0x1800302f, ins_FormatR)
-#endif
-    }
-    ins_masked = ins_word & 0xf9f0707f;
-    switch (ins_masked)
-    {
-        run(lr_w, 0x1000202f, ins_FormatR)
-#if XLEN == 64
-        run(lr_d, 0x1000302f, ins_FormatR)
-#endif
-    }
-    ins_masked = ins_word & 0xfc00707f;
-    switch (ins_masked)
-    {
-        run(slli, 0x00001013, ins_FormatR)
-        run(srai, 0x40005013, ins_FormatR)
-        run(srli, 0x00005013, ins_FormatR)
-    }
-    ins_masked = ins_word & 0xfe00707f;
-    switch (ins_masked)
-    {
-        run(add, 0x00000033, ins_FormatR)
-        run(and, 0x00007033, ins_FormatR)
-        run(div, 0x02004033, ins_FormatR)
-        run(divu, 0x02005033, ins_FormatR)
-        run(mul, 0x02000033, ins_FormatR)
-        run(mulh, 0x02001033, ins_FormatR)
-        run(mulhsu, 0x02002033, ins_FormatR)
-        run(mulhu, 0x02003033, ins_FormatR)
-        run(or, 0x00006033, ins_FormatR)
-        run(rem, 0x02006033, ins_FormatR)
-        run(remu, 0x02007033, ins_FormatR)
-        run(sll, 0x00001033, ins_FormatR)
-        run(slt, 0x00002033, ins_FormatR)
-        run(sltu, 0x00003033, ins_FormatR)
-        run(sra, 0x40005033, ins_FormatR)
-        run(srl, 0x00005033, ins_FormatR)
-        run(sub, 0x40000033, ins_FormatR)
-        run(xor, 0x00004033, ins_FormatR)
-#if XLEN == 64
-        run(slliw, 0x0000101b, ins_FormatR)
-        run(srliw, 0x0000501b, ins_FormatR)
-        run(sraiw, 0x4000501b, ins_FormatR)
-        run(addw, 0x0000003b, ins_FormatR)
-        run(subw, 0x4000003b, ins_FormatR)
-        run(sllw, 0x0000103b, ins_FormatR)
-        run(srlw, 0x0000503b, ins_FormatR)
-        run(sraw, 0x4000503b, ins_FormatR)
-        run(mulw, 0x0200003b, ins_FormatR)
-        run(divw, 0x0200403b, ins_FormatR)
-        run(divuw, 0x0200503b, ins_FormatR)
-        run(remw, 0x0200603b, ins_FormatR)
-        run(remuw, 0x0200703b, ins_FormatR)
-#endif
-    }
-    ins_masked = ins_word & 0xfe007fff;
-    switch (ins_masked)
-    {
-        run(sfence_vma, 0x12000073, ins_FormatEmpty)
-    }
-    // ---- RV32F / RV32D new switch blocks ----
-    // All FP compute instructions trap if mstatus.FS == Off
-    {
-        u32 op7 = ins_word & 0x7f;
-        if (op7 == 0x43 || op7 == 0x47 || op7 == 0x4b || op7 == 0x4f || op7 == 0x53)
+        ins_masked = ins_word & 0x0000707f;
+        switch (ins_masked)
         {
-            if (((cpu.csr.data[CSR_MSTATUS] >> 13) & 3) == 0)
-            {
-                ret.trap.en    = true;
-                ret.trap.type  = trap_IllegalInstruction;
-                ret.trap.value = ins_word;
-                return ret;
-            }
+            run(lb, 0x00000003, ins_FormatI)
+            run(lbu, 0x00004003, ins_FormatI)
+            run(lh, 0x00001003, ins_FormatI)
+            run(lhu, 0x00005003, ins_FormatI)
+            run(lw, 0x00002003, ins_FormatI)
+#if XLEN == 64
+            run(lwu, 0x00006003, ins_FormatI)
+#endif
+#if XLEN == 64
+            run(ld, 0x00003003, ins_FormatI)
+#endif
         }
+        break;
+    }
+    case 0x07:
+    {
+        ins_masked = ins_word & 0x0000707f;
+        switch (ins_masked)
+        {
+            run(flw, 0x00002007, ins_FormatI) // rv32f
+            run(fld, 0x00003007, ins_FormatI) // rv32d
+        }
+        break;
+    }
+    case 0x0f:
+    {
+        ins_masked = ins_word & 0x0000707f;
+        switch (ins_masked)
+        {
+            run(fence, 0x0000000f, ins_FormatEmpty)
+            run(fence_i, 0x0000100f, ins_FormatEmpty)
+        }
+        break;
+    }
+    case 0x13:
+    {
+        ins_masked = ins_word & 0x0000707f;
+        switch (ins_masked)
+        {
+            run(addi, 0x00000013, ins_FormatI)
+            run(andi, 0x00007013, ins_FormatI)
+            run(ori, 0x00006013, ins_FormatI)
+            run(slti, 0x00002013, ins_FormatI)
+            run(sltiu, 0x00003013, ins_FormatI)
+            run(xori, 0x00004013, ins_FormatI)
+        }
+        ins_masked = ins_word & 0xfc00707f;
+        switch (ins_masked)
+        {
+            run(slli, 0x00001013, ins_FormatR)
+            run(srai, 0x40005013, ins_FormatR)
+            run(srli, 0x00005013, ins_FormatR)
+        }
+        break;
+    }
+    case 0x17:
+    {
+        ins_masked = ins_word & 0x0000007f;
+        switch (ins_masked)
+        {
+            run(auipc, 0x00000017, ins_FormatU)
+        }
+        break;
+    }
+    case 0x1b:
+    {
+        ins_masked = ins_word & 0x0000707f;
+        switch (ins_masked)
+        {
+#if XLEN == 64
+            run(addiw, 0x0000001b, ins_FormatI)
+#endif
+        }
+        ins_masked = ins_word & 0xfe00707f;
+        switch (ins_masked)
+        {
+#if XLEN == 64
+            run(slliw, 0x0000101b, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(srliw, 0x0000501b, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(sraiw, 0x4000501b, ins_FormatR)
+#endif
+        }
+        break;
+    }
+    case 0x23:
+    {
+        ins_masked = ins_word & 0x0000707f;
+        switch (ins_masked)
+        {
+            run(sb, 0x00000023, ins_FormatS)
+            run(sh, 0x00001023, ins_FormatS)
+            run(sw, 0x00002023, ins_FormatS)
+#if XLEN == 64
+            run(sd, 0x00003023, ins_FormatS)
+#endif
+        }
+        break;
+    }
+    case 0x27:
+    {
+        ins_masked = ins_word & 0x0000707f;
+        switch (ins_masked)
+        {
+            run(fsw, 0x00002027, ins_FormatS) // rv32f
+            run(fsd, 0x00003027, ins_FormatS) // rv32d
+        }
+        break;
+    }
+    case 0x2f:
+    {
+        ins_masked = ins_word & 0xf800707f;
+        switch (ins_masked)
+        {
+            run(amoswap_w, 0x0800202f, ins_FormatR)
+            run(amoadd_w, 0x0000202f, ins_FormatR)
+            run(amoxor_w, 0x2000202f, ins_FormatR)
+            run(amoand_w, 0x6000202f, ins_FormatR)
+            run(amoor_w, 0x4000202f, ins_FormatR)
+            run(amomin_w, 0x8000202f, ins_FormatR)
+            run(amomax_w, 0xa000202f, ins_FormatR)
+            run(amominu_w, 0xc000202f, ins_FormatR)
+            run(amomaxu_w, 0xe000202f, ins_FormatR)
+            run(sc_w, 0x1800202f, ins_FormatR)
+#if XLEN == 64
+            run(amoswap_d, 0x0800302f, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(amoadd_d, 0x0000302f, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(amoxor_d, 0x2000302f, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(amoand_d, 0x6000302f, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(amoor_d, 0x4000302f, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(amomin_d, 0x8000302f, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(amomax_d, 0xa000302f, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(amominu_d, 0xc000302f, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(amomaxu_d, 0xe000302f, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(sc_d, 0x1800302f, ins_FormatR)
+#endif
+        }
+        ins_masked = ins_word & 0xf9f0707f;
+        switch (ins_masked)
+        {
+            run(lr_w, 0x1000202f, ins_FormatR)
+#if XLEN == 64
+            run(lr_d, 0x1000302f, ins_FormatR)
+#endif
+        }
+        break;
+    }
+    case 0x33:
+    {
+        ins_masked = ins_word & 0xfe00707f;
+        switch (ins_masked)
+        {
+            run(add, 0x00000033, ins_FormatR)
+            run(and, 0x00007033, ins_FormatR)
+            run(div, 0x02004033, ins_FormatR)
+            run(divu, 0x02005033, ins_FormatR)
+            run(mul, 0x02000033, ins_FormatR)
+            run(mulh, 0x02001033, ins_FormatR)
+            run(mulhsu, 0x02002033, ins_FormatR)
+            run(mulhu, 0x02003033, ins_FormatR)
+            run(or, 0x00006033, ins_FormatR)
+            run(rem, 0x02006033, ins_FormatR)
+            run(remu, 0x02007033, ins_FormatR)
+            run(sll, 0x00001033, ins_FormatR)
+            run(slt, 0x00002033, ins_FormatR)
+            run(sltu, 0x00003033, ins_FormatR)
+            run(sra, 0x40005033, ins_FormatR)
+            run(srl, 0x00005033, ins_FormatR)
+            run(sub, 0x40000033, ins_FormatR)
+            run(xor, 0x00004033, ins_FormatR)
+        }
+        break;
+    }
+    case 0x37:
+    {
+        ins_masked = ins_word & 0x0000007f;
+        switch (ins_masked)
+        {
+            run(lui, 0x00000037, ins_FormatU)
+        }
+        break;
+    }
+    case 0x3b:
+    {
+        ins_masked = ins_word & 0xfe00707f;
+        switch (ins_masked)
+        {
+#if XLEN == 64
+            run(addw, 0x0000003b, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(subw, 0x4000003b, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(sllw, 0x0000103b, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(srlw, 0x0000503b, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(sraw, 0x4000503b, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(mulw, 0x0200003b, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(divw, 0x0200403b, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(divuw, 0x0200503b, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(remw, 0x0200603b, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(remuw, 0x0200703b, ins_FormatR)
+#endif
+        }
+        break;
+    }
+    case 0x43:
+    {
+        // All FP compute instructions trap if mstatus.FS == Off
+        if (((cpu.csr.data[CSR_MSTATUS] >> 13) & 3) == 0)
+        {
+            ret.trap.en    = true;
+            ret.trap.type  = trap_IllegalInstruction;
+            ret.trap.value = ins_word;
+            return ret;
+        }
+        ins_masked = ins_word & 0x0600007f;
+        switch (ins_masked)
+        {
+            run(fmadd_s,  0x00000043, ins_FormatR)
+            run(fmadd_d,  0x02000043, ins_FormatR)
+        }
+        break;
+    }
+    case 0x47:
+    {
+        // All FP compute instructions trap if mstatus.FS == Off
+        if (((cpu.csr.data[CSR_MSTATUS] >> 13) & 3) == 0)
+        {
+            ret.trap.en    = true;
+            ret.trap.type  = trap_IllegalInstruction;
+            ret.trap.value = ins_word;
+            return ret;
+        }
+        ins_masked = ins_word & 0x0600007f;
+        switch (ins_masked)
+        {
+            run(fmsub_s,  0x00000047, ins_FormatR)
+            run(fmsub_d,  0x02000047, ins_FormatR)
+        }
+        break;
+    }
+    case 0x4b:
+    {
+        // All FP compute instructions trap if mstatus.FS == Off
+        if (((cpu.csr.data[CSR_MSTATUS] >> 13) & 3) == 0)
+        {
+            ret.trap.en    = true;
+            ret.trap.type  = trap_IllegalInstruction;
+            ret.trap.value = ins_word;
+            return ret;
+        }
+        ins_masked = ins_word & 0x0600007f;
+        switch (ins_masked)
+        {
+            run(fnmsub_s, 0x0000004b, ins_FormatR)
+            run(fnmsub_d, 0x0200004b, ins_FormatR)
+        }
+        break;
+    }
+    case 0x4f:
+    {
+        // All FP compute instructions trap if mstatus.FS == Off
+        if (((cpu.csr.data[CSR_MSTATUS] >> 13) & 3) == 0)
+        {
+            ret.trap.en    = true;
+            ret.trap.type  = trap_IllegalInstruction;
+            ret.trap.value = ins_word;
+            return ret;
+        }
+        ins_masked = ins_word & 0x0600007f;
+        switch (ins_masked)
+        {
+            run(fnmadd_s, 0x0000004f, ins_FormatR)
+            run(fnmadd_d, 0x0200004f, ins_FormatR)
+        }
+        break;
+    }
+    case 0x53:
+    {
+        // All FP compute instructions trap if mstatus.FS == Off
+        if (((cpu.csr.data[CSR_MSTATUS] >> 13) & 3) == 0)
+        {
+            ret.trap.en    = true;
+            ret.trap.type  = trap_IllegalInstruction;
+            ret.trap.value = ins_word;
+            return ret;
+        }
+        ins_masked = ins_word & 0xfff0707f;
+        switch (ins_masked)
+        {
+            run(fmv_x_w,  0xe0000053, ins_FormatR)
+            run(fclass_s, 0xe0001053, ins_FormatR)
+            run(fclass_d, 0xe2001053, ins_FormatR)
+#if XLEN == 64
+            run(fmv_x_d,  0xe2000053, ins_FormatR)
+#endif
+        }
+        ins_masked = ins_word & 0xfff0007f;
+        switch (ins_masked)
+        {
+            run(fsqrt_s,   0x58000053, ins_FormatR)
+            run(fsqrt_d,   0x5a000053, ins_FormatR)
+            run(fcvt_w_s,  0xc0000053, ins_FormatR)
+            run(fcvt_wu_s, 0xc0100053, ins_FormatR)
+            run(fcvt_s_w,  0xd0000053, ins_FormatR)
+            run(fcvt_s_wu, 0xd0100053, ins_FormatR)
+            run(fmv_w_x,   0xf0000053, ins_FormatR)
+            run(fcvt_s_d,  0x40100053, ins_FormatR)
+            run(fcvt_d_s,  0x42000053, ins_FormatR)
+            run(fcvt_w_d,  0xc2000053, ins_FormatR)
+            run(fcvt_wu_d, 0xc2100053, ins_FormatR)
+            run(fcvt_d_w,  0xd2000053, ins_FormatR)
+            run(fcvt_d_wu, 0xd2100053, ins_FormatR)
+#if XLEN == 64
+            run(fcvt_l_s,  0xc0200053, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(fcvt_lu_s, 0xc0300053, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(fcvt_s_l,  0xd0200053, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(fcvt_s_lu, 0xd0300053, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(fcvt_l_d,  0xc2200053, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(fcvt_lu_d, 0xc2300053, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(fcvt_d_l,  0xd2200053, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(fcvt_d_lu, 0xd2300053, ins_FormatR)
+#endif
+#if XLEN == 64
+            run(fmv_d_x,   0xf2000053, ins_FormatR)
+#endif
+        }
+        ins_masked = ins_word & 0xfe00707f;
+        switch (ins_masked)
+        {
+            run(fsgnj_s,  0x20000053, ins_FormatR)
+            run(fsgnjn_s, 0x20001053, ins_FormatR)
+            run(fsgnjx_s, 0x20002053, ins_FormatR)
+            run(fmin_s,   0x28000053, ins_FormatR)
+            run(fmax_s,   0x28001053, ins_FormatR)
+            run(feq_s,    0xa0002053, ins_FormatR)
+            run(flt_s,    0xa0001053, ins_FormatR)
+            run(fle_s,    0xa0000053, ins_FormatR)
+            run(fsgnj_d,  0x22000053, ins_FormatR)
+            run(fsgnjn_d, 0x22001053, ins_FormatR)
+            run(fsgnjx_d, 0x22002053, ins_FormatR)
+            run(fmin_d,   0x2a000053, ins_FormatR)
+            run(fmax_d,   0x2a001053, ins_FormatR)
+            run(feq_d,    0xa2002053, ins_FormatR)
+            run(flt_d,    0xa2001053, ins_FormatR)
+            run(fle_d,    0xa2000053, ins_FormatR)
+        }
+        ins_masked = ins_word & 0xfe00007f;
+        switch (ins_masked)
+        {
+            run(fadd_s, 0x00000053, ins_FormatR)
+            run(fsub_s, 0x08000053, ins_FormatR)
+            run(fmul_s, 0x10000053, ins_FormatR)
+            run(fdiv_s, 0x18000053, ins_FormatR)
+            run(fadd_d, 0x02000053, ins_FormatR)
+            run(fsub_d, 0x0a000053, ins_FormatR)
+            run(fmul_d, 0x12000053, ins_FormatR)
+            run(fdiv_d, 0x1a000053, ins_FormatR)
+        }
+        break;
+    }
+    case 0x63:
+    {
+        ins_masked = ins_word & 0x0000707f;
+        switch (ins_masked)
+        {
+            run(beq, 0x00000063, ins_FormatB)
+            run(bge, 0x00005063, ins_FormatB)
+            run(bgeu, 0x00007063, ins_FormatB)
+            run(blt, 0x00004063, ins_FormatB)
+            run(bltu, 0x00006063, ins_FormatB)
+            run(bne, 0x00001063, ins_FormatB)
+        }
+        break;
+    }
+    case 0x67:
+    {
+        ins_masked = ins_word & 0x0000707f;
+        switch (ins_masked)
+        {
+            run(jalr, 0x00000067, ins_FormatI)
+        }
+        break;
+    }
+    case 0x6f:
+    {
+        ins_masked = ins_word & 0x0000007f;
+        switch (ins_masked)
+        {
+            run(jal, 0x0000006f, ins_FormatJ)
+        }
+        break;
+    }
+    case 0x73:
+    {
+        ins_masked = ins_word & 0x0000707f;
+        switch (ins_masked)
+        {
+            run(csrrc, 0x00003073, ins_FormatCSR)
+            run(csrrci, 0x00007073, ins_FormatCSR)
+            run(csrrs, 0x00002073, ins_FormatCSR)
+            run(csrrsi, 0x00006073, ins_FormatCSR)
+            run(csrrw, 0x00001073, ins_FormatCSR)
+            run(csrrwi, 0x00005073, ins_FormatCSR)
+        }
+        ins_masked = ins_word & 0xfe007fff;
+        switch (ins_masked)
+        {
+            run(sfence_vma, 0x12000073, ins_FormatEmpty)
+        }
+        ins_masked = ins_word & 0xffffffff;
+        switch (ins_masked)
+        {
+            run(ebreak, 0x00100073, ins_FormatEmpty)
+            run(ecall, 0x00000073, ins_FormatEmpty)
+            run(mret, 0x30200073, ins_FormatEmpty)
+            run(sret, 0x10200073, ins_FormatEmpty)
+            run(uret, 0x00200073, ins_FormatEmpty)
+            run(wfi, 0x10500073, ins_FormatEmpty)
+        }
+        break;
+    }
+    default:
+        break;
     }
 
-    // R4-type fused: match opcode + fmt bits[26:25] (00=S, 01=D)
-    ins_masked = ins_word & 0x0600007f;
-    switch (ins_masked)
-    {
-        run(fmadd_s,  0x00000043, ins_FormatR)
-        run(fmsub_s,  0x00000047, ins_FormatR)
-        run(fnmsub_s, 0x0000004b, ins_FormatR)
-        run(fnmadd_s, 0x0000004f, ins_FormatR)
-        run(fmadd_d,  0x02000043, ins_FormatR)
-        run(fmsub_d,  0x02000047, ins_FormatR)
-        run(fnmsub_d, 0x0200004b, ins_FormatR)
-        run(fnmadd_d, 0x0200004f, ins_FormatR)
-    }
-    // fmv.x.w, fclass — match funct7 + rs2 + funct3
-    ins_masked = ins_word & 0xfff0707f;
-    switch (ins_masked)
-    {
-        run(fmv_x_w,  0xe0000053, ins_FormatR)
-        run(fclass_s, 0xe0001053, ins_FormatR)
-        run(fclass_d, 0xe2001053, ins_FormatR)
-#if XLEN == 64
-        run(fmv_x_d,  0xe2000053, ins_FormatR)
-#endif
-    }
-    // fsqrt, fcvt, fmv.w.x — match funct7 + rs2 (no funct3)
-    ins_masked = ins_word & 0xfff0007f;
-    switch (ins_masked)
-    {
-        run(fsqrt_s,   0x58000053, ins_FormatR)
-        run(fsqrt_d,   0x5a000053, ins_FormatR)
-        run(fcvt_w_s,  0xc0000053, ins_FormatR)
-        run(fcvt_wu_s, 0xc0100053, ins_FormatR)
-        run(fcvt_s_w,  0xd0000053, ins_FormatR)
-        run(fcvt_s_wu, 0xd0100053, ins_FormatR)
-        run(fmv_w_x,   0xf0000053, ins_FormatR)
-        run(fcvt_s_d,  0x40100053, ins_FormatR)
-        run(fcvt_d_s,  0x42000053, ins_FormatR)
-        run(fcvt_w_d,  0xc2000053, ins_FormatR)
-        run(fcvt_wu_d, 0xc2100053, ins_FormatR)
-        run(fcvt_d_w,  0xd2000053, ins_FormatR)
-        run(fcvt_d_wu, 0xd2100053, ins_FormatR)
-#if XLEN == 64
-        run(fcvt_l_s,  0xc0200053, ins_FormatR)
-        run(fcvt_lu_s, 0xc0300053, ins_FormatR)
-        run(fcvt_s_l,  0xd0200053, ins_FormatR)
-        run(fcvt_s_lu, 0xd0300053, ins_FormatR)
-        run(fcvt_l_d,  0xc2200053, ins_FormatR)
-        run(fcvt_lu_d, 0xc2300053, ins_FormatR)
-        run(fcvt_d_l,  0xd2200053, ins_FormatR)
-        run(fcvt_d_lu, 0xd2300053, ins_FormatR)
-        run(fmv_d_x,   0xf2000053, ins_FormatR)
-#endif
-    }
-    // fsgnj, fmin/max, feq/flt/fle — match funct7 + funct3
-    ins_masked = ins_word & 0xfe00707f;
-    switch (ins_masked)
-    {
-        run(fsgnj_s,  0x20000053, ins_FormatR)
-        run(fsgnjn_s, 0x20001053, ins_FormatR)
-        run(fsgnjx_s, 0x20002053, ins_FormatR)
-        run(fmin_s,   0x28000053, ins_FormatR)
-        run(fmax_s,   0x28001053, ins_FormatR)
-        run(feq_s,    0xa0002053, ins_FormatR)
-        run(flt_s,    0xa0001053, ins_FormatR)
-        run(fle_s,    0xa0000053, ins_FormatR)
-        run(fsgnj_d,  0x22000053, ins_FormatR)
-        run(fsgnjn_d, 0x22001053, ins_FormatR)
-        run(fsgnjx_d, 0x22002053, ins_FormatR)
-        run(fmin_d,   0x2a000053, ins_FormatR)
-        run(fmax_d,   0x2a001053, ins_FormatR)
-        run(feq_d,    0xa2002053, ins_FormatR)
-        run(flt_d,    0xa2001053, ins_FormatR)
-        run(fle_d,    0xa2000053, ins_FormatR)
-    }
-    // fadd/fsub/fmul/fdiv — match funct7 only
-    ins_masked = ins_word & 0xfe00007f;
-    switch (ins_masked)
-    {
-        run(fadd_s, 0x00000053, ins_FormatR)
-        run(fsub_s, 0x08000053, ins_FormatR)
-        run(fmul_s, 0x10000053, ins_FormatR)
-        run(fdiv_s, 0x18000053, ins_FormatR)
-        run(fadd_d, 0x02000053, ins_FormatR)
-        run(fsub_d, 0x0a000053, ins_FormatR)
-        run(fmul_d, 0x12000053, ins_FormatR)
-        run(fdiv_d, 0x1a000053, ins_FormatR)
-    }
-
-    ins_masked = ins_word & 0xffffffff;
-    switch (ins_masked)
-    {
-        run(ebreak, 0x00100073, ins_FormatEmpty)
-        run(ecall, 0x00000073, ins_FormatEmpty)
-        run(mret, 0x30200073, ins_FormatEmpty)
-        run(sret, 0x10200073, ins_FormatEmpty)
-        run(uret, 0x00200073, ins_FormatEmpty)
-        run(wfi, 0x10500073, ins_FormatEmpty)
-    }
+#undef ins_FormatR
+#undef ins_FormatI
+#undef ins_FormatS
+#undef ins_FormatU
+#undef ins_FormatJ
+#undef ins_FormatB
+#undef ins_FormatEmpty
 
     print_inst(cpu.pc, ins_word);
     printf("Invalid instruction: %08x\n", ins_word);
@@ -1725,14 +1979,16 @@ void Emulator::initialize()
     captureKeyboardInput();
 #endif
     cpu = RV32();
-    memory = (uint8_t *)malloc(MEM_SIZE);
+    // calloc hands back zeroed pages that are committed lazily, so a boot no longer pays for a 128 MiB memset,
+    // and a reload does not leak the previous RAM
+    free(memory);
+    memory = (uint8_t *)calloc(1, MEM_SIZE);
     cpu.init(memory, NULL, debugMode);
 }
 
 void Emulator::initializeElf(const char *path)
 {
-    initialize();
-    memset(memory, 0, MEM_SIZE);
+    initialize(); // (fresh zeroed RAM)
     // Load ELF image
     uint64_t entry = 0x80000000u;
     tohost_addr = 0;
@@ -1742,6 +1998,7 @@ void Emulator::initializeElf(const char *path)
     cpu.init(memory, NULL, debugMode);
     cpu.pc = (xlen_t)entry;
     elf_file_path = path;
+    loadElfSymbols(path, symbols);
     ready_to_run = true;
 }
 
@@ -1760,9 +2017,7 @@ void Emulator::initializeElfDts(const char *elf_file, const char *dts_file)
 void Emulator::initializeBin(const char *path)
 {
     initialize();
-    // Zero memory for a clean boot
-    memset(memory, 0, MEM_SIZE);
-
+    symbols.clear();
     // Load Linux kernel binary at memory[0] (maps to CPU VA 0x80000000)
     if (loadLinuxImage(path, strlen(path) + 1, memory, MEM_SIZE) != 0)
         return;
@@ -1803,9 +2058,294 @@ void Emulator::initializeBin(const char *path)
 
 
 
+// ---- Cold helpers of emulate(): kept out of line on purpose (see the comment in the tail of emulateImpl) ----
+
+__attribute__((noinline)) void Emulator::refreshTimers()
+{
+    struct timeval now;
+    gettimeofday(&now, NULL);
+    int64_t elapsed_usec = ((int64_t)now.tv_sec  - cpu.start_time_sec)  * 1000000LL
+                         + ((int64_t)now.tv_usec - cpu.start_time_usec);
+    uint64_t mtime = (uint64_t)elapsed_usec;
+    cpu.clint.mtime_lo = (u32)(mtime & 0xFFFFFFFFu);
+    cpu.clint.mtime_hi = (u32)(mtime >> 32);
+    // Poll the host terminal / flush UART output at most once per millisecond of wall time. A FIONREAD syscall
+    // costs microseconds; polling on every 1024th instruction at ~50 MIPS was a quarter of the run time.
+    int64_t now_us = (int64_t)now.tv_sec * 1000000LL + now.tv_usec;
+    if (now_us - cpu.last_poll_us >= 1000)
+    {
+        cpu.last_poll_us = now_us;
+        cpu.stdin_poll_due = true;
+    }
+}
+
+__attribute__((noinline)) void Emulator::serviceExternalIrq()
+{
+    xlen_t cur_mip = cpu.csr.data[CSR_MIP]; // (what readCsrRaw()/writeCsrRaw() use for MIP)
+    if (cpu.uart.interrupting)
+    {
+        cpu.writeCsrRaw(CSR_MIP, cur_mip | MIP_SEIP);
+    }
+    else if (cpu.net.rx_ready)
+    {
+        // Network RX interrupt (no-op when net not connected)
+        uint8_t *net_data = nullptr;
+        uint32_t net_data_len = 0;
+        if (net_recv(&net_data, &net_data_len))
+        {
+            cpu.writeCsrRaw(CSR_MIP, cur_mip | MIP_SEIP);
+            if (net_data_len > 4096u - sizeof(u32))
+                net_data_len = 4096u - sizeof(u32);
+            *((u32 *)cpu.net.netrx) = net_data_len;
+            memcpy(cpu.net.netrx + sizeof(u32), net_data, net_data_len);
+            cpu.net.rx_ready = 0;
+            free(net_data);
+        }
+    }
+}
+
+// Returns true when the guest asked for a reboot (CPU state was reset; the caller must not touch pc)
+__attribute__((noinline)) bool Emulator::handleSyscon()
+{
+    u32 cmd = cpu.syscon_cmd;
+    cpu.syscon_cmd = 0;
+    if (cmd == 0x5555)
+    {
+        printf("INFO: SYSCON POWEROFF\n");
+        running = false;
+        ready_to_run = false;
+    }
+    else if (cmd == 0x7777)
+    {
+        printf("INFO: SYSCON REBOOT\n");
+        initializeBin(bin_file_path.c_str());
+        return true;
+    }
+    return false;
+}
+
+__attribute__((noinline)) void Emulator::pollTohost()
+{
+    u64 v = XLEN == 64 ? cpu.peekDword(tohost_addr) : cpu.peekWord(tohost_addr);
+    if (v != 0)
+    {
+        test_done = true;
+        test_result = (v == 1) ? 0 : v;
+        running = false;
+    }
+}
+
+#ifdef RVE_PROFILE
+// Statistical stage timing. emulate() runs the untimed instantiation of emulateImpl() for all but one
+// instruction in PROF_SAMPLE_PERIOD, so the common path carries no timing code at all.
+#define PROF_SAMPLE_BEGIN()                                                              \
+    uint64_t prof_t = 0;                                                                 \
+    if constexpr (SAMPLE)                                                                \
+    {                                                                                    \
+        cpu.prof.samples++;                                                              \
+        cpu.prof.priv_samples[cpu.csr.privilege & 3]++;                                  \
+        cpu.prof_hot.add(cpu.pc);                                                        \
+        prof_t = prof_now_ns();                                                          \
+        uint64_t prof_n0 = prof_now_ns(); /* back-to-back read = cost of the timer itself */ \
+        cpu.prof.timer_ns += prof_n0 - prof_t;                                           \
+        prof_t = prof_n0;                                                                \
+    }
+#define PROF_STAGE(stage)                                                                \
+    if constexpr (SAMPLE)                                                                \
+    {                                                                                    \
+        uint64_t prof_n = prof_now_ns();                                                 \
+        cpu.prof.stage_ns[stage] += prof_n - prof_t;                                     \
+        prof_t = prof_n;                                                                 \
+    }
+#else
+#define PROF_SAMPLE_BEGIN()
+#define PROF_STAGE(stage)
+#endif
+
 void Emulator::emulate()
 {
+#ifdef RVE_PROFILE
+    if ((uint32_t)cpu.clock % PROF_SAMPLE_PERIOD == 0 && cpu.prof_sampling)
+    {
+        emulateImpl<true>();
+        return;
+    }
+#endif
+    emulateImpl<false>();
+}
+
+// Fast path for the hottest integer instructions. It calls the very same handlers, on the very same exact-match
+// encodings, as insSelect() (the cases below are copied from its run() lines), just without the generic decode:
+// no CSR pre-read, no opcode dispatch chain, and `ret` stays local so it can live in registers. Anything else
+// (CSR, atomics, FP, M-extension div/rem, system, illegal encodings) returns false and takes insSelect().
+inline __attribute__((always_inline)) bool Emulator::fastDecode(u32 ins_word, ins_ret &ret)
+{
+#define fast(name, fmt) { emu_##name(ins_word, &ret, fmt); return true; }
+    switch (ins_word & 0x7f)
+    {
+    case 0x03:
+        switch (ins_word & 0x0000707f)
+        {
+        case 0x00000003: fast(lb, parse_FormatI(ins_word))
+        case 0x00004003: fast(lbu, parse_FormatI(ins_word))
+        case 0x00001003: fast(lh, parse_FormatI(ins_word))
+        case 0x00005003: fast(lhu, parse_FormatI(ins_word))
+        case 0x00002003: fast(lw, parse_FormatI(ins_word))
+#if XLEN == 64
+        case 0x00006003: fast(lwu, parse_FormatI(ins_word))
+#endif
+#if XLEN == 64
+        case 0x00003003: fast(ld, parse_FormatI(ins_word))
+#endif
+        default: break;
+        }
+        break;
+    case 0x13:
+        switch (ins_word & 0x0000707f)
+        {
+        case 0x00000013: fast(addi, parse_FormatI(ins_word))
+        case 0x00002013: fast(slti, parse_FormatI(ins_word))
+        case 0x00003013: fast(sltiu, parse_FormatI(ins_word))
+        case 0x00004013: fast(xori, parse_FormatI(ins_word))
+        case 0x00006013: fast(ori, parse_FormatI(ins_word))
+        case 0x00007013: fast(andi, parse_FormatI(ins_word))
+        default: break;
+        }
+        switch (ins_word & 0xfc00707f)
+        {
+        case 0x00001013: fast(slli, parse_FormatR(ins_word))
+        case 0x00005013: fast(srli, parse_FormatR(ins_word))
+        case 0x40005013: fast(srai, parse_FormatR(ins_word))
+        default: break;
+        }
+        break;
+    case 0x17:
+        switch (ins_word & 0x0000007f)
+        {
+        case 0x00000017: fast(auipc, parse_FormatU(ins_word))
+        default: break;
+        }
+        break;
+    case 0x1b:
+        switch (ins_word & 0x0000707f)
+        {
+#if XLEN == 64
+        case 0x0000001b: fast(addiw, parse_FormatI(ins_word))
+#endif
+        default: break;
+        }
+        switch (ins_word & 0xfe00707f)
+        {
+#if XLEN == 64
+        case 0x0000101b: fast(slliw, parse_FormatR(ins_word))
+#endif
+#if XLEN == 64
+        case 0x0000501b: fast(srliw, parse_FormatR(ins_word))
+#endif
+#if XLEN == 64
+        case 0x4000501b: fast(sraiw, parse_FormatR(ins_word))
+#endif
+        default: break;
+        }
+        break;
+    case 0x23:
+        switch (ins_word & 0x0000707f)
+        {
+        case 0x00000023: fast(sb, parse_FormatS(ins_word))
+        case 0x00001023: fast(sh, parse_FormatS(ins_word))
+        case 0x00002023: fast(sw, parse_FormatS(ins_word))
+#if XLEN == 64
+        case 0x00003023: fast(sd, parse_FormatS(ins_word))
+#endif
+        default: break;
+        }
+        break;
+    case 0x33:
+        switch (ins_word & 0xfe00707f)
+        {
+        case 0x00000033: fast(add, parse_FormatR(ins_word))
+        case 0x40000033: fast(sub, parse_FormatR(ins_word))
+        case 0x00001033: fast(sll, parse_FormatR(ins_word))
+        case 0x00002033: fast(slt, parse_FormatR(ins_word))
+        case 0x00003033: fast(sltu, parse_FormatR(ins_word))
+        case 0x00004033: fast(xor, parse_FormatR(ins_word))
+        case 0x00005033: fast(srl, parse_FormatR(ins_word))
+        case 0x40005033: fast(sra, parse_FormatR(ins_word))
+        case 0x00006033: fast(or, parse_FormatR(ins_word))
+        case 0x00007033: fast(and, parse_FormatR(ins_word))
+        case 0x02000033: fast(mul, parse_FormatR(ins_word))
+        default: break;
+        }
+        break;
+    case 0x37:
+        switch (ins_word & 0x0000007f)
+        {
+        case 0x00000037: fast(lui, parse_FormatU(ins_word))
+        default: break;
+        }
+        break;
+    case 0x3b:
+        switch (ins_word & 0xfe00707f)
+        {
+#if XLEN == 64
+        case 0x0000003b: fast(addw, parse_FormatR(ins_word))
+#endif
+#if XLEN == 64
+        case 0x4000003b: fast(subw, parse_FormatR(ins_word))
+#endif
+#if XLEN == 64
+        case 0x0000103b: fast(sllw, parse_FormatR(ins_word))
+#endif
+#if XLEN == 64
+        case 0x0000503b: fast(srlw, parse_FormatR(ins_word))
+#endif
+#if XLEN == 64
+        case 0x4000503b: fast(sraw, parse_FormatR(ins_word))
+#endif
+#if XLEN == 64
+        case 0x0200003b: fast(mulw, parse_FormatR(ins_word))
+#endif
+        default: break;
+        }
+        break;
+    case 0x63:
+        switch (ins_word & 0x0000707f)
+        {
+        case 0x00000063: fast(beq, parse_FormatB(ins_word))
+        case 0x00001063: fast(bne, parse_FormatB(ins_word))
+        case 0x00004063: fast(blt, parse_FormatB(ins_word))
+        case 0x00005063: fast(bge, parse_FormatB(ins_word))
+        case 0x00006063: fast(bltu, parse_FormatB(ins_word))
+        case 0x00007063: fast(bgeu, parse_FormatB(ins_word))
+        default: break;
+        }
+        break;
+    case 0x67:
+        switch (ins_word & 0x0000707f)
+        {
+        case 0x00000067: fast(jalr, parse_FormatI(ins_word))
+        default: break;
+        }
+        break;
+    case 0x6f:
+        switch (ins_word & 0x0000007f)
+        {
+        case 0x0000006f: fast(jal, parse_FormatJ(ins_word))
+        default: break;
+        }
+        break;
+    default:
+        break;
+    }
+#undef fast
+    return false;
+}
+
+template <bool SAMPLE>
+inline __attribute__((always_inline)) void Emulator::emulateImpl()
+{
     cpu.tick();
+    PROF_SAMPLE_BEGIN()
 
     u32 ins_word = 0;
     ins_ret ret = cpu.insReturnNoop();
@@ -1816,8 +2356,11 @@ void Emulator::emulate()
         xlen_t phys_pc = cpu.mmuTranslate(&ret, cpu.pc, MMU_ACCESS_FETCH);
         if (!ret.trap.en)
         {
-            ins_word = cpu.memGetWord(phys_pc);
-            ret = insSelect(ins_word);
+            ins_word = cpu.peekWord(phys_pc); // fetches are derived from the class counts, not counted as data reads
+            PROF_STAGE(PSTAGE_FETCH)
+            if (debugMode || !fastDecode(ins_word, ret)) // -T trace output is produced by insSelect()'s run() macro
+                ret = insSelect(ins_word);
+            PROF_INC(cpu.prof.insns[prof_classify(ins_word)]);
 
 #if XLEN == 64
             // Any FP register write makes mstatus.FS Dirty so the OS saves FP state on switch
@@ -1834,13 +2377,21 @@ void Emulator::emulate()
             if (!ret.trap.en && ret.write_reg < 32 && ret.write_reg > 0)
                 cpu.xreg[ret.write_reg] = ret.write_val;
         }
+        else
+        {
+            PROF_INC(cpu.prof.fetch_faults);
+            PROF_STAGE(PSTAGE_FETCH)
+        }
     }
     else
     {
+        PROF_INC(cpu.prof.fetch_faults);
         ret.trap.en    = true;
         ret.trap.type  = trap_InstructionAddressMisaligned;
         ret.trap.value = cpu.pc;
     }
+
+    PROF_STAGE(PSTAGE_EXEC)
 
     if (debugMode)
         print_inst(cpu.pc, ins_word);
@@ -1849,18 +2400,9 @@ void Emulator::emulate()
     if (cpu.clint.msip)
         cpu.csr.data[CSR_MIP] |= MIP_MSIP;
 
-    // Update CLINT mtime from wall-clock — throttled to every 1024 instructions
-    // to avoid a gettimeofday() syscall on every emulated instruction.
+    // Refresh CLINT mtime from the wall clock every 1024 instructions (a gettimeofday() per instruction is far too slow)
     if ((cpu.clock & 0x3FF) == 0)
-    {
-        struct timeval now;
-        gettimeofday(&now, NULL);
-        int64_t elapsed_usec = ((int64_t)now.tv_sec  - cpu.start_time_sec)  * 1000000LL
-                             + ((int64_t)now.tv_usec - cpu.start_time_usec);
-        uint64_t mtime = (uint64_t)elapsed_usec;
-        cpu.clint.mtime_lo = (u32)(mtime & 0xFFFFFFFFu);
-        cpu.clint.mtime_hi = (u32)(mtime >> 32);
-    }
+        refreshTimers();
 
     // Set MTIP when mtime >= mtimecmp (guard: don't fire when mtimecmp == 0)
     if ((cpu.clint.mtimecmp_lo != 0 || cpu.clint.mtimecmp_hi != 0) &&
@@ -1871,55 +2413,31 @@ void Emulator::emulate()
         cpu.csr.data[CSR_MIP] |= MIP_MTIP;
     }
 
-    // virtio-net RX delivery + PLIC → SEIP
-    cpu.netTick();
+    PROF_STAGE(PSTAGE_TIMERS)
 
-    // UART tick + external interrupt
-    cpu.uartTick();
-    xlen_t cur_mip = cpu.readCsrRaw(CSR_MIP);
-    if (!(cur_mip & MIP_SEIP))
-    {
-        if (cpu.uart.interrupting)
-        {
-            cpu.writeCsrRaw(CSR_MIP, cur_mip | MIP_SEIP);
-        }
-        else if (cpu.net.rx_ready)
-        {
-            // Network RX interrupt (no-op when net not connected)
-            uint8_t *net_data = nullptr;
-            uint32_t net_data_len = 0;
-            if (net_recv(&net_data, &net_data_len))
-            {
-                cpu.writeCsrRaw(CSR_MIP, cur_mip | MIP_SEIP);
-                if (net_data_len > 4096u - sizeof(u32))
-                    net_data_len = 4096u - sizeof(u32);
-                *((u32 *)cpu.net.netrx) = net_data_len;
-                memcpy(cpu.net.netrx + sizeof(u32), net_data, net_data_len);
-                cpu.net.rx_ready = 0;
-                free(net_data);
-            }
-        }
-    }
+    // Devices. Only the cheap "is there anything to do" tests live in this loop; the work itself is out of line
+    // so its code (syscalls, stdio, network) does not compete with the interpreter for registers.
+    // virtio-net RX delivery + PLIC -> SEIP
+    if (cpu.vnet.active() && (cpu.net_dirty || (cpu.clock & 0x3FF) == 0))
+        cpu.netTick();
+    // UART: work only on the stdin poll tick or while a transmit / interrupt is in flight; idle it changes nothing.
+    if (cpu.stdin_poll_due || cpu.uart.thr_pending || cpu.uart.thre_ip || cpu.uart.interrupting)
+        cpu.uartTick();
+    // SEIP plumbing: only when the UART is interrupting or a legacy net RX is pending (and SEIP is not already set)
+    if ((cpu.uart.interrupting || cpu.net.rx_ready) && !(cpu.csr.data[CSR_MIP] & MIP_SEIP))
+        serviceExternalIrq();
 
-    cpu.handleIrqAndTrap(&ret);
+    PROF_STAGE(PSTAGE_DEVICES)
 
-    // Handle SYSCON poweroff/reboot
+    // Trap / interrupt entry: only when an exception was raised or an enabled interrupt is pending
+    if (ret.trap.en || cpu.irqPossible())
+        cpu.handleIrqAndTrap(&ret);
+
+    // SYSCON poweroff/reboot
     if (cpu.syscon_cmd != 0)
     {
-        u32 cmd = cpu.syscon_cmd;
-        cpu.syscon_cmd = 0;
-        if (cmd == 0x5555)
-        {
-            printf("INFO: SYSCON POWEROFF\n");
-            running = false;
-            ready_to_run = false;
-        }
-        else if (cmd == 0x7777)
-        {
-            printf("INFO: SYSCON REBOOT\n");
-            initializeBin(bin_file_path.c_str());
-            return; // initializeBin reset CPU state; don't overwrite pc
-        }
+        if (handleSyscon())
+            return; // reboot: initializeBin reset CPU state, don't overwrite pc
     }
 
     // Advance PC (ret.pc_val defaults to pc+4)
@@ -1927,13 +2445,6 @@ void Emulator::emulate()
 
     // ISA-test HTIF exit: a non-zero write to `tohost` finishes the test
     if (test_mode && tohost_addr && !test_done)
-    {
-        u64 v = XLEN == 64 ? cpu.memGetDword(tohost_addr) : cpu.memGetWord(tohost_addr);
-        if (v != 0)
-        {
-            test_done = true;
-            test_result = (v == 1) ? 0 : v;
-            running = false;
-        }
-    }
+        pollTohost();
+    PROF_STAGE(PSTAGE_TRAP)
 }
