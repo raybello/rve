@@ -55,6 +55,8 @@ UNAME_S := $(shell uname -s)
 
 # Compiler include 
 CXXFLAGS += -I$(SOURCE_DIR) -I$(INCLUDE_DIR)
+# track header dependencies so editing a header rebuilds the objects that include it
+CXXFLAGS += -MMD -MP
 CXXFLAGS += -I$(IMGUI_DIR) -I$(IMGUI_DIR)/backends -I$(IMGUI_DIR)/examples/libs/emscripten
 CXXFLAGS += -I$(IMPLOT_DIR) -I$(DISASM_DIR)
 
@@ -225,3 +227,5 @@ net-test:
 
 clean:
 	rm -rf build/* build64/*
+
+-include $(wildcard $(BUILD_DIR)/*.d)

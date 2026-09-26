@@ -34,7 +34,9 @@ async function sh(cmd, ms = 30000) {
   buf = '';
   child.stdin.write(`${cmd}; echo ${tag}\n`);
   await waitFor(new RegExp(`^${tag}`, 'm'), ms);
-  return buf.split(tag)[0].replace(/\r/g, '');
+  // the tag also appears in the echoed command line: keep what precedes the tag at the start of a line
+  const i = buf.search(new RegExp(`^${tag}`, 'm'));
+  return buf.slice(0, i).replace(/\r/g, '');
 }
 
 let failed = 0;
@@ -59,7 +61,7 @@ try {
   expect('ping resolved host', await sh('ping -c 2 -W 3 foo.test 2>&1'), /2 packets received|0% packet loss/);
   expect('ping unresolved host is unreachable', await sh('ping -c 1 -W 2 8.8.8.8 2>&1'), /unreachable|100% packet loss/i);
   expect('HTTP GET bridged to host', await sh('wget -qO- http://foo.test/hello 2>&1'), /fake host: GET https:\/\/foo\.test\/hello/);
-  expect('TCP to an unsupported port is refused', await sh('nc -w 3 93.184.216.34 22 </dev/null 2>&1; echo rc=$?'), /refused|rc=[1-9]/i);
+  expect('TCP to an unsupported port is refused', await sh('echo | nc 93.184.216.34 22 2>&1; echo rc=$?'), /refused|rc=[1-9]/i);
 } catch (e) {
   failed++;
   console.error(`\nERROR: ${e.message}`);

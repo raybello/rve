@@ -104,6 +104,7 @@ private:
     size_t out_head_ = 0;
     std::map<uint64_t, Conn> conns_;        // key: guest port << 32 | remote ip << 16 | port (hashed)
     std::map<int, PendingDns> dns_pending_;
+    std::vector<PendingDns> dns_deferred_;      // empty answers held back until pending A lookups finish
     std::map<uint32_t, std::string> ip_name_;   // resolved IP -> host name (HTTP Host / ping allow-list)
     std::map<std::string, std::vector<uint32_t>> dns_cache_;
     uint16_t ip_id_ = 1;

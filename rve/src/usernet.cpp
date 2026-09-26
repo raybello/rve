@@ -133,6 +133,11 @@ bool UserNetBackend::poll(std::vector<uint8_t> &frame)
                 if (kv.second.host_id == ev.id) { finishHttp(kv.second, ev); break; }
         }
     }
+    if (dns_pending_.empty() && !dns_deferred_.empty())
+    {
+        for (auto &q : dns_deferred_) sendDnsReply(q, {}, 0);
+        dns_deferred_.clear();
+    }
     if (!conns_.empty())
     {
         uint64_t now = nowMs();
@@ -323,7 +328,14 @@ void UserNetBackend::handleDns(const uint8_t *p, size_t n, uint16_t sport)
     if (i + 5 > n) return;
     uint16_t qtype = rd16(p + i + 1);
     PendingDns q{GUEST_IP, sport, std::vector<uint8_t>(p, p + i + 5), lower(name)};
-    if (qtype != 1) { sendDnsReply(q, {}, 0); return; } // AAAA & co: empty NOERROR answer
+    if (qtype != 1)
+    {
+        // AAAA & co: empty NOERROR answer, sent after any A lookup still in flight so resolvers
+        // that take the first reply (busybox nslookup) see the real answer, not the empty one.
+        if (dns_pending_.empty()) sendDnsReply(q, {}, 0);
+        else dns_deferred_.push_back(q);
+        return;
+    }
     auto c = dns_cache_.find(q.name);
     if (c != dns_cache_.end()) { sendDnsReply(q, c->second, 0); return; }
     int id = host_ ? host_->resolve(q.name) : 0;

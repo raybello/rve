@@ -100,6 +100,8 @@ CPPFLAGS += -I$(IMPLOT_DIR) -I$(DISASM_DIR)
 #CPPFLAGS += -g
 CPPFLAGS += -Wall -Wformat -Os $(EMS)
 CXXFLAGS += -std=c++17
+# track header dependencies so editing a header rebuilds the objects that include it
+CXXFLAGS += -MMD -MP
 LDFLAGS += --shell-file $(IMGUI_DIR)/examples/libs/emscripten/shell_minimal.html
 LDFLAGS += $(EMS)
 
@@ -160,7 +162,9 @@ ISA_TEST_DIR = $(ASSETS_DIR)/isa-test-rv64
 endif
 
 isas-wasm: $(ISA_JS)
-	../scripts/run_isa.sh "node $(ISA_JS)" $(ISA_TEST_DIR)
+	SKIPFILE=../scripts/isa_skip_wasm.txt ../scripts/run_isa.sh "node $(ISA_JS)" $(ISA_TEST_DIR)
 
 clean:
 	rm -rf $(WEB_DIR)
+
+-include $(wildcard $(WEB_DIR)/*.d)
