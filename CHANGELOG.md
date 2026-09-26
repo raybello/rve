@@ -1,5 +1,11 @@
 # Changelog
 
+## [v2026.09.26.2] - 2026-09-26
+
+- Merge pull request #15 from raybello/framebuff-all
+- framebuff: add 'all' flag to run patterns 1-10 in order, one second apart
+
+
 ## [v2026.09.26.1] - 2026-09-26
 
 - Merge pull request #14 from raybello/profiling
