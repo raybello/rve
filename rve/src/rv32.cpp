@@ -481,6 +481,7 @@ void RV32::handleIrqAndTrap(ins_ret *ret)
     if (t.en)
     {
         ret->trap = t;
+        PROF_INC(irq ? prof.irqs[t.type & 0xf] : prof.traps[t.type & 0xf]);
         bool handled = handleTrap(ret, irq);
         if (handled && irq)
         {
@@ -514,7 +515,7 @@ void RV32::setNetBackend(NetBackend *be)
 void RV32::netTick()
 {
     if (!vnet.active()) return;
-    if ((clock & 0x3F) == 0) vnet.tick();
+    if ((clock & 0x3F) == 0) { PROF_INC(prof.vnet_ticks); vnet.tick(); }
     plic.setLevel(VIRTIO_NET_IRQ, vnet.irqLevel());
     bool active = plic.ctxActive(1);
     xlen_t mip = readCsrRaw(CSR_MIP);
@@ -535,11 +536,51 @@ void RV32::netTick()
 static inline bool inVirtio(xlen_t a) { return a >= VIRTIO_NET_BASE && a < VIRTIO_NET_BASE + VIRTIO_NET_SIZE; }
 static inline bool inPlic(xlen_t a) { return a >= PLIC_BASE && a < PLIC_BASE + PLIC_SIZE; }
 
+#ifdef RVE_PROFILE
+// Which MMIO window an address belongs to (profiling only; mirrors the dispatch below)
+static inline u8 profRegion(xlen_t a)
+{
+    if (a >= 0x1020u && a <= 0x1fffu) return PREG_DTB_MTD;
+    if (a >= 0x40000000u && a < 0x80000000u) return PREG_DTB_MTD;
+    if (a >= 0x10000000u && a < 0x10001000u) return PREG_UART;
+    if (a >= 0x10001000u && a < 0x10002000u) return PREG_KBD;
+    if (inVirtio(a)) return PREG_VIRTIO;
+    if (inPlic(a)) return PREG_PLIC;
+    if (a >= RTC_MMIO_BASE && a < RTC_MMIO_BASE + RTC_MMIO_SIZE) return PREG_RTC;
+    if ((a >= 0x02000000u && a < 0x02010000u) || (a >= 0x11000000u && a < 0x11000004u) ||
+        (a >= 0x11004000u && a < 0x1100c000u)) return PREG_CLINT;
+    if (a >= 0x11000004u && a < 0x11002000u) return PREG_NETBUF;
+    if (a >= 0x11100000u && a < 0x11100004u) return PREG_SYSCON;
+    return PREG_UNMAPPED;
+}
+// One count per guest access (UI/debugger reads are rolled back by PROF_QUIET)
+#define PROF_MEM(width_idx, rw)  (++prof.mem[width_idx][rw])
+#define PROF_MMIO(rw, addr)      (++prof.mmio[rw][profRegion(addr)])
+#else
+#define PROF_MEM(width_idx, rw)  ((void)0)
+#define PROF_MMIO(rw, addr)      ((void)0)
+#endif
+
 ///////////////////////////////////////
 // Memory Functions
 ///////////////////////////////////////
+// Public accessors count the access once and then use the *Raw/*Slow helpers, so composed
+// accesses (a word read done as 4 byte reads on the MMIO path) are never double counted.
+
 // little endian, zero extended
 u32 RV32::memGetByte(xlen_t addr)
+{
+    PROF_MEM(0, 0);
+    if (addr >= 0x80000000u)
+    {
+        xlen_t phys = addr - 0x80000000u;
+        return phys >= (xlen_t)RV32_MEM_SIZE ? 0 : mem[phys];
+    }
+    PROF_MMIO(0, addr);
+    return memGetByteRaw(addr);
+}
+
+u32 RV32::memGetByteRaw(xlen_t addr)
 {
     if (addr < 0x80000000u)
     {
@@ -658,6 +699,7 @@ u32 RV32::memGetByte(xlen_t addr)
 
 u32 RV32::memGetHalfWord(xlen_t addr)
 {
+    PROF_MEM(1, 0);
     // Fast path: RAM addresses (>= 0x80000000) — skip MMIO dispatch
     if (addr >= 0x80000000u)
     {
@@ -666,12 +708,14 @@ u32 RV32::memGetHalfWord(xlen_t addr)
             return ((u32)mem[phys]) | ((u32)mem[phys + 1] << 8);
         return 0;
     }
-    return memGetByte(addr) | ((u32)memGetByte(addr + 1) << 8);
+    PROF_MMIO(0, addr);
+    return memGetByteRaw(addr) | ((u32)memGetByteRaw(addr + 1) << 8);
 }
 
-u32 RV32::memGetWord(xlen_t addr)
+// Uncounted word read, used for instruction fetch, PTE reads and debugger peeks.
+// Same result as memGetWord(); it just isn't a guest data access.
+u32 RV32::peekWord(xlen_t addr)
 {
-    // Fast path: RAM addresses (>= 0x80000000) — skip MMIO dispatch (4x cheaper)
     if (addr >= 0x80000000u)
     {
         xlen_t phys = addr - 0x80000000u;
@@ -680,18 +724,10 @@ u32 RV32::memGetWord(xlen_t addr)
                    ((u32)mem[phys + 2] << 16) | ((u32)mem[phys + 3] << 24);
         return 0;
     }
-    if ((addr & 3) == 0)
-    {
-        if (inPlic(addr))   return plic.read(addr - PLIC_BASE);
-        if (inVirtio(addr)) return vnet.read(addr - VIRTIO_NET_BASE);
-    }
-    return memGetByte(addr) |
-           ((u32)memGetByte(addr + 1) << 8) |
-           ((u32)memGetByte(addr + 2) << 16) |
-           ((u32)memGetByte(addr + 3) << 24);
+    return memGetWordSlow(addr);
 }
 
-u64 RV32::memGetDword(xlen_t addr)
+u64 RV32::peekDword(xlen_t addr)
 {
     if (addr >= 0x80000000u)
     {
@@ -704,10 +740,72 @@ u64 RV32::memGetDword(xlen_t addr)
         }
         return 0;
     }
-    return (u64)memGetWord(addr) | ((u64)memGetWord(addr + 4) << 32);
+    return (u64)memGetWordSlow(addr) | ((u64)memGetWordSlow(addr + 4) << 32);
+}
+
+u32 RV32::memGetWord(xlen_t addr)
+{
+    PROF_MEM(2, 0);
+    // Fast path: RAM addresses (>= 0x80000000) — skip MMIO dispatch (4x cheaper)
+    if (addr >= 0x80000000u)
+    {
+        xlen_t phys = addr - 0x80000000u;
+        if (phys <= (xlen_t)(RV32_MEM_SIZE - 4))
+            return ((u32)mem[phys]) | ((u32)mem[phys + 1] << 8) |
+                   ((u32)mem[phys + 2] << 16) | ((u32)mem[phys + 3] << 24);
+        return 0;
+    }
+    PROF_MMIO(0, addr);
+    return memGetWordSlow(addr);
+}
+
+// MMIO word read: PLIC/virtio are word-granular (claim reads have side effects), the rest is bytes
+u32 RV32::memGetWordSlow(xlen_t addr)
+{
+    if ((addr & 3) == 0)
+    {
+        if (inPlic(addr))   return plic.read(addr - PLIC_BASE);
+        if (inVirtio(addr)) return vnet.read(addr - VIRTIO_NET_BASE);
+    }
+    return memGetByteRaw(addr) |
+           ((u32)memGetByteRaw(addr + 1) << 8) |
+           ((u32)memGetByteRaw(addr + 2) << 16) |
+           ((u32)memGetByteRaw(addr + 3) << 24);
+}
+
+u64 RV32::memGetDword(xlen_t addr)
+{
+    PROF_MEM(3, 0);
+    if (addr >= 0x80000000u)
+    {
+        xlen_t phys = addr - 0x80000000u;
+        if (phys <= (xlen_t)(RV32_MEM_SIZE - 8))
+        {
+            u64 v;
+            memcpy(&v, mem + phys, 8); // little-endian host
+            return v;
+        }
+        return 0;
+    }
+    PROF_MMIO(0, addr);
+    return (u64)memGetWordSlow(addr) | ((u64)memGetWordSlow(addr + 4) << 32);
 }
 
 void RV32::memSetByte(xlen_t addr, u32 val)
+{
+    PROF_MEM(0, 1);
+    if (addr >= 0x80000000u)
+    {
+        xlen_t phys = addr - 0x80000000u;
+        if (phys < (xlen_t)RV32_MEM_SIZE)
+            mem[phys] = (u8)val;
+        return;
+    }
+    PROF_MMIO(1, addr);
+    memSetByteRaw(addr, val);
+}
+
+void RV32::memSetByteRaw(xlen_t addr, u32 val)
 {
     if (addr < 0x80000000u)
     {
@@ -841,6 +939,7 @@ void RV32::memSetByte(xlen_t addr, u32 val)
 
 void RV32::memSetHalfWord(xlen_t addr, u32 val)
 {
+    PROF_MEM(1, 1);
     // Fast path: RAM addresses (>= 0x80000000) — skip MMIO dispatch
     if (addr >= 0x80000000u)
     {
@@ -852,12 +951,14 @@ void RV32::memSetHalfWord(xlen_t addr, u32 val)
         }
         return;
     }
-    memSetByte(addr, val & 0xFF);
-    memSetByte(addr + 1, (val >> 8) & 0xFF);
+    PROF_MMIO(1, addr);
+    memSetByteRaw(addr, val & 0xFF);
+    memSetByteRaw(addr + 1, (val >> 8) & 0xFF);
 }
 
 void RV32::memSetWord(xlen_t addr, u32 val)
 {
+    PROF_MEM(2, 1);
     // Fast path: RAM addresses (>= 0x80000000) — skip MMIO dispatch (4x cheaper)
     if (addr >= 0x80000000u)
     {
@@ -871,19 +972,26 @@ void RV32::memSetWord(xlen_t addr, u32 val)
         }
         return;
     }
+    PROF_MMIO(1, addr);
+    memSetWordSlow(addr, val);
+}
+
+void RV32::memSetWordSlow(xlen_t addr, u32 val)
+{
     if ((addr & 3) == 0)
     {
         if (inPlic(addr))   { plic.write(addr - PLIC_BASE, val); return; }
         if (inVirtio(addr)) { vnet.write(addr - VIRTIO_NET_BASE, val); return; }
     }
-    memSetByte(addr, val & 0xFF);
-    memSetByte(addr + 1, (val >> 8) & 0xFF);
-    memSetByte(addr + 2, (val >> 16) & 0xFF);
-    memSetByte(addr + 3, val >> 24);
+    memSetByteRaw(addr, val & 0xFF);
+    memSetByteRaw(addr + 1, (val >> 8) & 0xFF);
+    memSetByteRaw(addr + 2, (val >> 16) & 0xFF);
+    memSetByteRaw(addr + 3, val >> 24);
 }
 
 void RV32::memSetDword(xlen_t addr, u64 val)
 {
+    PROF_MEM(3, 1);
     if (addr >= 0x80000000u)
     {
         xlen_t phys = addr - 0x80000000u;
@@ -891,8 +999,9 @@ void RV32::memSetDword(xlen_t addr, u64 val)
             memcpy(mem + phys, &val, 8); // little-endian host
         return;
     }
-    memSetWord(addr, (u32)val);
-    memSetWord(addr + 4, (u32)(val >> 32));
+    PROF_MMIO(1, addr);
+    memSetWordSlow(addr, (u32)val);
+    memSetWordSlow(addr + 4, (u32)(val >> 32));
 }
 
 ///////////////////////////////////////
@@ -913,6 +1022,7 @@ void RV32::uartTick()
     {
 #ifndef __EMSCRIPTEN__
         int byteswaiting = 0;
+        PROF_INC(prof.stdin_polls);
         ioctl(STDIN_FILENO, FIONREAD, &byteswaiting);
         if (byteswaiting > 0)
         {
@@ -920,6 +1030,7 @@ void RV32::uartTick()
             if (read(STDIN_FILENO, &c, 1) == 1)
             {
                 u32 value = (u8)c;
+                PROF_INC(prof.uart_rx_bytes);
                 UART_SET1(RBR, value);
                 UART_SET2(LSR, (UART_GET2(LSR) | LSR_DATA_AVAILABLE));
                 uartUpdateIir();
@@ -938,6 +1049,7 @@ void RV32::uartTick()
         uart.thr_pending = false;
         if (thr != 0) // a NUL byte is "transmitted" too (firmware does write them) but prints nothing
         {
+            PROF_INC(prof.uart_tx_bytes);
             printf("%c", (char)thr);
             fflush(stdout);
         }
@@ -996,6 +1108,7 @@ void RV32::mmuUpdate(xlen_t satp)
                              ((mode_val) == MMU_ACCESS_READ  ? trap_LoadPageFault        : \
                               trap_StorePageFault)); \
     (ret_ptr)->trap.value = (addr_val); \
+    PROF_INC(prof.mmu_faults[(mode_val)]); \
     return 0;
 
 xlen_t RV32::mmuTranslate(ins_ret *ret, xlen_t addr, u32 mode)
@@ -1014,6 +1127,8 @@ xlen_t RV32::mmuTranslate(ins_ret *ret, xlen_t addr, u32 mode)
     if (priv == PRIV_MACHINE)
         return addr;
 
+    PROF_INC(prof.mmu_walks[mode]);
+
 #if XLEN == 64
     // Sv39: bits 63:39 of the virtual address must equal bit 38
     {
@@ -1028,7 +1143,8 @@ xlen_t RV32::mmuTranslate(ins_ret *ret, xlen_t addr, u32 mode)
     for (level = 2; level >= 0; level--)
     {
         u64 vpn = (addr >> (12 + 9 * level)) & 0x1ff;
-        pte = memGetDword(a + vpn * 8);
+        PROF_INC(prof.ptw_reads);
+        pte = peekDword(a + vpn * 8); // walker reads are not guest data accesses
 
         bool v = pte & 1, r = (pte >> 1) & 1, w = (pte >> 2) & 1, x = (pte >> 3) & 1;
         // Invalid, reserved R/W combination, or reserved bits 63:54 set
@@ -1077,7 +1193,8 @@ xlen_t RV32::mmuTranslate(ins_ret *ret, xlen_t addr, u32 mode)
             page_addr = (page_ppn0 | (page_ppn1 << 10)) * 4096u
                         + ((addr >> 12) & 0x3ffu) * 4u;
 
-        u32 pte  = memGetWord(page_addr);
+        PROF_INC(prof.ptw_reads);
+        u32 pte  = peekWord(page_addr); // walker reads are not guest data accesses
         page_v   = (pte >> 0) & 1;
         page_r   = (pte >> 1) & 1;
         page_w   = (pte >> 2) & 1;

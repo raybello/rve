@@ -422,36 +422,42 @@ imp(beq, FormatB, { // rv32i
     if (cpu.xreg[ins.rs1] == cpu.xreg[ins.rs2])
     {
         WR_PC(cpu.pc + ins.imm);
+        PROF_INC(cpu.prof.branch_taken);
     }
 })
 imp(bge, FormatB, { // rv32i
     if (AS_SIGNED(cpu.xreg[ins.rs1]) >= AS_SIGNED(cpu.xreg[ins.rs2]))
     {
         WR_PC(cpu.pc + ins.imm);
+        PROF_INC(cpu.prof.branch_taken);
     }
 })
 imp(bgeu, FormatB, { // rv32i
     if (cpu.xreg[ins.rs1] >= cpu.xreg[ins.rs2])
     {
         WR_PC(cpu.pc + ins.imm);
+        PROF_INC(cpu.prof.branch_taken);
     }
 })
 imp(blt, FormatB, { // rv32i
     if (AS_SIGNED(cpu.xreg[ins.rs1]) < AS_SIGNED(cpu.xreg[ins.rs2]))
     {
         WR_PC(cpu.pc + ins.imm);
+        PROF_INC(cpu.prof.branch_taken);
     }
 })
 imp(bltu, FormatB, { // rv32i
     if (cpu.xreg[ins.rs1] < cpu.xreg[ins.rs2])
     {
         WR_PC(cpu.pc + ins.imm);
+        PROF_INC(cpu.prof.branch_taken);
     }
 })
 imp(bne, FormatB, { // rv32i
     if (cpu.xreg[ins.rs1] != cpu.xreg[ins.rs2])
     {
         WR_PC(cpu.pc + ins.imm);
+        PROF_INC(cpu.prof.branch_taken);
     }
 })
 imp(csrrc, FormatCSR, { // system
@@ -672,6 +678,7 @@ imp(sc_w, FormatR, { // rv32a
     if (ret->trap.en) return;
     bool ok = cpu.reservation_en && cpu.reservation_addr == addr;
     cpu.reservation_en = false; // a reservation is consumed by any SC
+    PROF_INC(ok ? cpu.prof.sc_ok : cpu.prof.sc_fail);
     if (ok)
     {
         cpu.memSetWord(addr, (u32)cpu.xreg[ins.rs2]);
@@ -864,6 +871,7 @@ imp(sc_d, FormatR, { // rv64a
     if (ret->trap.en) return;
     bool ok = cpu.reservation_en && cpu.reservation_addr == addr;
     cpu.reservation_en = false; // a reservation is consumed by any SC
+    PROF_INC(ok ? cpu.prof.sc_ok : cpu.prof.sc_fail);
     if (ok)
     {
         cpu.memSetDword(addr, cpu.xreg[ins.rs2]);
@@ -1816,8 +1824,9 @@ void Emulator::emulate()
         xlen_t phys_pc = cpu.mmuTranslate(&ret, cpu.pc, MMU_ACCESS_FETCH);
         if (!ret.trap.en)
         {
-            ins_word = cpu.memGetWord(phys_pc);
+            ins_word = cpu.peekWord(phys_pc); // fetches are derived from the class counts, not counted as data reads
             ret = insSelect(ins_word);
+            PROF_INC(cpu.prof.insns[prof_classify(ins_word)]);
 
 #if XLEN == 64
             // Any FP register write makes mstatus.FS Dirty so the OS saves FP state on switch
@@ -1834,9 +1843,14 @@ void Emulator::emulate()
             if (!ret.trap.en && ret.write_reg < 32 && ret.write_reg > 0)
                 cpu.xreg[ret.write_reg] = ret.write_val;
         }
+        else
+        {
+            PROF_INC(cpu.prof.fetch_faults);
+        }
     }
     else
     {
+        PROF_INC(cpu.prof.fetch_faults);
         ret.trap.en    = true;
         ret.trap.type  = trap_InstructionAddressMisaligned;
         ret.trap.value = cpu.pc;
@@ -1928,7 +1942,7 @@ void Emulator::emulate()
     // ISA-test HTIF exit: a non-zero write to `tohost` finishes the test
     if (test_mode && tohost_addr && !test_done)
     {
-        u64 v = XLEN == 64 ? cpu.memGetDword(tohost_addr) : cpu.memGetWord(tohost_addr);
+        u64 v = XLEN == 64 ? cpu.peekDword(tohost_addr) : cpu.peekWord(tohost_addr);
         if (v != 0)
         {
             test_done = true;

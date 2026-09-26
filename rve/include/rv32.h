@@ -328,8 +328,16 @@ public:
     // Memory Functions
     // Getters
     u32 memGetByte(xlen_t addr);
+    // Uncounted helpers (profiling counts each guest access once, in the public accessor)
+    u32 memGetByteRaw(xlen_t addr);
+    u32 memGetWordSlow(xlen_t addr);
+    void memSetByteRaw(xlen_t addr, u32 val);
+    void memSetWordSlow(xlen_t addr, u32 val);
     u32 memGetHalfWord(xlen_t addr);
     u32 memGetWord(xlen_t addr);
+    // Uncounted reads (instruction fetch, page-table walker, debugger); same values as memGetWord/Dword
+    u32 peekWord(xlen_t addr);
+    u64 peekDword(xlen_t addr);
     u64 memGetDword(xlen_t addr);
     // Setters
     void memSetByte(xlen_t addr, u32 val);

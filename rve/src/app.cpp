@@ -894,6 +894,7 @@ void App::createDisasm()
             // Append the new data at the end
             // pc is a virtual address once the MMU is on (e.g. 0xFFFFFFFF80... for the Sv39 kernel):
             // translate it as an instruction fetch before reading the word.
+            PROF_QUIET(emu.cpu); // debugger reads are not guest traffic
             ins_ret fetch = emu.cpu.insReturnNoop();
             xlen_t paddr = emu.cpu.mmuTranslate(&fetch, emu.cpu.pc, MMU_ACCESS_FETCH);
             if (fetch.trap.en)
