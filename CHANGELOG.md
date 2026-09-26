@@ -1,5 +1,17 @@
 # Changelog
 
+## [v2026.09.26.1] - 2026-09-26
+
+- Merge pull request #14 from raybello/profiling
+- Performance: LTO, TLB, event-driven devices and an inline fast path (1.9-3.1x)
+- Profiler: CSV export, headless --profile/--profile-check, tests, docs, CI
+- Profiler hotspots: sampled PC histogram, top functions/PCs/pages, heat map, ELF symbols
+- Profiler: sampled host-time breakdown per emulate() stage and privilege residency
+- Profiler window: rate history and ImPlot charts (Overview, Instructions, Memory, MMU & Traps, Devices)
+- Profiler counters: instruction mix, memory traffic, MMIO devices, MMU, traps, atomics
+- Profiler scaffolding: RVE_PROFILE build flag, header, Views > Profiler window shell
+
+
 ## [v2026.09.26] - 2026-09-26
 
 - Merge pull request #13 from raybello/web-networking
