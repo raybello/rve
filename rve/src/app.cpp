@@ -618,6 +618,9 @@ void App::renderLoop()
 #ifdef RVE_PROFILE
         uint64_t t_frame = prof_now_ns();
 #endif
+#ifdef RVE_PROFILE
+        emu.cpu.prof_sampling = profiler.sampling;
+#endif
         stepEmu();
 #ifdef RVE_PROFILE
         uint64_t t_emu = prof_now_ns();

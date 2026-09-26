@@ -6,6 +6,7 @@
 #include "imgui.h"
 #include "implot.h"
 #include <cstdio>
+#include <algorithm>
 #include <initializer_list>
 
 // ---- formatting ---------------------------------------------------------------------------
@@ -290,6 +291,81 @@ static void tabDevices(const Profiler &p, const ProfCounters &t)
     }
 }
 
+static void tabHostTime(const Profiler &p, const ProfCounters &t)
+{
+    if (!p.sampling)
+        ImGui::TextDisabled("Sampling is off.");
+    if (t.samples == 0)
+    {
+        ImGui::TextDisabled("No samples yet: run the emulator.");
+        return;
+    }
+    double st[PSTAGE_COUNT], total = 0;
+    for (int i = 0; i < PSTAGE_COUNT; i++)
+    {
+        st[i] = std::max(0.0, (double)t.stage_ns[i] - (double)t.timer_ns) / (double)t.samples;
+        total += st[i];
+    }
+    ImGui::Text("Sampled %llu instructions (1 in %u).  Estimated emulate() cost: %.1f ns/instruction (~%.1f MIPS in the core loop).",
+                (unsigned long long)t.samples, (unsigned)PROF_SAMPLE_PERIOD, total, total > 0 ? 1000.0 / total : 0.0);
+    ImGui::TextDisabled("Timer-call overhead (%.0f ns, measured per sample) is subtracted from every stage. Stages cost less than the\n"
+                        "timer tick, so read the shares as estimates; they converge as samples accumulate.",
+                        (double)t.timer_ns / (double)t.samples);
+
+    // one stacked horizontal bar of ns/instruction per stage
+    {
+        static double v[PSTAGE_COUNT];
+        static const char *labels[PSTAGE_COUNT];
+        for (int i = 0; i < PSTAGE_COUNT; i++) { v[i] = st[i]; labels[i] = prof_stage_name(i); }
+        hbars("ns per instruction by stage", labels, v, PSTAGE_COUNT, 190);
+    }
+
+    if (ImPlot::BeginPlot("Share of emulate() time", ImVec2(-1, 200)))
+    {
+        ImPlot::SetupAxes("t (s)", "%", ImPlotAxisFlags_None, ImPlotAxisFlags_AutoFit);
+        ImPlot::SetupAxisLimits(ImAxis_Y1, 0, 100, ImPlotCond_Once);
+        if (!p.paused)
+            ImPlot::SetupAxisLimits(ImAxis_X1, p.t_now - p.history_s, p.t_now, ImPlotCond_Always);
+        ImPlot::SetupLegend(ImPlotLocation_NorthWest, ImPlotLegendFlags_Horizontal | ImPlotLegendFlags_Outside);
+        for (int i = 0; i < PSTAGE_COUNT; i++)
+        {
+            const ProfSeries &s = p.stage_pct[i];
+            if (s.count)
+                ImPlot::PlotLine(prof_stage_name(i), s.x.data(), s.y.data(), s.count, ImPlotLineFlags_None, s.offset());
+        }
+        ImPlot::EndPlot();
+    }
+    linePlot(p, "Sampled cost per instruction", "ns", {{"ns / instruction", &p.ns_per_insn}}, 130);
+
+    if (ImGui::BeginTable("stage table", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchSame))
+    {
+        ImGui::TableSetupColumn("Stage");
+        ImGui::TableSetupColumn("ns / instruction");
+        ImGui::TableSetupColumn("Share");
+        ImGui::TableHeadersRow();
+        for (int i = 0; i < PSTAGE_COUNT; i++)
+        {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn(); ImGui::TextUnformatted(prof_stage_name(i));
+            ImGui::TableNextColumn(); ImGui::Text("%.2f", st[i]);
+            ImGui::TableNextColumn(); ImGui::Text("%.1f %%", total > 0 ? 100.0 * st[i] / total : 0.0);
+        }
+        ImGui::EndTable();
+    }
+
+    ImGui::SeparatorText("Privilege mode (sampled)");
+    {
+        static const char *names[4] = {"User", "Supervisor", "-", "Machine"};
+        static double v[3];
+        static const char *labels[3] = {"User", "Supervisor", "Machine"};
+        v[0] = (double)t.priv_samples[0]; v[1] = (double)t.priv_samples[1]; v[2] = (double)t.priv_samples[3];
+        (void)names;
+        hbars("Instructions by privilege", labels, v, 3, 120);
+        ImGui::Text("U %.1f %%   S %.1f %%   M %.1f %%", pct(t.priv_samples[0], t.samples),
+                    pct(t.priv_samples[1], t.samples), pct(t.priv_samples[3], t.samples));
+    }
+}
+
 // ---- window body ---------------------------------------------------------------------------------
 
 void Profiler::draw()
@@ -304,6 +380,8 @@ void Profiler::draw()
     ImGui::SameLine();
     ImGui::SetNextItemWidth(110);
     ImGui::SliderInt("History (s)", &history_s, 5, 120);
+    ImGui::SameLine();
+    ImGui::Checkbox("Host-time sampling", &sampling);
     ImGui::Separator();
 
     const ProfCounters t = tot();
@@ -314,6 +392,7 @@ void Profiler::draw()
         if (ImGui::BeginTabItem("Memory"))       { tabMemory(*this, t);       ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("MMU & Traps"))  { tabMmuTraps(*this, t);     ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("Devices"))      { tabDevices(*this, t);      ImGui::EndTabItem(); }
+        if (ImGui::BeginTabItem("Host time"))    { tabHostTime(*this, t);     ImGui::EndTabItem(); }
         ImGui::EndTabBar();
     }
 }

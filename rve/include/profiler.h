@@ -57,6 +57,21 @@ enum ProfRegion : uint8_t
 };
 
 // opcode(7) | funct3(3) << 7 | bit25 << 10 -> class, so classifying is one shift/mask and a load
+// Stages of Emulator::emulate() timed by the sampler
+enum ProfStage : uint8_t
+{
+    PSTAGE_FETCH = 0, // translate pc + read the instruction word
+    PSTAGE_EXEC,      // decode + execute + register/CSR write-back
+    PSTAGE_TIMERS,    // CLINT: msip, wall-clock mtime, mtimecmp compare
+    PSTAGE_DEVICES,   // virtio/PLIC, UART, external-interrupt plumbing
+    PSTAGE_TRAP,      // interrupt/trap entry, SYSCON, pc update, HTIF poll
+    PSTAGE_COUNT
+};
+
+// One instruction in PROF_SAMPLE_PERIOD is timed stage by stage. The period is prime so it can never
+// lock step with the emulator's own periodic work (mtime refresh, stdin poll: every 1024 instructions).
+static const uint32_t PROF_SAMPLE_PERIOD = 1021;
+
 struct ProfOpTable
 {
     uint8_t v[2048];
@@ -118,6 +133,12 @@ struct ProfCounters
     // Atomics
     uint64_t sc_ok = 0, sc_fail = 0;
 
+    // Statistical sampling (one instruction in PROF_SAMPLE_PERIOD)
+    uint64_t samples = 0;
+    uint64_t stage_ns[PSTAGE_COUNT] = {}; // raw wall time per emulate() stage, includes timer-call cost
+    uint64_t timer_ns = 0;                // cost of one timer read, measured in-context (two back-to-back reads per sample)
+    uint64_t priv_samples[4] = {};        // samples by privilege level (0=U 1=S 3=M)
+
     // Devices
     uint64_t uart_tx_bytes = 0, uart_rx_bytes = 0;
     uint64_t stdin_polls = 0;       // FIONREAD polls of the host terminal
@@ -134,6 +155,7 @@ inline uint64_t prof_now_ns()
 }
 
 const char *prof_class_name(int cls);
+const char *prof_stage_name(int stage);
 const char *prof_region_name(int region);
 const char *prof_exception_name(int cause);
 const char *prof_interrupt_name(int cause);
@@ -188,6 +210,9 @@ public:
     ProfSeries trap_rate, irq_rate;
     ProfSeries uart_tx_rate, uart_rx_rate;
     ProfSeries vnet_tx_rate, vnet_rx_rate;
+    ProfSeries stage_pct[PSTAGE_COUNT];             // share of emulate() wall time per stage, %
+    ProfSeries ns_per_insn;                         // sampled emulate() cost per instruction
+    bool sampling = true;                           // host-time sampling on/off (runtime gate)
 
 private:
     void pushSample(double dt, const ProfCounters &d, const VirtioNet::Stats &dv, uint64_t dinsns);

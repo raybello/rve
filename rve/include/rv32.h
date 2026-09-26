@@ -290,6 +290,7 @@ public:
 #ifdef RVE_PROFILE
     // Event counters bumped from the hot path; reset together with the CPU (cpu = RV32())
     ProfCounters prof;
+    bool prof_sampling = true;                    // runtime gate for the timed sample (counters stay on)
 #endif
 
     RV32();

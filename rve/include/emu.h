@@ -135,6 +135,7 @@ public:
     void initializeElf(const char *path);
     void initializeElfDts(const char *elf_file, const char *dts_file);
     void emulate(); // formerly cpu_tick
+    template <bool SAMPLE> void emulateImpl(); // SAMPLE: also time each stage (profiling)
     ins_ret insSelect(u32 ins_word);
 
     // File utilities

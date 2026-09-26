@@ -1811,9 +1811,49 @@ void Emulator::initializeBin(const char *path)
 
 
 
+#ifdef RVE_PROFILE
+// Statistical stage timing. emulate() runs the untimed instantiation of emulateImpl() for all but one
+// instruction in PROF_SAMPLE_PERIOD, so the common path carries no timing code at all.
+#define PROF_SAMPLE_BEGIN()                                                              \
+    uint64_t prof_t = 0;                                                                 \
+    if constexpr (SAMPLE)                                                                \
+    {                                                                                    \
+        cpu.prof.samples++;                                                              \
+        cpu.prof.priv_samples[cpu.csr.privilege & 3]++;                                  \
+        prof_t = prof_now_ns();                                                          \
+        uint64_t prof_n0 = prof_now_ns(); /* back-to-back read = cost of the timer itself */ \
+        cpu.prof.timer_ns += prof_n0 - prof_t;                                           \
+        prof_t = prof_n0;                                                                \
+    }
+#define PROF_STAGE(stage)                                                                \
+    if constexpr (SAMPLE)                                                                \
+    {                                                                                    \
+        uint64_t prof_n = prof_now_ns();                                                 \
+        cpu.prof.stage_ns[stage] += prof_n - prof_t;                                     \
+        prof_t = prof_n;                                                                 \
+    }
+#else
+#define PROF_SAMPLE_BEGIN()
+#define PROF_STAGE(stage)
+#endif
+
 void Emulator::emulate()
 {
+#ifdef RVE_PROFILE
+    if ((uint32_t)cpu.clock % PROF_SAMPLE_PERIOD == 0 && cpu.prof_sampling)
+    {
+        emulateImpl<true>();
+        return;
+    }
+#endif
+    emulateImpl<false>();
+}
+
+template <bool SAMPLE>
+inline __attribute__((always_inline)) void Emulator::emulateImpl()
+{
     cpu.tick();
+    PROF_SAMPLE_BEGIN()
 
     u32 ins_word = 0;
     ins_ret ret = cpu.insReturnNoop();
@@ -1825,6 +1865,7 @@ void Emulator::emulate()
         if (!ret.trap.en)
         {
             ins_word = cpu.peekWord(phys_pc); // fetches are derived from the class counts, not counted as data reads
+            PROF_STAGE(PSTAGE_FETCH)
             ret = insSelect(ins_word);
             PROF_INC(cpu.prof.insns[prof_classify(ins_word)]);
 
@@ -1846,6 +1887,7 @@ void Emulator::emulate()
         else
         {
             PROF_INC(cpu.prof.fetch_faults);
+            PROF_STAGE(PSTAGE_FETCH)
         }
     }
     else
@@ -1855,6 +1897,8 @@ void Emulator::emulate()
         ret.trap.type  = trap_InstructionAddressMisaligned;
         ret.trap.value = cpu.pc;
     }
+
+    PROF_STAGE(PSTAGE_EXEC)
 
     if (debugMode)
         print_inst(cpu.pc, ins_word);
@@ -1885,6 +1929,8 @@ void Emulator::emulate()
         cpu.csr.data[CSR_MIP] |= MIP_MTIP;
     }
 
+    PROF_STAGE(PSTAGE_TIMERS)
+
     // virtio-net RX delivery + PLIC → SEIP
     cpu.netTick();
 
@@ -1914,6 +1960,8 @@ void Emulator::emulate()
             }
         }
     }
+
+    PROF_STAGE(PSTAGE_DEVICES)
 
     cpu.handleIrqAndTrap(&ret);
 
@@ -1950,4 +1998,5 @@ void Emulator::emulate()
             running = false;
         }
     }
+    PROF_STAGE(PSTAGE_TRAP)
 }

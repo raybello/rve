@@ -15,6 +15,13 @@ const char *prof_class_name(int cls)
     return (cls >= 0 && cls < PIC_COUNT) ? names[cls] : "?";
 }
 
+const char *prof_stage_name(int stage)
+{
+    static const char *names[PSTAGE_COUNT] = {
+        "Fetch (MMU + read)", "Decode + execute", "CLINT timers", "Devices (UART, virtio)", "Trap / IRQ entry, pc"};
+    return (stage >= 0 && stage < PSTAGE_COUNT) ? names[stage] : "?";
+}
+
 const char *prof_region_name(int region)
 {
     static const char *names[PREG_COUNT] = {
@@ -91,6 +98,9 @@ static ProfCounters diff(const ProfCounters &a, const ProfCounters &b)
 
 Profiler::Profiler()
 {
+    for (ProfSeries &s : stage_pct)
+        s.init(PROF_SERIES_CAP);
+    ns_per_insn.init(PROF_SERIES_CAP);
     for (ProfSeries *s : {&mips, &frame_ms, &emu_ms, &ui_ms, &rd_rate, &wr_rate, &mmio_rate, &walk_rate,
                           &ptw_rate, &fault_rate, &trap_rate, &irq_rate, &uart_tx_rate, &uart_rx_rate,
                           &vnet_tx_rate, &vnet_rx_rate})
@@ -110,6 +120,9 @@ void Profiler::clearHistory()
         s->clear();
     for (int i = 0; i < PIC_COUNT; i++)
         cls_rate[i].clear();
+    for (ProfSeries &s : stage_pct)
+        s.clear();
+    ns_per_insn.clear();
     run_secs = 0;
     mips_now = mips_avg = 0;
     frame_sum = emu_sum = 0;
@@ -217,6 +230,20 @@ void Profiler::pushSample(double dt, const ProfCounters &d, const VirtioNet::Sta
     uart_rx_rate.push(x, (float)((double)d.uart_rx_bytes / dt));
     vnet_tx_rate.push(x, (float)((double)dv.tx_frames / dt));
     vnet_rx_rate.push(x, (float)((double)dv.rx_frames / dt));
+
+    // Host-time breakdown for this interval: stage cost minus the timer-call overhead, as a share of the total
+    if (d.samples)
+    {
+        double st[PSTAGE_COUNT], total = 0;
+        for (int i = 0; i < PSTAGE_COUNT; i++)
+        {
+            st[i] = std::max(0.0, (double)d.stage_ns[i] - (double)d.timer_ns);
+            total += st[i];
+        }
+        for (int i = 0; i < PSTAGE_COUNT; i++)
+            stage_pct[i].push(x, total > 0 ? (float)(100.0 * st[i] / total) : 0.0f);
+        ns_per_insn.push(x, (float)(total / (double)d.samples));
+    }
 
     if (frame_n)
     {
