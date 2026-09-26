@@ -3,7 +3,11 @@
 #ifdef RVE_PROFILE
 
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
 #include <cstring>
+#include <map>
+#include "loader.h"
 
 static const int PROF_SERIES_CAP = 4096; // >= longest history / shortest sampling period
 
@@ -109,6 +113,8 @@ Profiler::Profiler()
         cls_rate[i].init(PROF_SERIES_CAP);
 }
 
+bool Profiler::hasSymbols() const { return symbols && !symbols->empty(); }
+
 ProfCounters Profiler::tot() const { return diff(cur, base); }
 uint64_t Profiler::totalInsns() const { return sumInsns(cur) - sumInsns(base); }
 
@@ -123,6 +129,11 @@ void Profiler::clearHistory()
     for (ProfSeries &s : stage_pct)
         s.clear();
     ns_per_insn.clear();
+    hot_pcs.clear();
+    hot_funcs.clear();
+    hot_pages.clear();
+    heat.clear();
+    hot_seen = 0;
     run_secs = 0;
     mips_now = mips_avg = 0;
     frame_sum = emu_sum = 0;
@@ -131,6 +142,8 @@ void Profiler::clearHistory()
 
 void Profiler::reset()
 {
+    if (hot)
+        hot->clear();
     base = cur;
     vbase = vcur;
     clearHistory();
@@ -187,10 +200,97 @@ void Profiler::update(const ProfCounters &c, const VirtioNet::Stats &vs, bool ru
     uint64_t dinsns = sumInsns(c) - sumInsns(prev);
 
     pushSample(dt, d, dv, dinsns);
+    if (hot && hot->total != hot_seen)
+    {
+        hot_seen = hot->total;
+        computeHotspots();
+    }
 
     prev = c;
     vprev = vs;
     t_last_ns = now;
+}
+
+static std::string hex(uint64_t v)
+{
+    char b[24];
+    snprintf(b, sizeof b, "0x%llx", (unsigned long long)v);
+    return b;
+}
+
+void Profiler::computeHotspots()
+{
+    std::vector<ProfHotspots::Entry> all;
+    all.reserve((size_t)hot->distinct);
+    for (const auto &e : hot->tab)
+        if (e.n)
+            all.push_back(e);
+    if (all.empty())
+        return;
+
+    auto describe = [&](uint64_t pc) {
+        if (symbols && !symbols->empty())
+            if (const ElfSymbol *s = findElfSymbol(*symbols, pc))
+            {
+                char b[32];
+                snprintf(b, sizeof b, "+0x%llx", (unsigned long long)(pc - s->addr));
+                return s->name + b;
+            }
+        return std::string();
+    };
+
+    // top PCs
+    const size_t topn = std::min<size_t>(20, all.size());
+    std::partial_sort(all.begin(), all.begin() + topn, all.end(),
+                      [](const ProfHotspots::Entry &a, const ProfHotspots::Entry &b) { return a.n > b.n; });
+    hot_pcs.clear();
+    for (size_t i = 0; i < topn; i++)
+        hot_pcs.push_back({all[i].pc, all[i].n, describe(all[i].pc)});
+
+    // top functions and pages, aggregated over every sampled PC
+    std::map<std::string, uint64_t> funcs;
+    std::map<uint64_t, uint64_t> pages;
+    uint64_t lo = ~0ull, hi = 0;
+    for (const auto &e : (const std::vector<ProfHotspots::Entry> &)hot->tab)
+    {
+        if (!e.n) continue;
+        pages[e.pc >> 12] += e.n;
+        lo = std::min(lo, e.pc >> 12);
+        hi = std::max(hi, e.pc >> 12);
+        if (symbols && !symbols->empty())
+        {
+            const ElfSymbol *s = findElfSymbol(*symbols, e.pc);
+            funcs[s ? s->name : std::string("(unknown)")] += e.n;
+        }
+    }
+    hot_funcs.clear();
+    for (const auto &kv : funcs)
+        hot_funcs.push_back({kv.first, kv.second});
+    std::sort(hot_funcs.begin(), hot_funcs.end(), [](const HotFunc &a, const HotFunc &b) { return a.n > b.n; });
+    if (hot_funcs.size() > 16) hot_funcs.resize(16);
+
+    std::vector<std::pair<uint64_t, uint64_t>> pv(pages.begin(), pages.end());
+    std::sort(pv.begin(), pv.end(), [](const auto &a, const auto &b) { return a.second > b.second; });
+    if (pv.size() > 12) pv.resize(12);
+    hot_pages.clear();
+    for (auto &p : pv)
+        hot_pages.push_back({p.first, p.second, hex(p.first << 12)});
+
+    // address-space heat map: the sampled range split into heat_rows x heat_cols equal buckets
+    const int cells = heat_rows * heat_cols;
+    uint64_t span_pages = hi - lo + 1;
+    uint64_t bucket_pages = std::max<uint64_t>(1, (span_pages + cells - 1) / cells);
+    heat_lo = lo << 12;
+    heat_bucket = bucket_pages << 12;
+    heat.assign(cells, 0.0f);
+    for (const auto &kv : pages)
+    {
+        uint64_t idx = (kv.first - lo) / bucket_pages;
+        if (idx < (uint64_t)cells)
+            heat[idx] += (float)kv.second;
+    }
+    for (float &v : heat) // sqrt keeps a single scorching page from flattening the rest
+        v = std::sqrt(v);
 }
 
 void Profiler::pushSample(double dt, const ProfCounters &d, const VirtioNet::Stats &dv, uint64_t dinsns)

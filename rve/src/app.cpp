@@ -620,6 +620,7 @@ void App::renderLoop()
 #endif
 #ifdef RVE_PROFILE
         emu.cpu.prof_sampling = profiler.sampling;
+        profiler.attach(&emu.cpu.prof_hot, &emu.symbols);
 #endif
         stepEmu();
 #ifdef RVE_PROFILE

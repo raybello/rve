@@ -99,6 +99,9 @@ public:
     uint8_t *memory;
     RV32 cpu;
 
+    // Symbols of the loaded ELF (profiler hotspot names); empty for raw images
+    std::vector<ElfSymbol> symbols;
+
     // Filenames
     std::string elf_file_path = "no elf selected";
     std::string dts_file_path = "no dts selected";

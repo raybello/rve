@@ -1750,6 +1750,7 @@ void Emulator::initializeElf(const char *path)
     cpu.init(memory, NULL, debugMode);
     cpu.pc = (xlen_t)entry;
     elf_file_path = path;
+    loadElfSymbols(path, symbols);
     ready_to_run = true;
 }
 
@@ -1768,6 +1769,7 @@ void Emulator::initializeElfDts(const char *elf_file, const char *dts_file)
 void Emulator::initializeBin(const char *path)
 {
     initialize();
+    symbols.clear();
     // Zero memory for a clean boot
     memset(memory, 0, MEM_SIZE);
 
@@ -1820,6 +1822,7 @@ void Emulator::initializeBin(const char *path)
     {                                                                                    \
         cpu.prof.samples++;                                                              \
         cpu.prof.priv_samples[cpu.csr.privilege & 3]++;                                  \
+        cpu.prof_hot.add(cpu.pc);                                                        \
         prof_t = prof_now_ns();                                                          \
         uint64_t prof_n0 = prof_now_ns(); /* back-to-back read = cost of the timer itself */ \
         cpu.prof.timer_ns += prof_n0 - prof_t;                                           \

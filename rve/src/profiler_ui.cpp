@@ -366,6 +366,87 @@ static void tabHostTime(const Profiler &p, const ProfCounters &t)
     }
 }
 
+static void tabHotspots(const Profiler &p)
+{
+    if (p.hot_pcs.empty())
+    {
+        ImGui::TextDisabled("No samples yet: run the emulator.");
+        return;
+    }
+    ImGui::Text("Sampled PCs: %llu (1 in %u), %llu distinct%s", (unsigned long long)p.hotTotal(), (unsigned)PROF_SAMPLE_PERIOD,
+                (unsigned long long)p.hotDistinct(), p.hotDropped() ? "  [table full: some PCs not recorded]" : "");
+    if (!p.hasSymbols())
+        ImGui::TextDisabled("No symbols: load an ELF (Memory Loader or -e) to see function names; raw images show addresses only.");
+
+    const uint64_t total = p.hotTotal();
+    if (p.hasSymbols() && !p.hot_funcs.empty())
+    {
+        ImGui::SeparatorText("Top functions");
+        static double v[16];
+        static const char *labels[16];
+        int n = 0;
+        for (const auto &f : p.hot_funcs)
+            if (n < 16) { v[n] = (double)f.n; labels[n++] = f.name.c_str(); }
+        hbars("Top functions", labels, v, n, 50.0f + 22.0f * n);
+    }
+
+    ImGui::SeparatorText("Top program counters");
+    if (ImGui::BeginTable("hot pcs", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
+    {
+        ImGui::TableSetupColumn("PC");
+        ImGui::TableSetupColumn("Symbol");
+        ImGui::TableSetupColumn("Samples");
+        ImGui::TableSetupColumn("Share");
+        ImGui::TableHeadersRow();
+        for (const auto &h : p.hot_pcs)
+        {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn(); ImGui::Text("0x%llx", (unsigned long long)h.pc);
+            ImGui::TableNextColumn(); ImGui::TextUnformatted(h.sym.empty() ? "-" : h.sym.c_str());
+            ImGui::TableNextColumn(); ImGui::Text("%llu", (unsigned long long)h.n);
+            ImGui::TableNextColumn(); ImGui::Text("%.2f %%", pct(h.n, total));
+        }
+        ImGui::EndTable();
+    }
+
+    ImGui::SeparatorText("Hot 4 KiB pages");
+    {
+        static double v[12];
+        static const char *labels[12];
+        int n = 0;
+        for (const auto &pg : p.hot_pages)
+            if (n < 12) { v[n] = (double)pg.n; labels[n++] = pg.label.c_str(); }
+        hbars("Hot pages", labels, v, n, 50.0f + 22.0f * n);
+    }
+
+    ImGui::SeparatorText("Address-space heat map");
+    if (!p.heat.empty())
+    {
+        ImGui::TextDisabled("0x%llx .. 0x%llx, %llu KiB per cell (sqrt scale)", (unsigned long long)p.heat_lo,
+                            (unsigned long long)(p.heat_lo + p.heat_bucket * p.heat.size()),
+                            (unsigned long long)(p.heat_bucket >> 10));
+        ImPlot::PushColormap(ImPlotColormap_Hot);
+        if (ImPlot::BeginPlot("##heat", ImVec2(-1, 160), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
+        {
+            ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoDecorations, ImPlotAxisFlags_NoDecorations);
+            ImPlot::SetupAxesLimits(0, 1, 0, 1, ImPlotCond_Always);
+            ImPlot::PlotHeatmap("heat", p.heat.data(), p.heat_rows, p.heat_cols, 0, 0, nullptr, ImPlotPoint(0, 0), ImPlotPoint(1, 1));
+            if (ImPlot::IsPlotHovered())
+            {
+                ImPlotPoint m = ImPlot::GetPlotMousePos();
+                int col = (int)(m.x * p.heat_cols), row = (int)((1.0 - m.y) * p.heat_rows);
+                if (col >= 0 && col < p.heat_cols && row >= 0 && row < p.heat_rows)
+                {
+                    uint64_t a = p.heat_lo + (uint64_t)(row * p.heat_cols + col) * p.heat_bucket;
+                    ImGui::SetTooltip("0x%llx .. 0x%llx", (unsigned long long)a, (unsigned long long)(a + p.heat_bucket));
+                }
+            }
+            ImPlot::EndPlot();
+        }
+        ImPlot::PopColormap();
+    }
+}
+
 // ---- window body ---------------------------------------------------------------------------------
 
 void Profiler::draw()
@@ -393,6 +474,7 @@ void Profiler::draw()
         if (ImGui::BeginTabItem("MMU & Traps"))  { tabMmuTraps(*this, t);     ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("Devices"))      { tabDevices(*this, t);      ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("Host time"))    { tabHostTime(*this, t);     ImGui::EndTabItem(); }
+        if (ImGui::BeginTabItem("Hotspots"))     { tabHotspots(*this);        ImGui::EndTabItem(); }
         ImGui::EndTabBar();
     }
 }

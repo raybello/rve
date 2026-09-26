@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <chrono>
 #include <vector>
+#include <string>
 
 #ifdef RVE_PROFILE
 #include "virtio_net.h"
@@ -71,6 +72,38 @@ enum ProfStage : uint8_t
 // One instruction in PROF_SAMPLE_PERIOD is timed stage by stage. The period is prime so it can never
 // lock step with the emulator's own periodic work (mtime refresh, stdin poll: every 1024 instructions).
 static const uint32_t PROF_SAMPLE_PERIOD = 1021;
+
+// Sampled program-counter histogram (one PC per timed sample). Open-addressing hash, allocated on first use.
+struct ProfHotspots
+{
+    struct Entry { uint64_t pc = 0; uint64_t n = 0; }; // n == 0 marks an empty slot
+    static const uint32_t BITS = 16;                    // 65536 slots (1 MiB), filled to 75 % at most
+    std::vector<Entry> tab;
+    uint64_t total = 0;     // samples taken
+    uint64_t distinct = 0;  // occupied slots
+    uint64_t dropped = 0;   // samples whose PC did not fit in the table
+
+    void add(uint64_t pc)
+    {
+        total++;
+        if (tab.empty()) tab.assign((size_t)1 << BITS, Entry());
+        const size_t mask = ((size_t)1 << BITS) - 1;
+        size_t i = (size_t)((pc >> 1) * 0x9E3779B97F4A7C15ull >> (64 - BITS));
+        for (int probe = 0; probe < 64; probe++, i = (i + 1) & mask)
+        {
+            Entry &e = tab[i];
+            if (e.n && e.pc == pc) { e.n++; return; }
+            if (!e.n)
+            {
+                if (distinct >= ((uint64_t)3 << (BITS - 2))) break;
+                e.pc = pc; e.n = 1; distinct++;
+                return;
+            }
+        }
+        dropped++;
+    }
+    void clear() { tab.clear(); total = distinct = dropped = 0; }
+};
 
 struct ProfOpTable
 {
@@ -154,6 +187,7 @@ inline uint64_t prof_now_ns()
                std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
+struct ElfSymbol;
 const char *prof_class_name(int cls);
 const char *prof_stage_name(int stage);
 const char *prof_region_name(int region);
@@ -211,10 +245,29 @@ public:
     ProfSeries uart_tx_rate, uart_rx_rate;
     ProfSeries vnet_tx_rate, vnet_rx_rate;
     ProfSeries stage_pct[PSTAGE_COUNT];             // share of emulate() wall time per stage, %
+    // Hotspots (from the sampled PC histogram; recomputed every sampling interval)
+    struct HotPc { uint64_t pc, n; std::string sym; };
+    struct HotFunc { std::string name; uint64_t n; };
+    struct HotPage { uint64_t page, n; std::string label; };
+    std::vector<HotPc> hot_pcs;      // top program counters
+    std::vector<HotFunc> hot_funcs;  // top functions (needs ELF symbols)
+    std::vector<HotPage> hot_pages;  // top 4 KiB pages
+    std::vector<float> heat;         // address-space heat map, heat_rows x heat_cols
+    int heat_rows = 16, heat_cols = 64;
+    uint64_t heat_lo = 0, heat_bucket = 0;
+    uint64_t hotTotal() const { return hot ? hot->total : 0; }
+    uint64_t hotDistinct() const { return hot ? hot->distinct : 0; }
+    uint64_t hotDropped() const { return hot ? hot->dropped : 0; }
+    bool hasSymbols() const;
+    void attach(ProfHotspots *h, const std::vector<ElfSymbol> *syms) { hot = h; symbols = syms; }
     ProfSeries ns_per_insn;                         // sampled emulate() cost per instruction
     bool sampling = true;                           // host-time sampling on/off (runtime gate)
 
 private:
+    void computeHotspots();
+    ProfHotspots *hot = nullptr;
+    const std::vector<ElfSymbol> *symbols = nullptr;
+    uint64_t hot_seen = 0;
     void pushSample(double dt, const ProfCounters &d, const VirtioNet::Stats &dv, uint64_t dinsns);
     void clearHistory();
     uint64_t t_start_ns = 0, t_last_ns = 0;
