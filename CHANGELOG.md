@@ -1,5 +1,16 @@
 # Changelog
 
+## [v2026.09.26] - 2026-09-26
+
+- Merge pull request #13 from raybello/web-networking
+- Native networking: real host network backend (TCP proxy, system DNS, ICMP)
+- Rebuild demo with networking; DNS ordering fix, header dependency tracking, wasm ISA skip list
+- Wire the userspace network stack: netsetup, -F flag, browser host (fetch/DoH), tests and CI
+- Add userspace network stack (ARP/DHCP/DNS/ICMP/TCP->HTTP), rv64 DT + kernel/rootfs networking config
+- Add virtio-mmio net device, minimal PLIC and NetBackend interface
+- gitignore: ignore web64 build output and .DS_Store
+
+
 ## [v2026.09.25.1] - 2026-09-25
 
 - Merge pull request #12 from raybello/web-demo-rv64
