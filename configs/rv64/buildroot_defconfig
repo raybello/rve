@@ -2,7 +2,7 @@
 # Used by `make build ARCH=rv64` (docker/container.mk). Paths assume the docker layout
 # (/workspace/project = this repo).
 
-# Architecture: rv64imafd / lp64d (rve has no C extension)
+# Architecture: rv64imafdc / lp64d
 BR2_riscv=y
 BR2_RISCV_64=y
 BR2_riscv_custom=y
@@ -10,6 +10,7 @@ BR2_RISCV_ISA_RVM=y
 BR2_RISCV_ISA_RVA=y
 BR2_RISCV_ISA_RVF=y
 BR2_RISCV_ISA_RVD=y
+BR2_RISCV_ISA_RVC=y
 BR2_RISCV_ABI_LP64D=y
 
 # Toolchain: musl keeps the userspace small and the toolchain build fast
@@ -50,5 +51,4 @@ BR2_LINUX_KERNEL_IMAGE=y
 BR2_TARGET_OPENSBI=y
 BR2_TARGET_OPENSBI_LATEST_VERSION=y
 BR2_TARGET_OPENSBI_PLAT="generic"
-# rve has no C extension: build OpenSBI without compressed instructions (generic defaults to rv64imafdc)
-BR2_TARGET_OPENSBI_ADDITIONAL_VARIABLES="FW_TEXT_START=0x80000000 FW_JUMP_ADDR=0x80200000 PLATFORM_RISCV_ISA=rv64ima_zicsr_zifencei PLATFORM_RISCV_ABI=lp64"
+BR2_TARGET_OPENSBI_ADDITIONAL_VARIABLES="FW_TEXT_START=0x80000000 FW_JUMP_ADDR=0x80200000 PLATFORM_RISCV_ISA=rv64imac_zicsr_zifencei PLATFORM_RISCV_ABI=lp64"

@@ -312,8 +312,9 @@ public:
     void dump();
     void tick();
 
-    // Noop
-    ins_ret insReturnNoop();
+    // Noop. ins_len defaults to 4 (a native 32-bit instruction); RV64's compressed-instruction
+    // fetch path (emulateImpl()) passes 2 so pc_val defaults correctly for 16-bit instructions.
+    ins_ret insReturnNoop(u32 ins_len = 4);
 
     // CSR Functions
     bool hasCsrAccessPrivilege(u32 addr);
@@ -414,6 +415,7 @@ public:
     u32 memGetWord(xlen_t addr);
     // Uncounted reads (instruction fetch, page-table walker, debugger); same values as memGetWord/Dword
     u32 peekWord(xlen_t addr);
+    u32 peekHalfWord(xlen_t addr);
     u64 peekDword(xlen_t addr);
     u64 memGetDword(xlen_t addr);
     // Setters

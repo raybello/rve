@@ -51,12 +51,15 @@ make rerun        # clean, build, and run
 make isas         # rv32 u{i,m,a,f,d} tests, headless; prints PASS/FAIL/TIMEOUT per test
 make isas64       # rv64 u{i,m,a,f,d} physical (-p-) tests + rve directed tests (rve/tests/rv64)
 make isas64-v     # rv64 tests under Sv39 virtual memory (-v-)
+make isas64c      # rv64uc compressed-extension (RVC) corner-case test
 make isas-all     # all of the above; exits non-zero on any failure
 make isa ISA_TEST=rv32ui-p-add   # run a single test in the GUI
 ```
 
-**RV64 build:** `make XLEN=64` (in `rve/`) builds `build64/rve64`, a 64-bit RV64IMAFD core with Sv39
-(same source tree as the RV32 `build/rve`). The headless test runner is also usable directly:
+**RV64 build:** `make XLEN=64` (in `rve/`) builds `build64/rve64`, a 64-bit RV64IMAFDC core with Sv39
+(same source tree as the RV32 `build/rve`). The compressed (C) extension is decoded by expanding each
+16-bit instruction to its standard 32-bit equivalent before it reaches the normal decoder (`emu.cpp`'s
+`decodeCompressed()`); RV32 is unaffected and stays C-free. The headless test runner is also usable directly:
 ```sh
 rve/build64/rve64 -n -t -e rve/assets/isa-test-rv64/rv64ui-p-add   # exit 0=pass, 1=fail, 2=timeout
 rve/build64/rve64 -n -t -T -e <test>                                # -T traces every instruction
@@ -276,7 +279,7 @@ Outputs land in `rve/assets/linux64/`: `Image` (OpenSBI padded to 2 MiB + kernel
 
 | | rv32 (default) | rv64 (`ARCH=rv64`) |
 |---|---|---|
-| ISA / ABI | rv32im, ilp32, soft-float | rv64imafd, lp64d (no C: rve has no compressed instructions) |
+| ISA / ABI | rv32im, ilp32, soft-float | rv64imafdc, lp64d |
 | MMU | none (M-mode nommu) | Sv39, S-mode kernel |
 | Firmware | none | OpenSBI 1.3 `generic` (fw_jump) |
 | libc | uClibc, static, flat binaries | musl, ELF |
@@ -313,6 +316,7 @@ make lnx      # use local assets/linux/Image and run with GUI
 | rv32 u{i,m,a,f,d} + mi/si CSR (`make isas32`) | 81/81 |
 | rv64 u{i,m,a,f,d}-p (`make isas64`) | 109/109 |
 | rv64 u{i,m,a,f,d}-v, Sv39 (`make isas64-v`) | 109/109 |
+| rv64uc RVC corner cases (`make isas64c`) | 1/1 (37 sub-cases) |
 
 RV32 detail (`make isas`):
 
