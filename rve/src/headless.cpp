@@ -10,6 +10,7 @@
 // Headless emulation loop.
 // Flags:
 //   -b <image>   raw binary image to boot          -e <elf>   load an ELF (ISA tests)
+//   -D <image>   attach a flat disk image as the virtio-blk root device
 //   -s <path>    Unix socket, act as server (player 0)
 //   -S <path>    Unix socket, connect as client (player 1)
 //   -F           virtio-net backed by the userspace stack with the deterministic fake host (tests)
@@ -27,6 +28,7 @@ int runHeadless(int argc, char *argv[])
 
     const char *bin_file = nullptr;
     const char *elf_file = nullptr;
+    const char *disk_file = nullptr;
     uint64_t max_instr = 20000000ull; // ISA-test watchdog
     const char *net_server = nullptr;
     bool net_fake = false, net_off = false;
@@ -40,6 +42,8 @@ int runHeadless(int argc, char *argv[])
             bin_file = argv[++i];
         else if (strcmp(argv[i], "-e") == 0 && i + 1 < argc)
             elf_file = argv[++i];
+        else if (strcmp(argv[i], "-D") == 0 && i + 1 < argc)
+            disk_file = argv[++i];
         else if (strcmp(argv[i], "-t") == 0)
             emu.test_mode = true;
         else if (strcmp(argv[i], "-F") == 0)
@@ -86,6 +90,9 @@ int runHeadless(int argc, char *argv[])
         fprintf(stderr, "ERRO: failed to load image\n");
         return 1;
     }
+
+    if (disk_file && !emu.cpu.vblk.attachImage(disk_file))
+        fprintf(stderr, "WARN: could not open disk image %s (virtio-blk will report zero capacity)\n", disk_file);
 
     emu.running = true;
 

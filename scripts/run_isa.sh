@@ -7,6 +7,10 @@ BIN=$1
 DIR=$2
 FILTER=${3:-.}
 SKIPFILE=${SKIPFILE:-$(dirname "$0")/isa_skip.txt}
+# Fresh, zeroed scratch disk for the directed virtio-blk test (rve64mi-virtio-blk); harmless for
+# every other test, which never touches -D. 128 sectors so the test can assert an exact capacity.
+DISKIMG=/tmp/rve_isa_blk.$$
+truncate -s 65536 "$DISKIMG" 2>/dev/null
 pass=0; fail=0; total=0; skipped=0; failed=""
 for t in "$DIR"/*; do
   case "$t" in *.dump) continue;; esac
@@ -16,7 +20,7 @@ for t in "$DIR"/*; do
     skipped=$((skipped+1)); echo "SKIP  $n"; continue
   fi
   total=$((total+1))
-  $BIN -n -F -t -e "$t" >/tmp/rve_isa_out.$$ 2>&1
+  $BIN -n -F -D "$DISKIMG" -t -e "$t" >/tmp/rve_isa_out.$$ 2>&1
   rc=$?
   if [ $rc -eq 0 ]; then
     pass=$((pass+1)); echo "PASS  $n"
@@ -25,7 +29,7 @@ for t in "$DIR"/*; do
     [ $rc -eq 2 ] && echo "TIMEOUT $n" || echo "FAIL  $n (rc=$rc)"
   fi
 done
-rm -f /tmp/rve_isa_out.$$
+rm -f /tmp/rve_isa_out.$$ "$DISKIMG"
 echo "----------------------------------------"
 echo "$pass/$total passed, $fail failed, $skipped skipped"
 [ $fail -eq 0 ] || { echo "failed:$failed"; exit 1; }

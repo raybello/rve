@@ -527,6 +527,7 @@ void RV32::setNetBackend(NetBackend *be)
             memcpy(mem + (pa - 0x80000000u), src, n);
     };
     vnet.init(gm, be ? be : &null_backend);
+    vblk.init(gm); // same guest-RAM access lambda; virtio-blk DMA never touches anything else
 }
 
 __attribute__((noinline)) void RV32::netTick()
@@ -549,9 +550,29 @@ __attribute__((noinline)) void RV32::netTick()
     }
 }
 
-// Word-granular MMIO for the PLIC and the virtio-net window (claim reads have side effects,
+__attribute__((noinline)) void RV32::blkTick()
+{
+    if (!vblk.active()) return;
+    blk_dirty = false;
+    plic.setLevel(VIRTIO_BLK_IRQ, vblk.irqLevel());
+    bool active = plic.ctxActive(1);
+    xlen_t mip = readCsrRaw(CSR_MIP);
+    if (active && !(mip & MIP_SEIP))
+    {
+        writeCsrRaw(CSR_MIP, mip | MIP_SEIP);
+        plic_seip = true;
+    }
+    else if (!active && plic_seip)
+    {
+        writeCsrRaw(CSR_MIP, mip & ~(xlen_t)MIP_SEIP);
+        plic_seip = false;
+    }
+}
+
+// Word-granular MMIO for the PLIC and the virtio device windows (claim reads have side effects,
 // so these must not be composed from byte accesses).
 static inline bool inVirtio(xlen_t a) { return a >= VIRTIO_NET_BASE && a < VIRTIO_NET_BASE + VIRTIO_NET_SIZE; }
+static inline bool inVirtioBlk(xlen_t a) { return a >= VIRTIO_BLK_BASE && a < VIRTIO_BLK_BASE + VIRTIO_BLK_SIZE; }
 static inline bool inPlic(xlen_t a) { return a >= PLIC_BASE && a < PLIC_BASE + PLIC_SIZE; }
 
 // Guest RAM is little-endian. On a little-endian host a memcpy compiles to a single (unaligned) load/store;
@@ -577,6 +598,7 @@ static inline u8 profRegion(xlen_t a)
     if (a >= 0x10000000u && a < 0x10001000u) return PREG_UART;
     if (a >= 0x10001000u && a < 0x10002000u) return PREG_KBD;
     if (inVirtio(a)) return PREG_VIRTIO;
+    if (inVirtioBlk(a)) return PREG_VIRTIO;
     if (inPlic(a)) return PREG_PLIC;
     if (a >= RTC_MMIO_BASE && a < RTC_MMIO_BASE + RTC_MMIO_SIZE) return PREG_RTC;
     if ((a >= 0x02000000u && a < 0x02010000u) || (a >= 0x11000000u && a < 0x11000004u) ||
@@ -808,8 +830,9 @@ u32 RV32::memGetWordSlow(xlen_t addr)
 {
     if ((addr & 3) == 0)
     {
-        if (inPlic(addr))   { net_dirty = true; return plic.read(addr - PLIC_BASE); }
-        if (inVirtio(addr)) { net_dirty = true; return vnet.read(addr - VIRTIO_NET_BASE); }
+        if (inPlic(addr))      { net_dirty = true; blk_dirty = true; return plic.read(addr - PLIC_BASE); }
+        if (inVirtio(addr))    { net_dirty = true; return vnet.read(addr - VIRTIO_NET_BASE); }
+        if (inVirtioBlk(addr)) { blk_dirty = true; return vblk.read(addr - VIRTIO_BLK_BASE); }
     }
     return memGetByteRaw(addr) |
            ((u32)memGetByteRaw(addr + 1) << 8) |
@@ -1020,8 +1043,9 @@ void RV32::memSetWordSlow(xlen_t addr, u32 val)
 {
     if ((addr & 3) == 0)
     {
-        if (inPlic(addr))   { net_dirty = true; plic.write(addr - PLIC_BASE, val); return; }
-        if (inVirtio(addr)) { net_dirty = true; vnet.write(addr - VIRTIO_NET_BASE, val); return; }
+        if (inPlic(addr))      { net_dirty = true; blk_dirty = true; plic.write(addr - PLIC_BASE, val); return; }
+        if (inVirtio(addr))    { net_dirty = true; vnet.write(addr - VIRTIO_NET_BASE, val); return; }
+        if (inVirtioBlk(addr)) { blk_dirty = true; vblk.write(addr - VIRTIO_BLK_BASE, val); return; }
     }
     memSetByteRaw(addr, val & 0xFF);
     memSetByteRaw(addr + 1, (val >> 8) & 0xFF);

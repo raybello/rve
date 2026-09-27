@@ -2742,6 +2742,10 @@ inline __attribute__((always_inline)) void Emulator::emulateImpl()
     // virtio-net RX delivery + PLIC -> SEIP
     if (cpu.vnet.active() && (cpu.net_dirty || (cpu.clock & 0x3FF) == 0))
         cpu.netTick();
+    // virtio-blk: requests complete synchronously on the guest's QueueNotify write, so this only
+    // needs to re-run when a guest access might have changed the IRQ/PLIC state -- no polling.
+    if (cpu.vblk.active() && cpu.blk_dirty)
+        cpu.blkTick();
     // UART: work only on the stdin poll tick or while a transmit / interrupt is in flight; idle it changes nothing.
     if (cpu.stdin_poll_due || cpu.uart.thr_pending || cpu.uart.thre_ip || cpu.uart.interrupting)
         cpu.uartTick();

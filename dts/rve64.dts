@@ -136,6 +136,14 @@
 			interrupt-parent = <&plic>;
 		};
 
+		/* virtio-blk root disk (PLIC source 3; source 2 reserved for a future virtio-gpu) */
+		virtio_blk: virtio@10004000 {
+			compatible = "virtio,mmio";
+			reg = <0x00 0x10004000 0x00 0x1000>;
+			interrupts = <0x03>;
+			interrupt-parent = <&plic>;
+		};
+
 		keyboard@10001000 {
 			compatible = "rve-kbd";
 			reg = <0x00 0x10001000 0x00 0x10>;
