@@ -119,6 +119,41 @@ cd rve && make -f Makefile.emscripten XLEN=64   # writes rve/web64/
 cp web64/index.{html,js,wasm,data} ../docs/demo/
 ```
 
+### Host rendering: WebGPU evaluation
+
+The web build's own rendering (ImGui/ImPlot, the framebuffer texture blit, the debug UI — not
+anything inside the guest) goes through `IMGUI_IMPL_OPENGL_ES2`, which Emscripten translates to
+WebGL 1.0 in the browser. This was evaluated (not implemented — see the GUI-userspace plan's M5)
+as a candidate to replace with WebGPU. Findings:
+
+- **Browser support is no longer the blocker it used to be.** WebGPU now ships in stable Chrome/Edge
+  (since Chrome 113), Firefox (Windows/macOS; Linux expected later), and Safari (26+, June 2025) —
+  broad enough for a production target as of this writing.
+- **Emscripten's WebGPU story changed recently.** The old `-sUSE_WEBGPU=1` flag is deprecated/removed;
+  the current path is `--use-port=emdawnwebgpu` (a Dawn-maintained port), needing **Emscripten 4.0.10+**.
+  This project's CI pins **emsdk 3.1.38** (`.github/workflows/ci.yml`) — years older. Any WebGPU work
+  has to clear an emsdk major-version upgrade first, which is its own (separate, non-trivial) risk to
+  the existing SDL2/OpenGL ES2 build before any WebGPU code is even written.
+- **Dear ImGui has an official WebGPU backend** (`imgui_impl_wgpu`) that auto-targets Dawn/emdawnwebgpu
+  on Emscripten 4.0.10+, so the integration path is real and maintained, not a from-scratch effort.
+  It decouples cleanly from the platform backend (`imgui_impl_sdl2` stays as-is) — but upstream's own
+  WebGPU examples pair it with GLFW, not SDL2, so SDL2+WebGPU specifically is less trodden; SDL2 itself
+  has no first-class WebGPU surface API (unlike SDL3), so the web build's swapchain setup would go
+  through Emscripten's raw `html5_webgpu.h` bindings alongside SDL2, not through SDL2 itself.
+- **The actual payoff looks small for this app.** WebGPU's advantages over WebGL — lower per-draw-call
+  CPU overhead, multithreaded command recording, compute shaders — target GPU-bound or draw-call-bound
+  workloads. This app's rendering load (a handful of ImGui panels, one framebuffer texture upload and
+  one virtio-gpu-scanout blit per frame) is trivial; the actual bottleneck is the RISC-V interpreter
+  (CPU-bound instruction emulation), which a rendering-API change does nothing for.
+- **Where it would matter: a future 3D passthrough.** If `virtio-gpu` 3D mode is ever implemented (the
+  plan's M6, explicitly out of scope here), WebGPU's explicit buffer/pipeline model is a more natural
+  target for translating a guest's GPU command stream than forcing it through WebGL1/ES2's older,
+  fixed-function-adjacent API. That's the concrete reason to revisit this, not raw 2D UI perf.
+
+**Recommendation:** no code changes now. Revisit specifically if/when 3D passthrough is picked up, and
+treat the emsdk 3.1.38 → 4.0.10+ upgrade as its own separate, first step (with its own regression
+testing against the existing WebGL/SDL2 path) rather than bundling it into a rendering-backend change.
+
 ### Networking in the web build
 
 The RV64 guest has a virtio-net NIC (`virtio-mmio` at `0x10002000`, PLIC source 1) wired to a userspace
@@ -152,7 +187,7 @@ Guest UDP other than DNS is not forwarded, and the stock image has no TLS client
 **Tests** (also run in CI):
 ```sh
 make -C rve net-test        # virtio-net device, PLIC, network stack and native-host (real loopback sockets) tests (+ the Unix-socket pair test)
-make -C rve isas64          # includes rve's guest-driven virtio-net test (rv64mi-p-virtio-net)
+make -C rve isas64          # includes rve's guest-driven virtio-net and virtio-blk tests (rv64mi-p-virtio-{net,blk})
 node scripts/net_e2e.mjs          # boots the rv64 Linux image and checks DHCP, DNS, ping and wget (needs rve/assets/linux64/Image)
 node scripts/net_e2e.mjs --host   # same, on the machine's real network against local echo/HTTP servers (E2E_INTERNET=1 adds example.com and 8.8.8.8)
 ```
@@ -287,8 +322,79 @@ Outputs land in `rve/assets/linux64/`: `Image` (OpenSBI padded to 2 MiB + kernel
 | Configs | `configs/{buildroot,kernel,busybox,uclibc}_config` | `configs/rv64/{buildroot_defconfig,kernel_config,busybox.fragment}` |
 | Custom apps in `/root` | `hello_linux`, `pi`, `framebuff` (flat binaries) | the same three, built by `configs/rv64/post_build.sh` (static musl ELF) |
 
+### RV64 root disk (virtio-blk)
+
+The rv64 image can also attach a flat disk image as a `virtio-blk` device (`/dev/vda` in the guest),
+in addition to (not instead of) its initramfs. Boot with `-D <image>` (both `rve64 -n ... -D <image>`
+and the GUI build's `-D` flag), then from the busybox shell:
+
+```sh
+mount -t ext4 /dev/vda /mnt
+chroot /mnt /bin/sh   # or: switch_root, if the image has its own /init
+```
+
+`scripts/build_alpine_rootfs.sh [output.img] [size] [alpine-version] [packages...]` builds a
+ready-to-attach ext4 image containing a real (unmodified) Alpine Linux riscv64 rootfs, exported from
+a QEMU-emulated `docker run --platform=linux/riscv64 alpine` container, with the given `apk` packages
+installed — needs Docker with riscv64 emulation registered once via
+`docker run --privileged --rm tonistiigi/binfmt --install riscv64`. Requires the kernel's C extension
+support (`CONFIG_RISCV_ISA_C=y`, see below) since Alpine's prebuilt riscv64 packages are compiled
+rv64gc. Defaults to `labwc foot eudev seatd` (the graphical desktop stack, see below) — pass `""` for
+just the bare rootfs.
+
 The Docker base image is pinned to Ubuntu 24.04: newer releases ship GCC 15, which breaks the host tools this
 Buildroot version compiles.
+
+### RV64 graphical desktop (virtio-gpu + virtio-input + labwc)
+
+The rv64 guest has a real, small-footprint graphical desktop stack, not just a text console:
+
+| Device | MMIO base | PLIC source | Replaces / adds |
+|---|---|---|---|
+| `virtio-gpu` (2D only, no 3D/virgl) | `0x10003000` | 2 | the old fixed-RAM `simple-framebuffer` window |
+| `virtio-blk` (root disk) | `0x10004000` | 3 | — |
+| `virtio-input` (absolute pointer + 3 buttons) | `0x10005000` | 4 | new — `rve-kbd` still covers the keyboard |
+
+The guest kernel drives its display through the real Linux DRM stack (`CONFIG_DRM_VIRTIO_GPU`), not a
+bespoke framebuffer hack, so any DRM/KMS-aware compositor works — resolution, format and mode
+negotiation all go through the actual virtio-gpu protocol. There's no hardware cursor plane, so
+compositors fall back to a software-rendered cursor (this is automatic and expected, not an error).
+
+**Host display:** the "Framebuffer" panel in the debug UI always shows the current scanout. For a
+real, undecorated "this is the screen" window instead of a docked debug panel, use **Views → Guest
+Display (separate window)** in the menu bar — it tracks the guest's resolution and is where mouse
+input is captured (motion/clicks in that window drive `virtio-input`; the docked debug panel stays
+view-only).
+
+**Booting a graphical desktop (labwc, a minimal Wayland compositor):**
+```sh
+cd rve
+scripts/build_alpine_rootfs.sh                       # once: builds assets/alpine-rve.img with labwc+foot+eudev+seatd
+./build64/rve64 -r -b assets/linux64/Image -D assets/alpine-rve.img
+```
+Then from the busybox shell (bind-mounting `/dev` is required so the chroot can see the DRM/input
+device nodes; `/proc` and `/sys` are needed by udev and the compositor):
+```sh
+mount -t ext4 /dev/vda /mnt
+mount --bind /dev /mnt/dev && mount -t proc proc /mnt/proc && mount -t sysfs sysfs /mnt/sys
+chroot /mnt /bin/sh
+```
+Inside the chroot:
+```sh
+mkdir -p /tmp/xdg && chmod 700 /tmp/xdg && export XDG_RUNTIME_DIR=/tmp/xdg
+/sbin/udevd --daemon && udevadm trigger && udevadm settle   # populate udev so libinput/eudev see the devices
+seatd &                                                       # seat management (no logind needed)
+WLR_RENDERER=pixman labwc &                                   # force software rendering: this device is 2D-only
+WAYLAND_DISPLAY=wayland-0 foot &                               # a terminal, or any other Wayland client
+```
+`WLR_RENDERER=pixman` matters: wlroots' default renderer probes for a GBM/EGL (hardware) driver
+first, which isn't installed (and wouldn't help — this device has no 3D command support), so without
+the override it stalls. This is documented behavior on wlroots' own end, not an rve quirk.
+Verified end to end: real DRM modesetting, a real `seatd`-managed seat, Pixman software rendering,
+and the compositor visibly taking over the display (confirmed via screenshot — the boot console is
+replaced by the compositor's own rendered background). A connected client (`foot`) stays alive with
+no errors; its window wasn't confirmed visible in testing, which is flagged as a follow-up rather than
+a known bug in the device/compositor plumbing above.
 
 **Run Linux directly (downloads a pre-built image):**
 ```sh

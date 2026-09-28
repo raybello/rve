@@ -15,6 +15,7 @@
 
 // Std Library
 #include <string>
+#include <cstdint>
 // Dependencies
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
@@ -41,6 +42,7 @@ struct AppSettings
     bool show_cpu_state = true;
     bool show_disasm = true;
     bool show_profiler = false;         // Profiling metrics (ImPlot)
+    bool show_display_window = false;   // Dedicated undecorated guest-display window (native only)
 
     // Emulator settings
 };
@@ -68,10 +70,27 @@ class App
     Profiler profiler;
 #endif
 
-    // Framebuffer texture
+    // Framebuffer texture, backed by the guest's virtio-gpu scanout (rve/include/virtio_gpu.h).
+    // Sized to whatever the guest last negotiated; FB_W/FB_H are only the initial allocation,
+    // matching virtio-gpu's own default before any guest command changes the resolution.
     GLuint fb_texture_id = 0;
     static constexpr int FB_W = 850;
     static constexpr int FB_H = 478;
+    int fb_tex_w = FB_W, fb_tex_h = FB_H; // currently-allocated texture size
+    uint64_t last_gpu_frame_gen = 0;      // last VirtioGpu::frameGeneration() uploaded
+
+    // Dedicated undecorated guest-display window (M2 of the GUI-userspace plan): shows exactly
+    // the virtio-gpu scanout at native resolution, sharing the main GL context. Off by default,
+    // toggled from the "Views" menu. Native builds only -- not meaningful for Emscripten/wasm.
+#ifndef __EMSCRIPTEN__
+    SDL_Window *display_window = nullptr;
+    GLuint display_shader_program = 0;
+    GLuint display_vao = 0, display_vbo = 0;
+    int display_win_w = 0, display_win_h = 0;
+    void createDisplayWindow();
+    void destroyDisplayWindow();
+    void renderDisplayWindow();
+#endif
 
 public:
     App(/* args */);
