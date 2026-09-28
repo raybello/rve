@@ -2749,6 +2749,13 @@ inline __attribute__((always_inline)) void Emulator::emulateImpl()
     // virtio-gpu: same synchronous-completion reasoning as virtio-blk above.
     if (cpu.vgpu.active() && cpu.gpu_dirty)
         cpu.gpuTick();
+    // virtio-input: host mouse events arrive asynchronously (outside this loop) and already
+    // attempt delivery immediately via VirtioInput::tick(), but that doesn't update the PLIC/SEIP
+    // line -- only RV32::inputTick() does. Poll periodically too (like virtio-net's RX path),
+    // not just on input_dirty, so an injected event's interrupt is raised even if the guest
+    // happens not to touch the device's MMIO window right after.
+    if (cpu.vinput.active() && (cpu.input_dirty || (cpu.clock & 0x3FF) == 0))
+        cpu.inputTick();
     // UART: work only on the stdin poll tick or while a transmit / interrupt is in flight; idle it changes nothing.
     if (cpu.stdin_poll_due || cpu.uart.thr_pending || cpu.uart.thre_ip || cpu.uart.interrupting)
         cpu.uartTick();

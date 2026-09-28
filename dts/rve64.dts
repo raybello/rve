@@ -130,6 +130,14 @@
 			interrupt-parent = <&plic>;
 		};
 
+		/* virtio-input absolute pointer (PLIC source 4); rve-kbd below still covers the keyboard */
+		virtio_input: virtio@10005000 {
+			compatible = "virtio,mmio";
+			reg = <0x00 0x10005000 0x00 0x1000>;
+			interrupts = <0x04>;
+			interrupt-parent = <&plic>;
+		};
+
 		keyboard@10001000 {
 			compatible = "rve-kbd";
 			reg = <0x00 0x10001000 0x00 0x10>;

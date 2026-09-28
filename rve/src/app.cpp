@@ -705,6 +705,36 @@ void App::handleEvents()
                     emu.cpu.kbdPush(lk, window_event.type == SDL_KEYUP);
             }
         }
+#ifndef __EMSCRIPTEN__
+        // Pointer input targets the dedicated guest-display window only (its coordinates map
+        // directly onto the guest's virtio-gpu resolution); the ImGui-docked "Framebuffer" panel
+        // stays view-only -- mapping a click through ImGui's own layout/scroll/docking state to a
+        // guest-relative position is real added complexity this milestone doesn't need to take on.
+        if (display_window)
+        {
+            if (window_event.type == SDL_MOUSEMOTION && window_event.motion.windowID == SDL_GetWindowID(display_window) &&
+                display_win_w > 0 && display_win_h > 0)
+            {
+                int mx = window_event.motion.x, my = window_event.motion.y;
+                if (mx < 0) mx = 0; if (mx >= display_win_w) mx = display_win_w - 1;
+                if (my < 0) my = 0; if (my >= display_win_h) my = display_win_h - 1;
+                uint16_t nx = (uint16_t)((int64_t)mx * RVE_ABS_MAX / display_win_w);
+                uint16_t ny = (uint16_t)((int64_t)my * RVE_ABS_MAX / display_win_h);
+                emu.cpu.vinput.pushAbsMotion(nx, ny);
+            }
+            else if ((window_event.type == SDL_MOUSEBUTTONDOWN || window_event.type == SDL_MOUSEBUTTONUP) &&
+                     window_event.button.windowID == SDL_GetWindowID(display_window))
+            {
+                bool down = window_event.type == SDL_MOUSEBUTTONDOWN;
+                uint16_t code = window_event.button.button == SDL_BUTTON_LEFT   ? RVE_BTN_LEFT
+                              : window_event.button.button == SDL_BUTTON_RIGHT  ? RVE_BTN_RIGHT
+                              : window_event.button.button == SDL_BUTTON_MIDDLE ? RVE_BTN_MIDDLE
+                                                                                 : 0;
+                if (code)
+                    emu.cpu.vinput.pushButton(code, down);
+            }
+        }
+#endif
     }
     if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED)
     {
