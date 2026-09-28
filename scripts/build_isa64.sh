@@ -1,9 +1,13 @@
 #!/bin/sh
 # Build the rv64 {ui,um,ua,uf,ud} ISA tests out-of-tree.
-# Usage: scripts/build_isa64.sh [output_dir] [--virtual]
-#   default    builds the physical (-p-) tests  -> rve/assets/isa-test-rv64
-#   --virtual  builds the Sv39 virtual-memory (-v-) variants instead
-#   --custom   builds rve's own directed tests (rve/tests/rv64/*.S) instead
+# Usage: scripts/build_isa64.sh [output_dir] [--virtual|--custom|--compressed]
+#   default       builds the physical (-p-) tests  -> rve/assets/isa-test-rv64
+#   --virtual     builds the Sv39 virtual-memory (-v-) variants instead
+#   --custom      builds rve's own directed tests (rve/tests/rv64/*.S) instead
+#   --compressed  builds the rv64uc (C extension) tests plus rve's own directed compressed-
+#                 extension tests (rve/tests/rv64c/*.S) -> rve/assets/isa-test-rv64c
+#                 (built with -march=rv64gc; every other mode stays on rv64g so those
+#                 corpora are guaranteed compressed-instruction-free)
 set -e
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 OUT=${1:-$ROOT/rve/assets/isa-test-rv64}
@@ -19,6 +23,24 @@ if [ "$2" = "--custom" ]; then
   for f in "$ROOT"/rve/tests/rv64/*.S; do
     n=$(basename "$f" .S)
     ${RISCV_PREFIX}gcc $COMMON -I"$T/env/p" -I"$T/isa/macros/scalar" \
+      -T"$T/env/p/link.ld" "$f" -o "$OUT/${n%%-*}-p-${n#*-}"
+  done
+  echo "built $(ls "$OUT" | wc -l) tests in $OUT"
+  exit 0
+fi
+if [ "$2" = "--compressed" ]; then
+  COMPRESSED_COMMON="-march=rv64gc -mabi=lp64 -static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles"
+  for f in "$T"/isa/rv64uc/*.S; do
+    n=$(basename "$f" .S)
+    ${RISCV_PREFIX}gcc $COMPRESSED_COMMON -I"$T/env/p" -I"$T/isa/macros/scalar" \
+      -T"$T/env/p/link.ld" "$f" -o "$OUT/rv64uc-p-$n"
+  done
+  # rve's own directed compressed-extension tests (e.g. compressed FP load/store, which the
+  # upstream rvc.S corpus above doesn't cover) -- these need -march=rv64gc too, unlike the plain
+  # --custom tests below which are deliberately kept compressed-instruction-free.
+  for f in "$ROOT"/rve/tests/rv64c/*.S; do
+    n=$(basename "$f" .S)
+    ${RISCV_PREFIX}gcc $COMPRESSED_COMMON -I"$T/env/p" -I"$T/isa/macros/scalar" \
       -T"$T/env/p/link.ld" "$f" -o "$OUT/${n%%-*}-p-${n#*-}"
   done
   echo "built $(ls "$OUT" | wc -l) tests in $OUT"

@@ -32,6 +32,9 @@ isas64:
 isas64-v:
 	make -C rve isas64-v
 
+isas64c:
+	make -C rve isas64c
+
 isas-all:
 	make -C rve isas-all
 
@@ -39,6 +42,7 @@ isa-tests64:
 	scripts/build_isa64.sh
 	scripts/build_isa64.sh rve/assets/isa-test-rv64-v --virtual
 	scripts/build_isa64.sh rve/assets/isa-test-rv64-rve --custom
+	scripts/build_isa64.sh rve/assets/isa-test-rv64c --compressed
 
 linux:
 	make -C rve linux

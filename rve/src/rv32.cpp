@@ -87,7 +87,13 @@ void RV32::initCSRs()
         csr.data[i] = 0;
     }
     // A(0) D(3) F(5) I(8) M(12) S(18) U(20); MXL in the top two bits
+#if XLEN == 64
+    // RV64 additionally advertises C(2): the fetch path in emulateImpl() decodes and expands
+    // compressed instructions before they reach insSelect()/fastDecode().
+    csr.data[CSR_MISA] = ((xlen_t)MISA_MXL << (XLEN - 2)) | 0x0014112Du;
+#else
     csr.data[CSR_MISA] = ((xlen_t)MISA_MXL << (XLEN - 2)) | 0x00141129u;
+#endif
 }
 
 void RV32::dump()
@@ -112,11 +118,11 @@ void RV32::tick()
     // emulate(cpu);
 }
 
-ins_ret RV32::insReturnNoop()
+ins_ret RV32::insReturnNoop(u32 ins_len)
 {
     ins_ret ret;
     memset(&ret, 0, sizeof(ins_ret));
-    ret.pc_val = pc + 4;
+    ret.pc_val = pc + ins_len;
     return ret;
 }
 
@@ -750,6 +756,20 @@ u32 RV32::peekWord(xlen_t addr)
         return 0;
     }
     return memGetWordSlow(addr);
+}
+
+// Uncounted half-word read, used by RV64's compressed-instruction fetch path.
+// Same result as memGetHalfWord(); it just isn't a guest data access.
+u32 RV32::peekHalfWord(xlen_t addr)
+{
+    if (addr >= 0x80000000u)
+    {
+        xlen_t phys = addr - 0x80000000u;
+        if (phys <= (xlen_t)(RV32_MEM_SIZE - 2))
+            return loadLE16(mem + phys);
+        return 0;
+    }
+    return memGetByteRaw(addr) | ((u32)memGetByteRaw(addr + 1) << 8);
 }
 
 u64 RV32::peekDword(xlen_t addr)

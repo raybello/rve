@@ -170,6 +170,8 @@ ISA_RV64_DIR = $(ASSETS_DIR)/isa-test-rv64
 ISA_RV64_RVE_DIR = $(ASSETS_DIR)/isa-test-rv64-rve
 # Sv39 virtual-memory (-v-) variants of the rv64 tests
 ISA_RV64_V_DIR = $(ASSETS_DIR)/isa-test-rv64-v
+# RVC (compressed extension) corner-case test, see scripts/build_isa64.sh --compressed
+ISA_RV64_C_DIR = $(ASSETS_DIR)/isa-test-rv64c
 
 isas32:
 	$(MAKE) XLEN=32 all
@@ -184,13 +186,18 @@ isas64-v:
 	$(MAKE) XLEN=64 all
 	../scripts/run_isa.sh build64/rve64 $(ISA_RV64_V_DIR)
 
+isas64c:
+	$(MAKE) XLEN=64 all
+	../scripts/run_isa.sh build64/rve64 $(ISA_RV64_C_DIR)
+
 isas: isas32
 
-# Serialized on purpose: isas64 and isas64-v share build64/ and MAKEFLAGS enables -j
+# Serialized on purpose: isas64/isas64-v/isas64c share build64/ and MAKEFLAGS enables -j
 isas-all:
 	$(MAKE) -j1 isas32
 	$(MAKE) -j1 isas64
 	$(MAKE) -j1 isas64-v
+	$(MAKE) -j1 isas64c
 
 linux-clean:
 	@echo ============ Cleaning Linux Test ============

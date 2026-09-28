@@ -144,7 +144,9 @@ public:
     void serviceExternalIrq();
     bool handleSyscon();
     void pollTohost();
-    ins_ret insSelect(u32 ins_word);
+    // ins_len: 4 for a native instruction, 2 when ins_word is a compressed instruction that was
+    // already expanded to its full 32-bit equivalent by the RV64 fetch path (see emulateImpl()).
+    ins_ret insSelect(u32 ins_word, u32 ins_len = 4);
     bool fastDecode(u32 ins_word, ins_ret &ret); // hottest instructions, inline in emulateImpl()
 
     // File utilities

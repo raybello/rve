@@ -30,9 +30,11 @@ jobs:
           scripts/build_isa64.sh /tmp/isa-rv64
           scripts/build_isa64.sh /tmp/isa-rv64-v --virtual
           scripts/build_isa64.sh /tmp/isa-rv64-rve --custom
+          scripts/build_isa64.sh /tmp/isa-rv64c --compressed
 
       - name: Run the fresh binaries
         run: |
           scripts/run_isa.sh rve/build64/rve64 /tmp/isa-rv64
           scripts/run_isa.sh rve/build64/rve64 /tmp/isa-rv64-v
           scripts/run_isa.sh rve/build64/rve64 /tmp/isa-rv64-rve
+          scripts/run_isa.sh rve/build64/rve64 /tmp/isa-rv64c

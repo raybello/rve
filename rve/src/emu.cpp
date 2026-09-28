@@ -572,11 +572,13 @@ imp(fence_i, FormatEmpty, {
     // skip
 })
 imp(jal, FormatJ, { // rv32i
-    WR_RD(cpu.pc + 4);
+    // ret->pc_val is still the sequential-next-pc default here (pc+4, or pc+2 when this is an
+    // expanded RV64 compressed instruction) -- WR_PC below overwrites it with the jump target.
+    WR_RD(ret->pc_val);
     WR_PC(cpu.pc + ins.imm);
 })
 imp(jalr, FormatI, { // rv32i
-    WR_RD(cpu.pc + 4);
+    WR_RD(ret->pc_val);
     WR_PC((cpu.xreg[ins.rs1] + ins.imm) & ~(xlen_t)1);
 })
 imp(lb, FormatI, { // rv32i
@@ -1414,10 +1416,279 @@ imp(fmv_d_x, FormatR, { // rv64d: freg[rd] = xreg[rs1] bits
 })
 #endif
 
-    ins_ret Emulator::insSelect(u32 ins_word)
+#if XLEN == 64
+// RV64 compressed (C) extension: expands a 16-bit RVC instruction into the exact bit pattern of
+// its standard 32-bit equivalent, so the result flows unchanged into fastDecode()/insSelect() --
+// no separate execution path, no separate trap/CSR/FP-dirty handling. Reserved or unimplemented
+// (RV32C-only) encodings return ILLEGAL_32 (opcode 0, not a defined base opcode), which falls
+// through insSelect()'s decode switch into its existing illegal-instruction path.
+namespace {
+
+constexpr u32 OP_LOAD      = 0x03;
+constexpr u32 OP_LOAD_FP   = 0x07;
+constexpr u32 OP_OP_IMM    = 0x13;
+constexpr u32 OP_OP_IMM_32 = 0x1b;
+constexpr u32 OP_STORE     = 0x23;
+constexpr u32 OP_STORE_FP  = 0x27;
+constexpr u32 OP_OP        = 0x33;
+constexpr u32 OP_LUI       = 0x37;
+constexpr u32 OP_OP_32     = 0x3b;
+constexpr u32 OP_BRANCH    = 0x63;
+constexpr u32 OP_JALR      = 0x67;
+constexpr u32 OP_JAL       = 0x6f;
+constexpr u32 ILLEGAL_32   = 0;
+
+inline u32 encR(u32 op, u32 rd, u32 f3, u32 rs1, u32 rs2, u32 f7)
+{
+    return (op & 0x7f) | ((rd & 0x1f) << 7) | ((f3 & 0x7) << 12) | ((rs1 & 0x1f) << 15) |
+           ((rs2 & 0x1f) << 20) | ((f7 & 0x7f) << 25);
+}
+inline u32 encI(u32 op, u32 rd, u32 f3, u32 rs1, u32 imm12)
+{
+    return (op & 0x7f) | ((rd & 0x1f) << 7) | ((f3 & 0x7) << 12) | ((rs1 & 0x1f) << 15) | ((imm12 & 0xfff) << 20);
+}
+inline u32 encS(u32 op, u32 f3, u32 rs1, u32 rs2, u32 imm12)
+{
+    u32 imm = imm12 & 0xfff;
+    return (op & 0x7f) | ((imm & 0x1f) << 7) | ((f3 & 0x7) << 12) | ((rs1 & 0x1f) << 15) |
+           ((rs2 & 0x1f) << 20) | (((imm >> 5) & 0x7f) << 25);
+}
+inline u32 encU(u32 op, u32 rd, u32 imm_hi20_value) // caller passes the full value; low 12 bits are ignored
+{
+    return (op & 0x7f) | ((rd & 0x1f) << 7) | (imm_hi20_value & 0xfffff000u);
+}
+inline u32 encJ(u32 op, u32 rd, s32 imm) // imm: signed byte offset, even
+{
+    u32 v = (u32)imm;
+    return (op & 0x7f) | ((rd & 0x1f) << 7) | (v & 0xff000u) |
+           (((v >> 11) & 0x1) << 20) | (((v >> 1) & 0x3ff) << 21) | (((v >> 20) & 0x1) << 31);
+}
+inline u32 encB(u32 op, u32 f3, u32 rs1, u32 rs2, s32 imm) // imm: signed byte offset, even
+{
+    u32 v = (u32)imm;
+    return (op & 0x7f) | (((v >> 11) & 0x1) << 7) | (((v >> 1) & 0xf) << 8) | ((f3 & 0x7) << 12) |
+           ((rs1 & 0x1f) << 15) | ((rs2 & 0x1f) << 20) | (((v >> 5) & 0x3f) << 25) | (((v >> 12) & 0x1) << 31);
+}
+inline s32 sext(u32 value, u32 bits) // sign-extend the low `bits` bits of `value`
+{
+    u32 shift = 32 - bits;
+    return (s32)(value << shift) >> shift;
+}
+
+} // namespace
+
+static u32 decodeCompressed(u16 ci)
+{
+    u32 quadrant = ci & 0x3;
+    u32 funct3 = (ci >> 13) & 0x7;
+
+    if (quadrant == 0x0) // Quadrant 0: stack/register-relative loads and stores (rd'/rs1' = x8-x15)
+    {
+        u32 rd_ = 8 + ((ci >> 2) & 0x7);
+        u32 rs1_ = 8 + ((ci >> 7) & 0x7);
+        switch (funct3)
+        {
+        case 0x0: // C.ADDI4SPN
+        {
+            u32 imm = (((ci >> 7) & 0xf) << 6) | (((ci >> 11) & 0x3) << 4) | (((ci >> 5) & 0x1) << 3) | (((ci >> 6) & 0x1) << 2);
+            if (imm == 0) return ILLEGAL_32; // reserved
+            return encI(OP_OP_IMM, rd_, 0, 2, imm);
+        }
+        case 0x1: // C.FLD
+        {
+            u32 off = (((ci >> 5) & 0x3) << 6) | (((ci >> 10) & 0x7) << 3);
+            return encI(OP_LOAD_FP, rd_, 3, rs1_, off);
+        }
+        case 0x2: // C.LW
+        {
+            u32 off = (((ci >> 5) & 0x1) << 6) | (((ci >> 10) & 0x7) << 3) | (((ci >> 6) & 0x1) << 2);
+            return encI(OP_LOAD, rd_, 2, rs1_, off);
+        }
+        case 0x3: // C.LD
+        {
+            u32 off = (((ci >> 5) & 0x3) << 6) | (((ci >> 10) & 0x7) << 3);
+            return encI(OP_LOAD, rd_, 3, rs1_, off);
+        }
+        case 0x5: // C.FSD
+        {
+            u32 off = (((ci >> 5) & 0x3) << 6) | (((ci >> 10) & 0x7) << 3);
+            return encS(OP_STORE_FP, 3, rs1_, rd_, off); // rd_ here is rs2'
+        }
+        case 0x6: // C.SW
+        {
+            u32 off = (((ci >> 5) & 0x1) << 6) | (((ci >> 10) & 0x7) << 3) | (((ci >> 6) & 0x1) << 2);
+            return encS(OP_STORE, 2, rs1_, rd_, off);
+        }
+        case 0x7: // C.SD
+        {
+            u32 off = (((ci >> 5) & 0x3) << 6) | (((ci >> 10) & 0x7) << 3);
+            return encS(OP_STORE, 3, rs1_, rd_, off);
+        }
+        default: return ILLEGAL_32; // funct3 == 4 is reserved
+        }
+    }
+    else if (quadrant == 0x1) // Quadrant 1: immediate ALU ops, LUI, branches, jumps
+    {
+        u32 rd = (ci >> 7) & 0x1f;
+        switch (funct3)
+        {
+        case 0x0: // C.ADDI / C.NOP (rd==0)
+        {
+            s32 imm = sext((((ci >> 12) & 0x1) << 5) | ((ci >> 2) & 0x1f), 6);
+            return encI(OP_OP_IMM, rd, 0, rd, (u32)imm);
+        }
+        case 0x1: // C.ADDIW
+        {
+            s32 imm = sext((((ci >> 12) & 0x1) << 5) | ((ci >> 2) & 0x1f), 6);
+            return encI(OP_OP_IMM_32, rd, 0, rd, (u32)imm);
+        }
+        case 0x2: // C.LI
+        {
+            s32 imm = sext((((ci >> 12) & 0x1) << 5) | ((ci >> 2) & 0x1f), 6);
+            return encI(OP_OP_IMM, rd, 0, 0, (u32)imm);
+        }
+        case 0x3: // C.ADDI16SP (rd==2) / C.LUI (rd!=0,2)
+        {
+            if (rd == 2)
+            {
+                s32 imm = sext((((ci >> 12) & 0x1) << 9) | (((ci >> 3) & 0x3) << 7) | (((ci >> 5) & 0x1) << 6) |
+                               (((ci >> 2) & 0x1) << 5) | (((ci >> 6) & 0x1) << 4), 10);
+                if (imm == 0) return ILLEGAL_32; // reserved
+                return encI(OP_OP_IMM, 2, 0, 2, (u32)imm);
+            }
+            if (rd == 0) return ILLEGAL_32; // reserved
+            u32 sign = (ci >> 12) & 0x1;
+            u32 field = (ci >> 2) & 0x1f;
+            if (sign == 0 && field == 0) return ILLEGAL_32; // reserved (nzimm==0)
+            // value's bit17 = sign; bits[31:18] sign-extend above it; bits[16:12] = field
+            u32 value = (sign ? 0xfffc0000u : 0u) | (sign << 17) | (field << 12);
+            return encU(OP_LUI, rd, value);
+        }
+        case 0x4: // MISC-ALU: C.SRLI/C.SRAI/C.ANDI/C.SUB/C.XOR/C.OR/C.AND/C.SUBW/C.ADDW
+        {
+            u32 rd_ = 8 + ((ci >> 7) & 0x7);
+            u32 rs2_ = 8 + ((ci >> 2) & 0x7);
+            u32 f2 = (ci >> 10) & 0x3;
+            if (f2 == 0x0) // C.SRLI (6-bit shamt)
+            {
+                u32 shamt = (((ci >> 12) & 0x1) << 5) | ((ci >> 2) & 0x1f);
+                return encI(OP_OP_IMM, rd_, 5, rd_, shamt);
+            }
+            if (f2 == 0x1) // C.SRAI
+            {
+                u32 shamt = (((ci >> 12) & 0x1) << 5) | ((ci >> 2) & 0x1f);
+                return encI(OP_OP_IMM, rd_, 5, rd_, shamt | 0x400);
+            }
+            if (f2 == 0x2) // C.ANDI
+            {
+                s32 imm = sext((((ci >> 12) & 0x1) << 5) | ((ci >> 2) & 0x1f), 6);
+                return encI(OP_OP_IMM, rd_, 7, rd_, (u32)imm);
+            }
+            // f2 == 0x3: register-register group, selected by bit 12 and bits[6:5]
+            u32 sub = (ci >> 5) & 0x3;
+            if (((ci >> 12) & 0x1) == 0)
+            {
+                switch (sub)
+                {
+                case 0x0: return encR(OP_OP, rd_, 0, rd_, rs2_, 0x20); // C.SUB
+                case 0x1: return encR(OP_OP, rd_, 4, rd_, rs2_, 0x00); // C.XOR
+                case 0x2: return encR(OP_OP, rd_, 6, rd_, rs2_, 0x00); // C.OR
+                default:  return encR(OP_OP, rd_, 7, rd_, rs2_, 0x00); // C.AND
+                }
+            }
+            if (sub == 0x0) return encR(OP_OP_32, rd_, 0, rd_, rs2_, 0x20); // C.SUBW
+            if (sub == 0x1) return encR(OP_OP_32, rd_, 0, rd_, rs2_, 0x00); // C.ADDW
+            return ILLEGAL_32; // sub 2,3 reserved
+        }
+        case 0x5: // C.J
+        {
+            s32 off = sext((((ci >> 12) & 0x1) << 11) | (((ci >> 8) & 0x1) << 10) | (((ci >> 9) & 0x3) << 8) |
+                           (((ci >> 6) & 0x1) << 7) | (((ci >> 7) & 0x1) << 6) | (((ci >> 2) & 0x1) << 5) |
+                           (((ci >> 11) & 0x1) << 4) | (((ci >> 3) & 0x7) << 1), 12);
+            return encJ(OP_JAL, 0, off);
+        }
+        case 0x6: // C.BEQZ
+        case 0x7: // C.BNEZ
+        {
+            u32 rs1_ = 8 + ((ci >> 7) & 0x7);
+            s32 off = sext((((ci >> 12) & 0x1) << 8) | (((ci >> 5) & 0x3) << 6) | (((ci >> 2) & 0x1) << 5) |
+                           (((ci >> 10) & 0x3) << 3) | (((ci >> 3) & 0x3) << 1), 9);
+            return encB(OP_BRANCH, funct3 == 0x6 ? 0 : 1, rs1_, 0, off);
+        }
+        default: return ILLEGAL_32;
+        }
+    }
+    else // Quadrant 2 (op==0b10): SP-relative loads/stores, shifts, jumps/moves
+    {
+        u32 rdrs1 = (ci >> 7) & 0x1f;
+        u32 rs2 = (ci >> 2) & 0x1f;
+        switch (funct3)
+        {
+        case 0x0: // C.SLLI (6-bit shamt)
+        {
+            u32 shamt = (((ci >> 12) & 0x1) << 5) | ((ci >> 2) & 0x1f);
+            return encI(OP_OP_IMM, rdrs1, 1, rdrs1, shamt);
+        }
+        case 0x1: // C.FLDSP
+        {
+            u32 off = (((ci >> 2) & 0x7) << 6) | (((ci >> 12) & 0x1) << 5) | (((ci >> 5) & 0x3) << 3);
+            return encI(OP_LOAD_FP, rdrs1, 3, 2, off);
+        }
+        case 0x2: // C.LWSP
+        {
+            if (rdrs1 == 0) return ILLEGAL_32; // reserved
+            u32 off = (((ci >> 2) & 0x3) << 6) | (((ci >> 12) & 0x1) << 5) | (((ci >> 4) & 0x7) << 2);
+            return encI(OP_LOAD, rdrs1, 2, 2, off);
+        }
+        case 0x3: // C.LDSP
+        {
+            if (rdrs1 == 0) return ILLEGAL_32; // reserved
+            u32 off = (((ci >> 2) & 0x7) << 6) | (((ci >> 12) & 0x1) << 5) | (((ci >> 5) & 0x3) << 3);
+            return encI(OP_LOAD, rdrs1, 3, 2, off);
+        }
+        case 0x4: // C.JR / C.MV / C.EBREAK / C.JALR / C.ADD
+        {
+            if (((ci >> 12) & 0x1) == 0)
+            {
+                if (rs2 == 0)
+                {
+                    if (rdrs1 == 0) return ILLEGAL_32; // reserved
+                    return encI(OP_JALR, 0, 0, rdrs1, 0); // C.JR
+                }
+                return encR(OP_OP, rdrs1, 0, 0, rs2, 0); // C.MV: rd=rdrs1, x0+rs2
+            }
+            if (rs2 == 0)
+            {
+                if (rdrs1 == 0) return 0x00100073u; // C.EBREAK
+                return encI(OP_JALR, 1, 0, rdrs1, 0); // C.JALR
+            }
+            return encR(OP_OP, rdrs1, 0, rdrs1, rs2, 0); // C.ADD
+        }
+        case 0x5: // C.FSDSP
+        {
+            u32 off = (((ci >> 7) & 0x7) << 6) | (((ci >> 10) & 0x7) << 3);
+            return encS(OP_STORE_FP, 3, 2, rs2, off);
+        }
+        case 0x6: // C.SWSP
+        {
+            u32 off = (((ci >> 9) & 0xf) << 2) | (((ci >> 7) & 0x3) << 6);
+            return encS(OP_STORE, 2, 2, rs2, off);
+        }
+        case 0x7: // C.SDSP
+        {
+            u32 off = (((ci >> 7) & 0x7) << 6) | (((ci >> 10) & 0x7) << 3);
+            return encS(OP_STORE, 3, 2, rs2, off);
+        }
+        default: return ILLEGAL_32;
+        }
+    }
+}
+#endif // XLEN == 64
+
+    ins_ret Emulator::insSelect(u32 ins_word, u32 ins_len)
 {
     u32 ins_masked;
-    ins_ret ret = cpu.insReturnNoop();
+    ins_ret ret = cpu.insReturnNoop(ins_len);
 
     // Operand fields are extracted only by the handler's own format (the run() cases name one of these)
 #define ins_FormatR parse_FormatR(ins_word)
@@ -2348,28 +2619,46 @@ inline __attribute__((always_inline)) void Emulator::emulateImpl()
     PROF_SAMPLE_BEGIN()
 
     u32 ins_word = 0;
-    ins_ret ret = cpu.insReturnNoop();
+    u32 ins_len = 4;
+    ins_ret ret = cpu.insReturnNoop(4);
 
-    if ((cpu.pc & 0x3) == 0)
+#if XLEN == 64
+    if ((cpu.pc & 0x1) == 0)
     {
-        // Fetch through MMU
+        // Fetch through MMU. A compressed (RVC) instruction is 2 bytes; a native 4-byte
+        // instruction's low and high halves are translated independently since they can
+        // straddle a page boundary when RVC is in use.
         xlen_t phys_pc = cpu.mmuTranslate(&ret, cpu.pc, MMU_ACCESS_FETCH);
         if (!ret.trap.en)
         {
-            ins_word = cpu.peekWord(phys_pc); // fetches are derived from the class counts, not counted as data reads
+            u32 lo = cpu.peekHalfWord(phys_pc);
+            if ((lo & 0x3) == 0x3)
+            {
+                xlen_t phys_hi = cpu.mmuTranslate(&ret, cpu.pc + 2, MMU_ACCESS_FETCH);
+                if (!ret.trap.en)
+                    ins_word = lo | ((u32)cpu.peekHalfWord(phys_hi) << 16);
+            }
+            else
+            {
+                ins_len = 2;
+                ins_word = decodeCompressed((u16)lo);
+            }
+        }
+
+        if (!ret.trap.en)
+        {
+            ret.pc_val = cpu.pc + ins_len; // fastDecode() uses this ret directly; insSelect() sets its own via ins_len
             PROF_STAGE(PSTAGE_FETCH)
             if (debugMode || !fastDecode(ins_word, ret)) // -T trace output is produced by insSelect()'s run() macro
-                ret = insSelect(ins_word);
+                ret = insSelect(ins_word, ins_len);
             PROF_INC(cpu.prof.insns[prof_classify(ins_word)]);
 
-#if XLEN == 64
             // Any FP register write makes mstatus.FS Dirty so the OS saves FP state on switch
             {
                 u32 op = ins_word & 0x7f;
                 if (!ret.trap.en && (op == 0x07 || op == 0x43 || op == 0x47 || op == 0x4b || op == 0x4f || op == 0x53))
                     cpu.fpStateDirty();
             }
-#endif
 
             if (ret.csr_write && !ret.trap.en)
                 cpu.setCsr(ret.csr_write, ret.csr_val, &ret);
@@ -2390,6 +2679,39 @@ inline __attribute__((always_inline)) void Emulator::emulateImpl()
         ret.trap.type  = trap_InstructionAddressMisaligned;
         ret.trap.value = cpu.pc;
     }
+#else
+    if ((cpu.pc & 0x3) == 0)
+    {
+        // Fetch through MMU
+        xlen_t phys_pc = cpu.mmuTranslate(&ret, cpu.pc, MMU_ACCESS_FETCH);
+        if (!ret.trap.en)
+        {
+            ins_word = cpu.peekWord(phys_pc); // fetches are derived from the class counts, not counted as data reads
+            PROF_STAGE(PSTAGE_FETCH)
+            if (debugMode || !fastDecode(ins_word, ret)) // -T trace output is produced by insSelect()'s run() macro
+                ret = insSelect(ins_word, ins_len);
+            PROF_INC(cpu.prof.insns[prof_classify(ins_word)]);
+
+            if (ret.csr_write && !ret.trap.en)
+                cpu.setCsr(ret.csr_write, ret.csr_val, &ret);
+
+            if (!ret.trap.en && ret.write_reg < 32 && ret.write_reg > 0)
+                cpu.xreg[ret.write_reg] = ret.write_val;
+        }
+        else
+        {
+            PROF_INC(cpu.prof.fetch_faults);
+            PROF_STAGE(PSTAGE_FETCH)
+        }
+    }
+    else
+    {
+        PROF_INC(cpu.prof.fetch_faults);
+        ret.trap.en    = true;
+        ret.trap.type  = trap_InstructionAddressMisaligned;
+        ret.trap.value = cpu.pc;
+    }
+#endif
 
     PROF_STAGE(PSTAGE_EXEC)
 
