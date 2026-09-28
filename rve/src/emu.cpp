@@ -2746,6 +2746,9 @@ inline __attribute__((always_inline)) void Emulator::emulateImpl()
     // needs to re-run when a guest access might have changed the IRQ/PLIC state -- no polling.
     if (cpu.vblk.active() && cpu.blk_dirty)
         cpu.blkTick();
+    // virtio-gpu: same synchronous-completion reasoning as virtio-blk above.
+    if (cpu.vgpu.active() && cpu.gpu_dirty)
+        cpu.gpuTick();
     // UART: work only on the stdin poll tick or while a transmit / interrupt is in flight; idle it changes nothing.
     if (cpu.stdin_poll_due || cpu.uart.thr_pending || cpu.uart.thre_ip || cpu.uart.interrupting)
         cpu.uartTick();
