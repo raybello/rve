@@ -1,5 +1,20 @@
 # Changelog
 
+## [v2026.09.28] - 2026-09-28
+
+- Merge pull request #20 from raybello/rvc-decode
+- Merge pull request #18 from raybello/gui-userspace
+- rv64: M5 - WebGPU host-rendering evaluation (docs only)
+- rv64: M4 - boot labwc on Alpine, software-rendered
+- rv64: M3 - virtio-input absolute pointer
+- rv64: M2 - virtio-gpu 2D display + dedicated host window
+- Merge pull request #17 from raybello/virtio-blk
+- Merge pull request #16 from raybello/rvc-decode
+- rv64: add a virtio-blk root disk, boot Alpine over it
+- rv64c: add test coverage for compressed FP load/store
+- rv64: implement the C (compressed) extension
+
+
 ## [v2026.09.26.2] - 2026-09-26
 
 - Merge pull request #15 from raybello/framebuff-all
