@@ -528,6 +528,8 @@ void RV32::setNetBackend(NetBackend *be)
     };
     vnet.init(gm, be ? be : &null_backend);
     vblk.init(gm); // same guest-RAM access lambda; virtio-blk DMA never touches anything else
+    vgpu.init(gm); // ditto for virtio-gpu
+    vinput.init(gm); // ditto for virtio-input
 }
 
 __attribute__((noinline)) void RV32::netTick()
@@ -569,10 +571,50 @@ __attribute__((noinline)) void RV32::blkTick()
     }
 }
 
+__attribute__((noinline)) void RV32::gpuTick()
+{
+    if (!vgpu.active()) return;
+    gpu_dirty = false;
+    plic.setLevel(VIRTIO_GPU_IRQ, vgpu.irqLevel());
+    bool active = plic.ctxActive(1);
+    xlen_t mip = readCsrRaw(CSR_MIP);
+    if (active && !(mip & MIP_SEIP))
+    {
+        writeCsrRaw(CSR_MIP, mip | MIP_SEIP);
+        plic_seip = true;
+    }
+    else if (!active && plic_seip)
+    {
+        writeCsrRaw(CSR_MIP, mip & ~(xlen_t)MIP_SEIP);
+        plic_seip = false;
+    }
+}
+
+__attribute__((noinline)) void RV32::inputTick()
+{
+    if (!vinput.active()) return;
+    input_dirty = false;
+    plic.setLevel(VIRTIO_INPUT_IRQ, vinput.irqLevel());
+    bool active = plic.ctxActive(1);
+    xlen_t mip = readCsrRaw(CSR_MIP);
+    if (active && !(mip & MIP_SEIP))
+    {
+        writeCsrRaw(CSR_MIP, mip | MIP_SEIP);
+        plic_seip = true;
+    }
+    else if (!active && plic_seip)
+    {
+        writeCsrRaw(CSR_MIP, mip & ~(xlen_t)MIP_SEIP);
+        plic_seip = false;
+    }
+}
+
 // Word-granular MMIO for the PLIC and the virtio device windows (claim reads have side effects,
 // so these must not be composed from byte accesses).
 static inline bool inVirtio(xlen_t a) { return a >= VIRTIO_NET_BASE && a < VIRTIO_NET_BASE + VIRTIO_NET_SIZE; }
 static inline bool inVirtioBlk(xlen_t a) { return a >= VIRTIO_BLK_BASE && a < VIRTIO_BLK_BASE + VIRTIO_BLK_SIZE; }
+static inline bool inVirtioGpu(xlen_t a) { return a >= VIRTIO_GPU_BASE && a < VIRTIO_GPU_BASE + VIRTIO_GPU_SIZE; }
+static inline bool inVirtioInput(xlen_t a) { return a >= VIRTIO_INPUT_BASE && a < VIRTIO_INPUT_BASE + VIRTIO_INPUT_SIZE; }
 static inline bool inPlic(xlen_t a) { return a >= PLIC_BASE && a < PLIC_BASE + PLIC_SIZE; }
 
 // Guest RAM is little-endian. On a little-endian host a memcpy compiles to a single (unaligned) load/store;
@@ -599,6 +641,8 @@ static inline u8 profRegion(xlen_t a)
     if (a >= 0x10001000u && a < 0x10002000u) return PREG_KBD;
     if (inVirtio(a)) return PREG_VIRTIO;
     if (inVirtioBlk(a)) return PREG_VIRTIO;
+    if (inVirtioGpu(a)) return PREG_VIRTIO;
+    if (inVirtioInput(a)) return PREG_VIRTIO;
     if (inPlic(a)) return PREG_PLIC;
     if (a >= RTC_MMIO_BASE && a < RTC_MMIO_BASE + RTC_MMIO_SIZE) return PREG_RTC;
     if ((a >= 0x02000000u && a < 0x02010000u) || (a >= 0x11000000u && a < 0x11000004u) ||
@@ -652,9 +696,17 @@ u32 RV32::memGetByteRaw(xlen_t addr)
         if (addr >= 0x11001000u && addr < 0x11002000u)
             return net.netrx[addr - 0x11001000u];
 
-        // virtio-net config/regs: sub-word reads are extracted from the aligned word (no side effects)
+        // virtio device config/regs: sub-word reads are extracted from the aligned word (no side
+        // effects for any register a driver legitimately reads byte-wise -- those are all in the
+        // read-only config space; queue/status/notify registers are always accessed word-wise).
         if (inVirtio(addr))
             return (vnet.read((addr - VIRTIO_NET_BASE) & ~3u) >> (8 * (addr & 3))) & 0xFF;
+        if (inVirtioBlk(addr))
+            return (vblk.read((addr - VIRTIO_BLK_BASE) & ~3u) >> (8 * (addr & 3))) & 0xFF;
+        if (inVirtioGpu(addr))
+            return (vgpu.read((addr - VIRTIO_GPU_BASE) & ~3u) >> (8 * (addr & 3))) & 0xFF;
+        if (inVirtioInput(addr))
+            return (vinput.read((addr - VIRTIO_INPUT_BASE) & ~3u) >> (8 * (addr & 3))) & 0xFF;
 
         // RTC at 0x03000000–0x030007ff
         if (addr >= RTC_MMIO_BASE && addr < (RTC_MMIO_BASE + RTC_MMIO_SIZE))
@@ -830,9 +882,11 @@ u32 RV32::memGetWordSlow(xlen_t addr)
 {
     if ((addr & 3) == 0)
     {
-        if (inPlic(addr))      { net_dirty = true; blk_dirty = true; return plic.read(addr - PLIC_BASE); }
-        if (inVirtio(addr))    { net_dirty = true; return vnet.read(addr - VIRTIO_NET_BASE); }
-        if (inVirtioBlk(addr)) { blk_dirty = true; return vblk.read(addr - VIRTIO_BLK_BASE); }
+        if (inPlic(addr))        { net_dirty = true; blk_dirty = true; gpu_dirty = true; input_dirty = true; return plic.read(addr - PLIC_BASE); }
+        if (inVirtio(addr))      { net_dirty = true; return vnet.read(addr - VIRTIO_NET_BASE); }
+        if (inVirtioBlk(addr))   { blk_dirty = true; return vblk.read(addr - VIRTIO_BLK_BASE); }
+        if (inVirtioGpu(addr))   { gpu_dirty = true; return vgpu.read(addr - VIRTIO_GPU_BASE); }
+        if (inVirtioInput(addr)) { input_dirty = true; return vinput.read(addr - VIRTIO_INPUT_BASE); }
     }
     return memGetByteRaw(addr) |
            ((u32)memGetByteRaw(addr + 1) << 8) |
@@ -896,6 +950,42 @@ void RV32::memSetByteRaw(xlen_t addr, u32 val)
         if (addr >= RTC_MMIO_BASE && addr < (RTC_MMIO_BASE + RTC_MMIO_SIZE))
         {
             rtcWrite(addr - RTC_MMIO_BASE, (u8)val);
+            return;
+        }
+
+        // Byte-granular writes into a virtio device's config space (e.g. virtio-input's select/
+        // subsel, each documented as a single byte -- Linux's generic virtio config accessor
+        // writes fields at their declared width, i.e. iowrite8 for these). Functional registers
+        // (queue setup, status, notify) are always accessed word-wise by any real driver, so a
+        // read-modify-write here only ever touches config-space bytes in practice.
+        if (inVirtio(addr) || inVirtioBlk(addr) || inVirtioGpu(addr) || inVirtioInput(addr))
+        {
+            u32 shift = 8 * (addr & 3);
+            u32 mask = ~(0xFFu << shift);
+            if (inVirtio(addr))
+            {
+                u32 off = (addr - VIRTIO_NET_BASE) & ~3u;
+                net_dirty = true;
+                vnet.write(off, (vnet.read(off) & mask) | ((val & 0xFF) << shift));
+            }
+            else if (inVirtioBlk(addr))
+            {
+                u32 off = (addr - VIRTIO_BLK_BASE) & ~3u;
+                blk_dirty = true;
+                vblk.write(off, (vblk.read(off) & mask) | ((val & 0xFF) << shift));
+            }
+            else if (inVirtioGpu(addr))
+            {
+                u32 off = (addr - VIRTIO_GPU_BASE) & ~3u;
+                gpu_dirty = true;
+                vgpu.write(off, (vgpu.read(off) & mask) | ((val & 0xFF) << shift));
+            }
+            else
+            {
+                u32 off = (addr - VIRTIO_INPUT_BASE) & ~3u;
+                input_dirty = true;
+                vinput.write(off, (vinput.read(off) & mask) | ((val & 0xFF) << shift));
+            }
             return;
         }
 
@@ -1043,9 +1133,11 @@ void RV32::memSetWordSlow(xlen_t addr, u32 val)
 {
     if ((addr & 3) == 0)
     {
-        if (inPlic(addr))      { net_dirty = true; blk_dirty = true; plic.write(addr - PLIC_BASE, val); return; }
-        if (inVirtio(addr))    { net_dirty = true; vnet.write(addr - VIRTIO_NET_BASE, val); return; }
-        if (inVirtioBlk(addr)) { blk_dirty = true; vblk.write(addr - VIRTIO_BLK_BASE, val); return; }
+        if (inPlic(addr))        { net_dirty = true; blk_dirty = true; gpu_dirty = true; input_dirty = true; plic.write(addr - PLIC_BASE, val); return; }
+        if (inVirtio(addr))      { net_dirty = true; vnet.write(addr - VIRTIO_NET_BASE, val); return; }
+        if (inVirtioBlk(addr))   { blk_dirty = true; vblk.write(addr - VIRTIO_BLK_BASE, val); return; }
+        if (inVirtioGpu(addr))   { gpu_dirty = true; vgpu.write(addr - VIRTIO_GPU_BASE, val); return; }
+        if (inVirtioInput(addr)) { input_dirty = true; vinput.write(addr - VIRTIO_INPUT_BASE, val); return; }
     }
     memSetByteRaw(addr, val & 0xFF);
     memSetByteRaw(addr + 1, (val >> 8) & 0xFF);

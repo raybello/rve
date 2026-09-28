@@ -408,6 +408,135 @@ void App::endRender()
     SDL_GL_SwapWindow(window);
 }
 
+#ifndef __EMSCRIPTEN__
+static GLuint compileDisplayShader(GLenum type, const char *src)
+{
+    GLuint s = glCreateShader(type);
+    glShaderSource(s, 1, &src, nullptr);
+    glCompileShader(s);
+    GLint ok = 0;
+    glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
+    if (!ok)
+    {
+        char log[512];
+        glGetShaderInfoLog(s, sizeof(log), nullptr, log);
+        printf("ERRO: display window shader failed to compile: %s\n", log);
+    }
+    return s;
+}
+
+// A second, undecorated OS window showing exactly the guest's virtio-gpu scanout at native
+// resolution -- the "real screen" surface, as opposed to the dockable debug panel in
+// createTerminal(). Shares the main GL context (SDL supports one context across multiple windows
+// via repeated MakeCurrent); a small shader+quad blits the same fb_texture_id createTerminal()
+// already keeps up to date, so there is no separate upload path to keep in sync.
+void App::createDisplayWindow()
+{
+    if (display_window)
+        return;
+    int w = (int)emu.cpu.vgpu.displayWidth();
+    int h = (int)emu.cpu.vgpu.displayHeight();
+    display_window = SDL_CreateWindow("rve display", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                                       w, h, (SDL_WindowFlags)(SDL_WINDOW_OPENGL | SDL_WINDOW_BORDERLESS));
+    if (!display_window)
+    {
+        printf("Error: SDL_CreateWindow(display): %s\n", SDL_GetError());
+        return;
+    }
+    display_win_w = w;
+    display_win_h = h;
+
+    SDL_GL_MakeCurrent(display_window, window_context);
+
+    std::string vsrc = std::string(glsl_version) +
+        "\nin vec2 aPos;\nin vec2 aUV;\nout vec2 vUV;\n"
+        "void main() { vUV = aUV; gl_Position = vec4(aPos, 0.0, 1.0); }\n";
+    std::string fsrc = std::string(glsl_version) +
+        "\nin vec2 vUV;\nout vec4 FragColor;\nuniform sampler2D uTex;\n"
+        "void main() { FragColor = texture(uTex, vUV); }\n";
+    GLuint vs = compileDisplayShader(GL_VERTEX_SHADER, vsrc.c_str());
+    GLuint fs = compileDisplayShader(GL_FRAGMENT_SHADER, fsrc.c_str());
+    display_shader_program = glCreateProgram();
+    glAttachShader(display_shader_program, vs);
+    glAttachShader(display_shader_program, fs);
+    glBindAttribLocation(display_shader_program, 0, "aPos");
+    glBindAttribLocation(display_shader_program, 1, "aUV");
+    glLinkProgram(display_shader_program);
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+
+    // Two triangles covering NDC space. UV v=0 maps to NDC top (y=+1): row 0 of the uploaded
+    // pixel data is the top row of the image, matching how createTerminal()'s ImGui::Image()
+    // already displays it -- this quad must agree or the guest screen would render upside down.
+    float verts[] = {
+        -1.f, -1.f, 0.f, 1.f,
+         1.f, -1.f, 1.f, 1.f,
+        -1.f,  1.f, 0.f, 0.f,
+        -1.f,  1.f, 0.f, 0.f,
+         1.f, -1.f, 1.f, 1.f,
+         1.f,  1.f, 1.f, 0.f,
+    };
+    glGenVertexArrays(1, &display_vao);
+    glGenBuffers(1, &display_vbo);
+    glBindVertexArray(display_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, display_vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(2 * sizeof(float)));
+    glBindVertexArray(0);
+
+    SDL_GL_MakeCurrent(window, window_context);
+}
+
+void App::destroyDisplayWindow()
+{
+    if (!display_window)
+        return;
+    SDL_GL_MakeCurrent(display_window, window_context);
+    if (display_vbo) glDeleteBuffers(1, &display_vbo);
+    if (display_vao) glDeleteVertexArrays(1, &display_vao);
+    if (display_shader_program) glDeleteProgram(display_shader_program);
+    display_vbo = display_vao = display_shader_program = 0;
+    SDL_GL_MakeCurrent(window, window_context);
+    SDL_DestroyWindow(display_window);
+    display_window = nullptr;
+}
+
+void App::renderDisplayWindow()
+{
+    if (settings.show_display_window && !display_window)
+        createDisplayWindow();
+    else if (!settings.show_display_window && display_window)
+        destroyDisplayWindow();
+    if (!display_window)
+        return;
+
+    int gw = (int)emu.cpu.vgpu.displayWidth();
+    int gh = (int)emu.cpu.vgpu.displayHeight();
+    if (gw != display_win_w || gh != display_win_h)
+    {
+        SDL_SetWindowSize(display_window, gw, gh);
+        display_win_w = gw;
+        display_win_h = gh;
+    }
+
+    SDL_GL_MakeCurrent(display_window, window_context);
+    glViewport(0, 0, display_win_w, display_win_h);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glUseProgram(display_shader_program);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, fb_texture_id);
+    glUniform1i(glGetUniformLocation(display_shader_program, "uTex"), 0);
+    glBindVertexArray(display_vao);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    glBindVertexArray(0);
+    SDL_GL_SwapWindow(display_window);
+    SDL_GL_MakeCurrent(window, window_context);
+}
+#endif // __EMSCRIPTEN__
+
 // SDL scancode → Linux key code lookup table (index = SDL_Scancode, value = Linux KEY_*)
 // 0 means "no mapping". Values from linux/input-event-codes.h.
 static const u8 sdl_to_linux_key[512] = {
@@ -559,6 +688,13 @@ void App::handleEvents()
         {
             running = false;
         }
+#ifndef __EMSCRIPTEN__
+        if (display_window && window_event.type == SDL_WINDOWEVENT && window_event.window.event == SDL_WINDOWEVENT_CLOSE &&
+            window_event.window.windowID == SDL_GetWindowID(display_window))
+        {
+            settings.show_display_window = false; // renderDisplayWindow() tears it down next frame
+        }
+#endif
         if (window_event.type == SDL_KEYDOWN || window_event.type == SDL_KEYUP)
         {
             SDL_Scancode sc = window_event.key.keysym.scancode;
@@ -569,6 +705,36 @@ void App::handleEvents()
                     emu.cpu.kbdPush(lk, window_event.type == SDL_KEYUP);
             }
         }
+#ifndef __EMSCRIPTEN__
+        // Pointer input targets the dedicated guest-display window only (its coordinates map
+        // directly onto the guest's virtio-gpu resolution); the ImGui-docked "Framebuffer" panel
+        // stays view-only -- mapping a click through ImGui's own layout/scroll/docking state to a
+        // guest-relative position is real added complexity this milestone doesn't need to take on.
+        if (display_window)
+        {
+            if (window_event.type == SDL_MOUSEMOTION && window_event.motion.windowID == SDL_GetWindowID(display_window) &&
+                display_win_w > 0 && display_win_h > 0)
+            {
+                int mx = window_event.motion.x, my = window_event.motion.y;
+                if (mx < 0) mx = 0; if (mx >= display_win_w) mx = display_win_w - 1;
+                if (my < 0) my = 0; if (my >= display_win_h) my = display_win_h - 1;
+                uint16_t nx = (uint16_t)((int64_t)mx * RVE_ABS_MAX / display_win_w);
+                uint16_t ny = (uint16_t)((int64_t)my * RVE_ABS_MAX / display_win_h);
+                emu.cpu.vinput.pushAbsMotion(nx, ny);
+            }
+            else if ((window_event.type == SDL_MOUSEBUTTONDOWN || window_event.type == SDL_MOUSEBUTTONUP) &&
+                     window_event.button.windowID == SDL_GetWindowID(display_window))
+            {
+                bool down = window_event.type == SDL_MOUSEBUTTONDOWN;
+                uint16_t code = window_event.button.button == SDL_BUTTON_LEFT   ? RVE_BTN_LEFT
+                              : window_event.button.button == SDL_BUTTON_RIGHT  ? RVE_BTN_RIGHT
+                              : window_event.button.button == SDL_BUTTON_MIDDLE ? RVE_BTN_MIDDLE
+                                                                                 : 0;
+                if (code)
+                    emu.cpu.vinput.pushButton(code, down);
+            }
+        }
+#endif
     }
     if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED)
     {
@@ -578,6 +744,9 @@ void App::handleEvents()
 
 int App::destroyUI()
 {
+#ifndef __EMSCRIPTEN__
+    destroyDisplayWindow();
+#endif
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplSDL2_Shutdown();
     ImPlot::DestroyContext();
@@ -641,6 +810,9 @@ void App::renderLoop()
         beginRender();
         drawUI();
         endRender();
+#ifndef __EMSCRIPTEN__
+        renderDisplayWindow();
+#endif
 #ifdef RVE_PROFILE
         profiler.frameDone((double)(prof_now_ns() - t_frame) * 1e-6, (double)(t_emu - t_frame) * 1e-6);
 #endif
@@ -694,6 +866,9 @@ void App::createMenubar()
             ImGui::MenuItem("CPU State", NULL, &settings.show_cpu_state);
             ImGui::MenuItem("Disassembler", NULL, &settings.show_disasm);
             ImGui::MenuItem("Profiler", NULL, &settings.show_profiler);
+#ifndef __EMSCRIPTEN__
+            ImGui::MenuItem("Guest Display (separate window)", NULL, &settings.show_display_window);
+#endif
             ImGui::EndMenu();
         }
         ImGuiIO &io = ImGui::GetIO();
@@ -717,14 +892,30 @@ void App::createTerminal()
 
     ImGui::Begin("Framebuffer");
 
-    // Upload emulated framebuffer (physical 0x84000000 = host mem + 64MB) to GPU
+    // Source: the virtio-gpu device's current scanout (rve/include/virtio_gpu.h), not raw guest
+    // RAM -- the guest's resolution can change at runtime (SET_SCANOUT), so the texture is
+    // reallocated when the size changes and only re-uploaded when a flush actually happened.
+    int gw = (int)emu.cpu.vgpu.displayWidth();
+    int gh = (int)emu.cpu.vgpu.displayHeight();
+    uint64_t gen = emu.cpu.vgpu.frameGeneration();
+
     glBindTexture(GL_TEXTURE_2D, fb_texture_id);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, FB_W, FB_H,
-                    GL_RGBA, GL_UNSIGNED_BYTE,
-                    emu.memory + 0x04000000u);
+    if (gw != fb_tex_w || gh != fb_tex_h)
+    {
+        fb_tex_w = gw; fb_tex_h = gh;
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, fb_tex_w, fb_tex_h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                     emu.cpu.vgpu.framebufferRGBA());
+        last_gpu_frame_gen = gen;
+    }
+    else if (gen != last_gpu_frame_gen)
+    {
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, fb_tex_w, fb_tex_h,
+                        GL_RGBA, GL_UNSIGNED_BYTE, emu.cpu.vgpu.framebufferRGBA());
+        last_gpu_frame_gen = gen;
+    }
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    ImGui::Image((ImTextureID)(intptr_t)fb_texture_id, ImVec2(FB_W, FB_H));
+    ImGui::Image((ImTextureID)(intptr_t)fb_texture_id, ImVec2((float)fb_tex_w, (float)fb_tex_h));
 
     ImGui::End();
 }

@@ -24,28 +24,6 @@
 		reg = <0x00 0x80000000 0x00 0x8000000>;
 	};
 
-	reserved-memory {
-		#address-cells = <0x02>;
-		#size-cells = <0x02>;
-		ranges;
-
-		/* Emulated framebuffer that the GUI scans out; must not be given to the page allocator */
-		framebuffer_mem: framebuffer@84000000 {
-			reg = <0x00 0x84000000 0x00 0x200000>;
-			no-map;
-		};
-	};
-
-	framebuffer0: framebuffer@84000000 {
-		compatible = "simple-framebuffer";
-		reg = <0x00 0x84000000 0x00 0x18cc18>;
-		width = <850>;
-		height = <478>;
-		stride = <0xd48>;
-		format = "a8b8g8r8";
-		status = "okay";
-	};
-
 	cpus {
 		#address-cells = <0x01>;
 		#size-cells = <0x00>;
@@ -136,11 +114,27 @@
 			interrupt-parent = <&plic>;
 		};
 
-		/* virtio-blk root disk (PLIC source 3; source 2 reserved for a future virtio-gpu) */
+		/* virtio-blk root disk (PLIC source 3) */
 		virtio_blk: virtio@10004000 {
 			compatible = "virtio,mmio";
 			reg = <0x00 0x10004000 0x00 0x1000>;
 			interrupts = <0x03>;
+			interrupt-parent = <&plic>;
+		};
+
+		/* virtio-gpu 2D display (PLIC source 2), replaces the old simple-framebuffer window */
+		virtio_gpu: virtio@10003000 {
+			compatible = "virtio,mmio";
+			reg = <0x00 0x10003000 0x00 0x1000>;
+			interrupts = <0x02>;
+			interrupt-parent = <&plic>;
+		};
+
+		/* virtio-input absolute pointer (PLIC source 4); rve-kbd below still covers the keyboard */
+		virtio_input: virtio@10005000 {
+			compatible = "virtio,mmio";
+			reg = <0x00 0x10005000 0x00 0x1000>;
+			interrupts = <0x04>;
 			interrupt-parent = <&plic>;
 		};
 

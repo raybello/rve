@@ -5,6 +5,8 @@
 #include "plic.h"
 #include "virtio_net.h"
 #include "virtio_blk.h"
+#include "virtio_gpu.h"
+#include "virtio_input.h"
 #include <cstdint>
 #include <stdio.h>
 #include <assert.h>
@@ -275,6 +277,14 @@ public:
     VirtioBlk vblk;
     bool blk_dirty = true; // set on any guest access to the virtio-blk MMIO window; see net_dirty
     void blkTick();
+    // virtio-gpu (2D display)
+    VirtioGpu vgpu;
+    bool gpu_dirty = true; // set on any guest access to the virtio-gpu MMIO window; see net_dirty
+    void gpuTick();
+    // virtio-input (absolute pointer)
+    VirtioInput vinput;
+    bool input_dirty = true; // set on any guest access to the virtio-input MMIO window; see net_dirty
+    void inputTick();
     // RTC registers (ds1742 compatible)
     u32 rtc0, rtc1;
     // SYSCON (poweroff/reboot): set when 0x11100000 is written
