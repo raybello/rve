@@ -16,7 +16,7 @@ static void HelpMarker(const char *desc)
 
 static void showHelp()
 {
-    printf("./rve [parameters]\n\t-e [elf binary]\n\t-m [ram amount]\n\t-f [running image]\n\t-k [kernel command line]\n\t-b [dtb file, or 'disable']\n\t-c instruction count\n\t-s single step with full processor state\n\t-t time division base\n\t-l lock time base to instruction count\n\t-p disable sleep when wfi\n\t-d fail out immediately on all faults\n\t-F virtio-net on the deterministic fake host (tests)\n\t--no-net disconnect the virtio-net NIC (default: use the host network)\n");
+    printf("./rve [parameters]\n\t-e [elf binary]\n\t-m [ram amount]\n\t-f [running image]\n\t-k [kernel command line]\n\t-b [dtb file, or 'disable']\n\t-c instruction count\n\t-s single step with full processor state\n\t-t time division base\n\t-l lock time base to instruction count\n\t-p disable sleep when wfi\n\t-d fail out immediately on all faults\n\t-F virtio-net on the deterministic fake host (tests)\n\t--no-net disconnect the virtio-net NIC (default: use the host network)\n\t-D [disk image] attach a flat disk image as the virtio-blk root device\n");
 }
 
 static void applyTheme()
@@ -240,6 +240,7 @@ int App::initializeEmu(int argc, char *argv[])
     const char *elf_file_name = 0;
     const char *bin_file_name = 0;
     const char *dtb_file_name = 0;
+    const char *disk_file_name = 0;
     bool net_fake = false, net_off = false;
 
     // First pass: standalone flags that consume the next argument.
@@ -281,6 +282,9 @@ int App::initializeEmu(int argc, char *argv[])
                     break;
                 case 'd':
                     dtb_file_name = (++i < argc) ? argv[i] : 0;
+                    break;
+                case 'D':
+                    disk_file_name = (++i < argc) ? argv[i] : 0;
                     break;
                 case 'e':
                     elf_file_name = (++i < argc) ? argv[i] : 0;
@@ -340,6 +344,12 @@ int App::initializeEmu(int argc, char *argv[])
     if (dtb_file_name)
     {
         printf("INFO: DTB File: %s\n", dtb_file_name);
+    }
+    if (disk_file_name)
+    {
+        printf("INFO: Disk Image: %s\n", disk_file_name);
+        if (!emu.cpu.vblk.attachImage(disk_file_name))
+            printf("WARN: could not open disk image %s (virtio-blk will report zero capacity)\n", disk_file_name);
     }
 
 #ifdef __EMSCRIPTEN__

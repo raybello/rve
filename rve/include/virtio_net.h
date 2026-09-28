@@ -3,19 +3,13 @@
 // device can be unit-tested without the CPU.
 #pragma once
 #include "netbackend.h"
+#include "virtio_common.h"
 #include <cstdint>
-#include <functional>
 #include <vector>
 
 #define VIRTIO_NET_BASE 0x10002000u
 #define VIRTIO_NET_SIZE 0x1000u
 #define VIRTIO_NET_IRQ 1 // PLIC source
-
-struct GuestMem
-{
-    std::function<void(uint64_t pa, void *dst, size_t n)> read;
-    std::function<void(uint64_t pa, const void *src, size_t n)> write;
-};
 
 class VirtioNet
 {

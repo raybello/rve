@@ -152,7 +152,7 @@ Guest UDP other than DNS is not forwarded, and the stock image has no TLS client
 **Tests** (also run in CI):
 ```sh
 make -C rve net-test        # virtio-net device, PLIC, network stack and native-host (real loopback sockets) tests (+ the Unix-socket pair test)
-make -C rve isas64          # includes rve's guest-driven virtio-net test (rv64mi-p-virtio-net)
+make -C rve isas64          # includes rve's guest-driven virtio-net and virtio-blk tests (rv64mi-p-virtio-{net,blk})
 node scripts/net_e2e.mjs          # boots the rv64 Linux image and checks DHCP, DNS, ping and wget (needs rve/assets/linux64/Image)
 node scripts/net_e2e.mjs --host   # same, on the machine's real network against local echo/HTTP servers (E2E_INTERNET=1 adds example.com and 8.8.8.8)
 ```
@@ -286,6 +286,24 @@ Outputs land in `rve/assets/linux64/`: `Image` (OpenSBI padded to 2 MiB + kernel
 | Device tree | `dts/sixtyfourmb.dts` | `dts/rve64.dts` (`make -C dts rv64` regenerates `rve/include/default_rv64_dtc.h`) |
 | Configs | `configs/{buildroot,kernel,busybox,uclibc}_config` | `configs/rv64/{buildroot_defconfig,kernel_config,busybox.fragment}` |
 | Custom apps in `/root` | `hello_linux`, `pi`, `framebuff` (flat binaries) | the same three, built by `configs/rv64/post_build.sh` (static musl ELF) |
+
+### RV64 root disk (virtio-blk)
+
+The rv64 image can also attach a flat disk image as a `virtio-blk` device (`/dev/vda` in the guest),
+in addition to (not instead of) its initramfs. Boot with `-D <image>` (both `rve64 -n ... -D <image>`
+and the GUI build's `-D` flag), then from the busybox shell:
+
+```sh
+mount -t ext4 /dev/vda /mnt
+chroot /mnt /bin/sh   # or: switch_root, if the image has its own /init
+```
+
+`scripts/build_alpine_rootfs.sh [output.img] [size] [alpine-version]` builds a ready-to-attach ext4
+image containing a real (unmodified) Alpine Linux riscv64 rootfs, exported from a QEMU-emulated
+`docker run --platform=linux/riscv64 alpine` container — needs Docker with riscv64 emulation
+registered once via `docker run --privileged --rm tonistiigi/binfmt --install riscv64`. Requires the
+kernel's C extension support (`CONFIG_RISCV_ISA_C=y`, see below) since Alpine's prebuilt riscv64
+packages are compiled rv64gc.
 
 The Docker base image is pinned to Ubuntu 24.04: newer releases ship GCC 15, which breaks the host tools this
 Buildroot version compiles.
