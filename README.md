@@ -51,7 +51,7 @@ make rerun        # clean, build, and run
 make isas         # rv32 u{i,m,a,f,d} tests, headless; prints PASS/FAIL/TIMEOUT per test
 make isas64       # rv64 u{i,m,a,f,d} physical (-p-) tests + rve directed tests (rve/tests/rv64)
 make isas64-v     # rv64 tests under Sv39 virtual memory (-v-)
-make isas64c      # rv64uc compressed-extension (RVC) corner-case test
+make isas64c      # rv64uc compressed-extension (RVC) corner-case + FP load/store tests
 make isas-all     # all of the above; exits non-zero on any failure
 make isa ISA_TEST=rv32ui-p-add   # run a single test in the GUI
 ```
@@ -316,7 +316,7 @@ make lnx      # use local assets/linux/Image and run with GUI
 | rv32 u{i,m,a,f,d} + mi/si CSR (`make isas32`) | 81/81 |
 | rv64 u{i,m,a,f,d}-p (`make isas64`) | 109/109 |
 | rv64 u{i,m,a,f,d}-v, Sv39 (`make isas64-v`) | 109/109 |
-| rv64uc RVC corner cases (`make isas64c`) | 1/1 (37 sub-cases) |
+| rv64uc RVC corner cases + FP load/store (`make isas64c`) | 2/2 (37 + 8 sub-cases) |
 
 RV32 detail (`make isas`):
 
