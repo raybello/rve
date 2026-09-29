@@ -425,19 +425,23 @@ static GLuint compileDisplayShader(GLenum type, const char *src)
     return s;
 }
 
-// A second, undecorated OS window showing exactly the guest's virtio-gpu scanout at native
-// resolution -- the "real screen" surface, as opposed to the dockable debug panel in
-// createTerminal(). Shares the main GL context (SDL supports one context across multiple windows
-// via repeated MakeCurrent); a small shader+quad blits the same fb_texture_id createTerminal()
-// already keeps up to date, so there is no separate upload path to keep in sync.
+// A second OS window showing exactly the guest's virtio-gpu scanout at native resolution -- the
+// "real screen" surface, and (on native builds) the only one, now that there's no redundant
+// docked debug panel duplicating it. Shares the main GL context (SDL supports one context across
+// multiple windows via repeated MakeCurrent); a small shader+quad blits fb_texture_id, which
+// drawUI() keeps current via updateFramebufferTexture() independent of this window's visibility.
 void App::createDisplayWindow()
 {
     if (display_window)
         return;
     int w = (int)emu.cpu.vgpu.displayWidth();
     int h = (int)emu.cpu.vgpu.displayHeight();
+    // A normal decorated window (title bar, draggable, native close button) -- not borderless.
+    // It's the only way to see the guest's display on native builds now that the redundant
+    // docked "Framebuffer" panel is gone, so it needs to behave like any other OS window: the
+    // user must be able to move it and close it without going through the Views menu.
     display_window = SDL_CreateWindow("rve display", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                                       w, h, (SDL_WindowFlags)(SDL_WINDOW_OPENGL | SDL_WINDOW_BORDERLESS));
+                                       w, h, (SDL_WindowFlags)(SDL_WINDOW_OPENGL));
     if (!display_window)
     {
         printf("Error: SDL_CreateWindow(display): %s\n", SDL_GetError());
@@ -466,8 +470,8 @@ void App::createDisplayWindow()
     glDeleteShader(fs);
 
     // Two triangles covering NDC space. UV v=0 maps to NDC top (y=+1): row 0 of the uploaded
-    // pixel data is the top row of the image, matching how createTerminal()'s ImGui::Image()
-    // already displays it -- this quad must agree or the guest screen would render upside down.
+    // pixel data is the top row of the image, matching how ImGui::Image() displays a texture --
+    // this quad must agree or the guest screen would render upside down.
     float verts[] = {
         -1.f, -1.f, 0.f, 1.f,
          1.f, -1.f, 1.f, 1.f,
@@ -706,10 +710,9 @@ void App::handleEvents()
             }
         }
 #ifndef __EMSCRIPTEN__
-        // Pointer input targets the dedicated guest-display window only (its coordinates map
-        // directly onto the guest's virtio-gpu resolution); the ImGui-docked "Framebuffer" panel
-        // stays view-only -- mapping a click through ImGui's own layout/scroll/docking state to a
-        // guest-relative position is real added complexity this milestone doesn't need to take on.
+        // Pointer input targets the dedicated guest-display window only -- its coordinates map
+        // directly onto the guest's virtio-gpu resolution, which a docked ImGui panel's own
+        // layout/scroll/docking state would complicate for no benefit now that it's gone anyway.
         if (display_window)
         {
             if (window_event.type == SDL_MOUSEMOTION && window_event.motion.windowID == SDL_GetWindowID(display_window) &&
@@ -769,8 +772,15 @@ void App::drawUI()
     if (settings.show_plot_demo_window)
         ImPlot::ShowDemoWindow(&settings.show_plot_demo_window);
 
-    if (settings.show_terminal_window)
-        createTerminal();
+#ifdef __EMSCRIPTEN__
+    if (settings.show_display_window)
+        createDisplayPanel();
+#else
+    // No docked display panel on native -- it would just duplicate the dedicated guest-display
+    // window (see renderDisplayWindow(), called from renderLoop()). Still keep the texture
+    // itself current regardless of that window's visibility.
+    updateFramebufferTexture();
+#endif
 
     if (settings.show_cpu_state)
         createCpuState();
@@ -860,15 +870,12 @@ void App::createMenubar()
         }
         if (ImGui::BeginMenu("Views"))
         {
-            ImGui::MenuItem("Terminal", NULL, &settings.show_terminal_window);
+            ImGui::MenuItem("Guest Display", NULL, &settings.show_display_window);
             ImGui::MenuItem("Demo Window", NULL, &settings.show_demo_window);
             ImGui::MenuItem("Plot Demo Window", NULL, &settings.show_plot_demo_window);
             ImGui::MenuItem("CPU State", NULL, &settings.show_cpu_state);
             ImGui::MenuItem("Disassembler", NULL, &settings.show_disasm);
             ImGui::MenuItem("Profiler", NULL, &settings.show_profiler);
-#ifndef __EMSCRIPTEN__
-            ImGui::MenuItem("Guest Display (separate window)", NULL, &settings.show_display_window);
-#endif
             ImGui::EndMenu();
         }
         ImGuiIO &io = ImGui::GetIO();
@@ -879,22 +886,14 @@ void App::createMenubar()
     }
 }
 
-void App::createTerminal()
+// Uploads the virtio-gpu device's current scanout (rve/include/virtio_gpu.h) into fb_texture_id
+// -- not raw guest RAM, since the guest's resolution can change at runtime (SET_SCANOUT). The
+// texture is reallocated when the size changes and only re-uploaded when a flush actually
+// happened. Both createDisplayPanel() (wasm's docked panel) and renderDisplayWindow() (native's
+// dedicated window) blit this same texture, so it must be kept current independent of either
+// one's visibility -- see the call sites in drawUI().
+void App::updateFramebufferTexture()
 {
-    ImGuiIO &io = ImGui::GetIO();
-    (void)io;
-
-    ImVec2 window_size = io.DisplaySize;
-    // Set window size to 50% of main viewport
-    ImGui::SetNextWindowSize(ImVec2(window_size.x * 0.5f, window_size.y * 0.5f), ImGuiCond_FirstUseEver);
-    // Set window position to the right half of the main viewport
-    ImGui::SetNextWindowPos(ImVec2(window_size.x * 0.5f, window_size.y * 0.5f), ImGuiCond_FirstUseEver);
-
-    ImGui::Begin("Framebuffer");
-
-    // Source: the virtio-gpu device's current scanout (rve/include/virtio_gpu.h), not raw guest
-    // RAM -- the guest's resolution can change at runtime (SET_SCANOUT), so the texture is
-    // reallocated when the size changes and only re-uploaded when a flush actually happened.
     int gw = (int)emu.cpu.vgpu.displayWidth();
     int gh = (int)emu.cpu.vgpu.displayHeight();
     uint64_t gen = emu.cpu.vgpu.frameGeneration();
@@ -914,11 +913,32 @@ void App::createTerminal()
         last_gpu_frame_gen = gen;
     }
     glBindTexture(GL_TEXTURE_2D, 0);
+}
 
-    ImGui::Image((ImTextureID)(intptr_t)fb_texture_id, ImVec2((float)fb_tex_w, (float)fb_tex_h));
+#ifdef __EMSCRIPTEN__
+// wasm equivalent of native's createDisplayWindow(): SDL2-on-Emscripten has no multi-window
+// support (the browser gives you one canvas), so the "Guest Display" toggle here opens a regular
+// docked ImGui panel instead of a real OS window. Passing &settings.show_display_window as
+// ImGui::Begin's p_open keeps the "Views" menu checkbox in sync when closed via the panel's own
+// titlebar close button, same as a real window would.
+void App::createDisplayPanel()
+{
+    updateFramebufferTexture();
 
+    ImGuiIO &io = ImGui::GetIO();
+    (void)io;
+
+    ImVec2 window_size = io.DisplaySize;
+    // Set window size to 50% of main viewport
+    ImGui::SetNextWindowSize(ImVec2(window_size.x * 0.5f, window_size.y * 0.5f), ImGuiCond_FirstUseEver);
+    // Set window position to the right half of the main viewport
+    ImGui::SetNextWindowPos(ImVec2(window_size.x * 0.5f, window_size.y * 0.5f), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin("Guest Display", &settings.show_display_window))
+        ImGui::Image((ImTextureID)(intptr_t)fb_texture_id, ImVec2((float)fb_tex_w, (float)fb_tex_h));
     ImGui::End();
 }
+#endif
 
 void App::createCpuState()
 {
@@ -928,8 +948,9 @@ void App::createCpuState()
     
     // Set window size to 50% of main viewport
     ImGui::SetNextWindowSize(ImVec2(window_size.x * 0.5f, window_size.y - 24), ImGuiCond_FirstUseEver);
-    // Set window position to the right half of the main viewport
-    ImGui::SetNextWindowPos(ImVec2(0, 24), ImGuiCond_FirstUseEver);
+    // Set window position to the right half of the main viewport (Disassembler/Tools takes the
+    // full left side -- see createDisasm())
+    ImGui::SetNextWindowPos(ImVec2(window_size.x * 0.5f, 24), ImGuiCond_FirstUseEver);
 
     ImGui::Begin("CPU State", NULL, ImGuiWindowFlags_MenuBar);
 
@@ -1087,10 +1108,9 @@ void App::createDisasm()
     (void)io;
     ImVec2 window_size = io.DisplaySize;
 
-    // Set window size to 50% of main viewport
-    ImGui::SetNextWindowSize(ImVec2(window_size.x * 0.5f, (window_size.y * 0.5f)-24), ImGuiCond_FirstUseEver);
-    // Set window position to the right half of the main viewport
-    ImGui::SetNextWindowPos(ImVec2(window_size.x * 0.5f, 24), ImGuiCond_FirstUseEver);
+    // Takes the whole left side, full height (CPU State takes the full right side instead).
+    ImGui::SetNextWindowSize(ImVec2(window_size.x * 0.5f, window_size.y - 24), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(0, 24), ImGuiCond_FirstUseEver);
 
     ImGui::Begin("Tools");
 
