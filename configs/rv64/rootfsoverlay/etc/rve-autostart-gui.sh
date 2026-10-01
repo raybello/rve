@@ -52,5 +52,28 @@ chroot "$MNT" /bin/sh -c '
   WLR_RENDERER=pixman labwc >/tmp/labwc.log 2>&1 &
   wait_for /tmp/xdg/wayland-0 50         # ~5s cap: labwc is the slowest step to come up
 
-  WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/tmp/xdg foot >/tmp/foot.log 2>&1 &
+  # KNOWN ISSUE, not just a startup race: labwc accepts no Wayland client at all until the guest
+  # receives a real input event (confirmed by driving labwc with full -d debug logging -- it goes
+  # completely silent, forever, right after allocating its second swapchain buffer, and foot fails
+  # with "failed to connect to wayland; no compositor running?" on every retry even across 80
+  # attempts / 40s of continuous retrying with no input). This looks like a deadlock specific to
+  # a non-modeset atomic commit against this devices virtio-gpu/DRM emulation -- the boot-time
+  # fbcon path commits fine throughout boot, so it is not virtio-gpu command completion in
+  # general, just whatever labwc needs for its first real frame that fbcon does not exercise.
+  # Root-causing that further needs kernel-driver-level work, not a script change -- see the PR
+  # description. NOTE: no apostrophes in this block -- it is embedded in a single-quoted
+  # chroot sh -c string, and a literal quote here ends that string early and breaks everything
+  # below it with a syntax error (learned the hard way -- keep comments in here contraction-free).
+  #
+  # Until that is fixed, retry foots launch indefinitely (not capped) at a cheap, low-frequency
+  # interval: as soon as the user provides any input (mouse/keyboard) to the guest display window,
+  # labwc unsticks and the very next retry succeeds, so the terminal just appears on its own a
+  # moment after that first click/keypress -- no manual restart or reboot needed.
+  while true; do
+    WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/tmp/xdg foot >/tmp/foot.log 2>&1 &
+    FOOTPID=$!
+    sleep 1
+    kill -0 "$FOOTPID" 2>/dev/null && break
+    sleep 1
+  done
 '
