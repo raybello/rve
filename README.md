@@ -354,6 +354,15 @@ The rv64 guest has a real, small-footprint graphical desktop stack, not just a t
 | `virtio-gpu` (2D only, no 3D/virgl) | `0x10003000` | 2 | the old fixed-RAM `simple-framebuffer` window |
 | `virtio-blk` (root disk) | `0x10004000` | 3 | — |
 | `virtio-input` (absolute pointer + 3 buttons) | `0x10005000` | 4 | new — `rve-kbd` still covers the keyboard |
+| `virtio-rng` (entropy device) | `0x10006000` | 5 | new — see below |
+
+Without `virtio-rng`, a deterministic emulator with no hardware RNG can leave the guest kernel's
+CRNG stuck for a long time (sometimes minutes) waiting for enough interrupt-timing jitter to seed
+itself — and until `dmesg` prints `random: crng init done`, any process that calls the blocking
+form of `getrandom()` at startup (wlroots, labwc, foot and seatd all do, e.g. for socket lock-file
+names) hangs silently. That's the "black screen until you mash keys" symptom (keyboard interrupts
+happen to feed the entropy pool too): `virtio-rng` gives the guest a real host-backed entropy
+source so the CRNG seeds in well under a second, no input required.
 
 The guest kernel drives its display through the real Linux DRM stack (`CONFIG_DRM_VIRTIO_GPU`), not a
 bespoke framebuffer hack, so any DRM/KMS-aware compositor works — resolution, format and mode
@@ -369,17 +378,32 @@ view-only).
 **Booting a graphical desktop (labwc, a minimal Wayland compositor):**
 ```sh
 cd rve
-scripts/build_alpine_rootfs.sh                       # once: builds assets/alpine-rve.img with labwc+foot+eudev+seatd
+scripts/build_alpine_rootfs.sh                       # once: builds assets/alpine-rve.img with labwc+foot+eudev+seatd+font-dejavu
 ./build64/rve64 -r -b assets/linux64/Image -D assets/alpine-rve.img
 ```
-Then from the busybox shell (bind-mounting `/dev` is required so the chroot can see the DRM/input
-device nodes; `/proc` and `/sys` are needed by udev and the compositor):
+That's it — the rv64 guest auto-boots straight into the graphical session. `/etc/inittab` runs
+`/etc/rve-autostart-gui.sh` as a non-blocking `once` action right after sysinit: it mounts
+`/dev/vda`, and if that succeeds and looks like a real rootfs (i.e. a disk image was actually
+attached via `-D`), it bind-mounts `/dev`+`/proc`+`/sys` into it, chroots in, and starts
+`udevd` → `seatd` → `WLR_RENDERER=pixman labwc` → `foot`, all backgrounded. If no `-D` image is
+attached, or anything in that chain fails, the script just exits — the normal busybox console/tty1
+login prompt is completely unaffected either way (it isn't blocked on this: `once` actions don't
+hold up the rest of `inittab`, and the kernel command line keeps both `tty0` and `ttyS0` as
+consoles, so the serial console used by the emulator's own `-n` headless mode stays independently
+usable even after labwc takes over the DRM/virtio-gpu scanout).
+
+To drive the same sequence by hand instead (e.g. to see its output live, or to launch a different
+compositor/client) log in and run:
 ```sh
-mount -t ext4 /dev/vda /mnt
-mount --bind /dev /mnt/dev && mount -t proc proc /mnt/proc && mount -t sysfs sysfs /mnt/sys
-chroot /mnt /bin/sh
+mkdir -p /mnt/alpine
+mount -t ext4 /dev/vda /mnt/alpine
+mount -o rbind /dev /mnt/alpine/dev && mount -t proc proc /mnt/alpine/proc && mount -t sysfs sysfs /mnt/alpine/sys
+chroot /mnt/alpine /bin/sh
 ```
-Inside the chroot:
+Use `-o rbind`, not a plain bind: `/dev/pts` is its own `devpts` mount nested inside `/dev` (see
+`/etc/fstab`), and a non-recursive bind only mirrors the top-level mount point, silently leaving
+`/mnt/alpine/dev/pts` as an empty directory — which makes any client that opens a PTY (a terminal
+like `foot`, for example) fail with `failed to open PTY: No such device`. Inside the chroot:
 ```sh
 mkdir -p /tmp/xdg && chmod 700 /tmp/xdg && export XDG_RUNTIME_DIR=/tmp/xdg
 /sbin/udevd --daemon && udevadm trigger && udevadm settle   # populate udev so libinput/eudev see the devices
@@ -393,8 +417,7 @@ the override it stalls. This is documented behavior on wlroots' own end, not an 
 Verified end to end: real DRM modesetting, a real `seatd`-managed seat, Pixman software rendering,
 and the compositor visibly taking over the display (confirmed via screenshot — the boot console is
 replaced by the compositor's own rendered background). A connected client (`foot`) stays alive with
-no errors; its window wasn't confirmed visible in testing, which is flagged as a follow-up rather than
-a known bug in the device/compositor plumbing above.
+no errors across an idle 60s stability check.
 
 **Run Linux directly (downloads a pre-built image):**
 ```sh

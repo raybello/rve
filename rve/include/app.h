@@ -38,11 +38,14 @@ struct AppSettings
     // Window settings
     bool show_demo_window = false;      // Imgui Demo
     bool show_plot_demo_window = false; // Implot Demo
-    bool show_terminal_window = true;
     bool show_cpu_state = true;
     bool show_disasm = true;
     bool show_profiler = false;         // Profiling metrics (ImPlot)
-    bool show_display_window = false;   // Dedicated undecorated guest-display window (native only)
+    // "Guest Display": a real, decorated OS window on native (movable, closable via its own
+    // close button); wasm has no OS-level multi-window support, so there it's a regular docked
+    // ImGui panel instead. Same virtio-gpu framebuffer either way -- see createDisplayPanel()
+    // (Emscripten) / createDisplayWindow() (native). On by default on both platforms.
+    bool show_display_window = true;
 
     // Emulator settings
 };
@@ -79,9 +82,11 @@ class App
     int fb_tex_w = FB_W, fb_tex_h = FB_H; // currently-allocated texture size
     uint64_t last_gpu_frame_gen = 0;      // last VirtioGpu::frameGeneration() uploaded
 
-    // Dedicated undecorated guest-display window (M2 of the GUI-userspace plan): shows exactly
-    // the virtio-gpu scanout at native resolution, sharing the main GL context. Off by default,
-    // toggled from the "Views" menu. Native builds only -- not meaningful for Emscripten/wasm.
+    // Dedicated guest-display window (M2 of the GUI-userspace plan): shows exactly the virtio-gpu
+    // scanout at native resolution, sharing the main GL context. A normal decorated OS window
+    // (title bar, draggable, closable via its own close button), not borderless. Native builds
+    // only -- SDL2 on Emscripten/wasm has no multi-window support, so createDisplayPanel() below
+    // covers the same role there via a docked ImGui panel instead.
 #ifndef __EMSCRIPTEN__
     SDL_Window *display_window = nullptr;
     GLuint display_shader_program = 0;
@@ -109,7 +114,8 @@ public:
     void handleEvents();
     // Windows
     void createMenubar();
-    void createTerminal();
+    void updateFramebufferTexture();
+    void createDisplayPanel();
     void createCpuState();
     void createDisasm();
     void createProfiler();
