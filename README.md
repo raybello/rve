@@ -354,6 +354,15 @@ The rv64 guest has a real, small-footprint graphical desktop stack, not just a t
 | `virtio-gpu` (2D only, no 3D/virgl) | `0x10003000` | 2 | the old fixed-RAM `simple-framebuffer` window |
 | `virtio-blk` (root disk) | `0x10004000` | 3 | — |
 | `virtio-input` (absolute pointer + 3 buttons) | `0x10005000` | 4 | new — `rve-kbd` still covers the keyboard |
+| `virtio-rng` (entropy device) | `0x10006000` | 5 | new — see below |
+
+Without `virtio-rng`, a deterministic emulator with no hardware RNG can leave the guest kernel's
+CRNG stuck for a long time (sometimes minutes) waiting for enough interrupt-timing jitter to seed
+itself — and until `dmesg` prints `random: crng init done`, any process that calls the blocking
+form of `getrandom()` at startup (wlroots, labwc, foot and seatd all do, e.g. for socket lock-file
+names) hangs silently. That's the "black screen until you mash keys" symptom (keyboard interrupts
+happen to feed the entropy pool too): `virtio-rng` gives the guest a real host-backed entropy
+source so the CRNG seeds in well under a second, no input required.
 
 The guest kernel drives its display through the real Linux DRM stack (`CONFIG_DRM_VIRTIO_GPU`), not a
 bespoke framebuffer hack, so any DRM/KMS-aware compositor works — resolution, format and mode

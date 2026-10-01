@@ -2756,6 +2756,10 @@ inline __attribute__((always_inline)) void Emulator::emulateImpl()
     // happens not to touch the device's MMIO window right after.
     if (cpu.vinput.active() && (cpu.input_dirty || (cpu.clock & 0x3FF) == 0))
         cpu.inputTick();
+    // virtio-rng: same synchronous-completion reasoning as virtio-blk above -- a posted buffer is
+    // filled and completed the instant the guest notifies, so there's nothing to poll for.
+    if (cpu.vrng.active() && cpu.rng_dirty)
+        cpu.rngTick();
     // UART: work only on the stdin poll tick or while a transmit / interrupt is in flight; idle it changes nothing.
     if (cpu.stdin_poll_due || cpu.uart.thr_pending || cpu.uart.thre_ip || cpu.uart.interrupting)
         cpu.uartTick();
