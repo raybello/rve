@@ -83,12 +83,22 @@ class App
     uint64_t last_gpu_frame_gen = 0;      // last VirtioGpu::frameGeneration() uploaded
 
     // Dedicated guest-display window (M2 of the GUI-userspace plan): shows exactly the virtio-gpu
-    // scanout at native resolution, sharing the main GL context. A normal decorated OS window
-    // (title bar, draggable, closable via its own close button), not borderless. Native builds
-    // only -- SDL2 on Emscripten/wasm has no multi-window support, so createDisplayPanel() below
-    // covers the same role there via a docked ImGui panel instead.
+    // scanout at native resolution. A normal decorated OS window (title bar, draggable, closable
+    // via its own close button), not borderless. Native builds only -- SDL2 on Emscripten/wasm
+    // has no multi-window support, so createDisplayPanel() below covers the same role there via a
+    // docked ImGui panel instead.
+    //
+    // Has its own SDL_GLContext (sharing GL objects -- textures, in particular fb_texture_id --
+    // with window_context via SDL_GL_SHARE_WITH_CURRENT_CONTEXT), rather than reusing
+    // window_context across both windows via repeated SDL_GL_MakeCurrent. On macOS, repeatedly
+    // re-targeting one NSOpenGLContext at a different NSView every frame is a known-fragile
+    // pattern: the texture upload succeeds (confirmed via frameGeneration() advancing), but the
+    // display_window's own presented surface stops picking up new frames, leaving it showing
+    // stale content indefinitely. A context genuinely dedicated to each window's view, with GL
+    // objects shared via the share-group instead of re-targeting, is the robust fix.
 #ifndef __EMSCRIPTEN__
     SDL_Window *display_window = nullptr;
+    SDL_GLContext display_gl_context = nullptr;
     GLuint display_shader_program = 0;
     GLuint display_vao = 0, display_vbo = 0;
     int display_win_w = 0, display_win_h = 0;

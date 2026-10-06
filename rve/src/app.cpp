@@ -450,7 +450,20 @@ void App::createDisplayWindow()
     display_win_w = w;
     display_win_h = h;
 
-    SDL_GL_MakeCurrent(display_window, window_context);
+    // A genuinely separate GL context for this window, sharing GL objects (just fb_texture_id,
+    // in practice) with window_context via the share hint below -- not window_context retargeted
+    // at a second NSView every frame. See the header comment on display_gl_context for why.
+    SDL_GL_MakeCurrent(window, window_context);
+    SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1);
+    display_gl_context = SDL_GL_CreateContext(display_window);
+    if (!display_gl_context)
+    {
+        printf("Error: SDL_GL_CreateContext(display): %s\n", SDL_GetError());
+        SDL_DestroyWindow(display_window);
+        display_window = nullptr;
+        return;
+    }
+    SDL_GL_MakeCurrent(display_window, display_gl_context);
 
     std::string vsrc = std::string(glsl_version) +
         "\nin vec2 aPos;\nin vec2 aUV;\nout vec2 vUV;\n"
@@ -498,12 +511,14 @@ void App::destroyDisplayWindow()
 {
     if (!display_window)
         return;
-    SDL_GL_MakeCurrent(display_window, window_context);
+    SDL_GL_MakeCurrent(display_window, display_gl_context);
     if (display_vbo) glDeleteBuffers(1, &display_vbo);
     if (display_vao) glDeleteVertexArrays(1, &display_vao);
     if (display_shader_program) glDeleteProgram(display_shader_program);
     display_vbo = display_vao = display_shader_program = 0;
     SDL_GL_MakeCurrent(window, window_context);
+    SDL_GL_DeleteContext(display_gl_context);
+    display_gl_context = nullptr;
     SDL_DestroyWindow(display_window);
     display_window = nullptr;
 }
@@ -526,7 +541,7 @@ void App::renderDisplayWindow()
         display_win_h = gh;
     }
 
-    SDL_GL_MakeCurrent(display_window, window_context);
+    SDL_GL_MakeCurrent(display_window, display_gl_context);
     glViewport(0, 0, display_win_w, display_win_h);
     glClear(GL_COLOR_BUFFER_BIT);
     glUseProgram(display_shader_program);
@@ -536,6 +551,7 @@ void App::renderDisplayWindow()
     glBindVertexArray(display_vao);
     glDrawArrays(GL_TRIANGLES, 0, 6);
     glBindVertexArray(0);
+    glFinish();
     SDL_GL_SwapWindow(display_window);
     SDL_GL_MakeCurrent(window, window_context);
 }
