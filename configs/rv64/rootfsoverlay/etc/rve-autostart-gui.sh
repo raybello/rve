@@ -39,11 +39,19 @@ chroot "$MNT" /bin/sh -c '
   }
   # Neither /tmp nor /run is a tmpfs on this rootfs (check /etc/fstab -- only /media/cdrom and
   # /media/usb are listed), so both are plain directories on the persistent disk image and
-  # anything written there survives a reboot of the SAME image. A leftover wayland-0 socket/lock
-  # or seatd.sock from an earlier boot can make a fresh labwc/seatd instance fail to cleanly
-  # (re)bind, leaving a socket file that exists (satisfying wait_for below) but refuses every
-  # connection -- wipe them first so each boot starts from a genuinely clean slate.
-  rm -rf /tmp/xdg /run/seatd.sock
+  # anything written there survives a reboot of the SAME image. Stale state left over from an
+  # earlier boot can make a fresh daemon fail to cleanly (re)bind, even though the stale file
+  # still exists (satisfying wait_for below) -- wipe it all first so each boot starts from a
+  # genuinely clean slate:
+  #   - /tmp/xdg, /run/seatd.sock: a leftover wayland-0 socket/lock or seatd.sock makes
+  #     labwc/seatd refuse every connection attempt.
+  #   - /tmp/.X11-unix, /tmp/.X*-lock: labwc spawns Xwayland by default (we never use it --
+  #     foot is a pure Wayland client -- but labwc does not have a runtime flag to disable it).
+  #     Xwayland picks the first free display number 0..32 by scanning for an unused lock file;
+  #     with ~34 stale lock files accumulated from repeated boots of this same disk image it
+  #     finds none free, logs "No display available in the first 33" / "cannot create xwayland
+  #     server", and labwc exits instead of just continuing without X11 support.
+  rm -rf /tmp/xdg /run/seatd.sock /tmp/.X11-unix /tmp/.X*-lock
   mkdir -p /tmp/xdg
   chmod 700 /tmp/xdg
   export XDG_RUNTIME_DIR=/tmp/xdg
