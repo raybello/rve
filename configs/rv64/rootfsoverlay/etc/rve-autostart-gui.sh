@@ -37,6 +37,13 @@ chroot "$MNT" /bin/sh -c '
       sleep 0.1
     done
   }
+  # Neither /tmp nor /run is a tmpfs on this rootfs (check /etc/fstab -- only /media/cdrom and
+  # /media/usb are listed), so both are plain directories on the persistent disk image and
+  # anything written there survives a reboot of the SAME image. A leftover wayland-0 socket/lock
+  # or seatd.sock from an earlier boot can make a fresh labwc/seatd instance fail to cleanly
+  # (re)bind, leaving a socket file that exists (satisfying wait_for below) but refuses every
+  # connection -- wipe them first so each boot starts from a genuinely clean slate.
+  rm -rf /tmp/xdg /run/seatd.sock
   mkdir -p /tmp/xdg
   chmod 700 /tmp/xdg
   export XDG_RUNTIME_DIR=/tmp/xdg
@@ -52,28 +59,20 @@ chroot "$MNT" /bin/sh -c '
   WLR_RENDERER=pixman labwc >/tmp/labwc.log 2>&1 &
   wait_for /tmp/xdg/wayland-0 50         # ~5s cap: labwc is the slowest step to come up
 
-  # KNOWN ISSUE, not just a startup race: labwc accepts no Wayland client at all until the guest
-  # receives a real input event (confirmed by driving labwc with full -d debug logging -- it goes
-  # completely silent, forever, right after allocating its second swapchain buffer, and foot fails
-  # with "failed to connect to wayland; no compositor running?" on every retry even across 80
-  # attempts / 40s of continuous retrying with no input). This looks like a deadlock specific to
-  # a non-modeset atomic commit against this devices virtio-gpu/DRM emulation -- the boot-time
-  # fbcon path commits fine throughout boot, so it is not virtio-gpu command completion in
-  # general, just whatever labwc needs for its first real frame that fbcon does not exercise.
-  # Root-causing that further needs kernel-driver-level work, not a script change -- see the PR
-  # description. NOTE: no apostrophes in this block -- it is embedded in a single-quoted
-  # chroot sh -c string, and a literal quote here ends that string early and breaks everything
-  # below it with a syntax error (learned the hard way -- keep comments in here contraction-free).
-  #
-  # Until that is fixed, retry foots launch indefinitely (not capped) at a cheap, low-frequency
-  # interval: as soon as the user provides any input (mouse/keyboard) to the guest display window,
-  # labwc unsticks and the very next retry succeeds, so the terminal just appears on its own a
-  # moment after that first click/keypress -- no manual restart or reboot needed.
-  while true; do
+  # The wayland-0 socket path can exist slightly before labwc has fully worked through the rest
+  # of its startup (DRM connector/mode scan, buffer allocation) and is ready to accept a client --
+  # NOTE: no apostrophes in this block -- it is embedded in a single-quoted chroot sh -c string,
+  # and a literal quote here ends that string early and breaks everything below it with a syntax
+  # error (learned the hard way -- keep comments in here contraction-free). Retry the launch
+  # itself a bounded number of times rather than trusting a single well-timed attempt: if foot
+  # exits within 0.5s it almost certainly failed to connect, not that the user closed a
+  # genuinely-opened terminal that fast.
+  i=0
+  while [ "$i" -lt 20 ]; do
     WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/tmp/xdg foot >/tmp/foot.log 2>&1 &
     FOOTPID=$!
-    sleep 1
+    sleep 0.5
     kill -0 "$FOOTPID" 2>/dev/null && break
-    sleep 1
+    i=$((i + 1))
   done
 '
