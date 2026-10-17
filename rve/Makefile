@@ -218,10 +218,11 @@ linux: all linux-clean linux-dl
 
 # RV64 Linux (OpenSBI + Sv39 kernel built by `make build ARCH=rv64`, see docker/container.mk)
 LINUX64_IMAGE = $(ASSETS_DIR)/linux64/Image
+ALPINE_IMAGE = $(ASSETS_DIR)/alpine-rve.img
 
 lnx64:
 	$(MAKE) XLEN=64 all
-	./build64/rve64 -r -b $(LINUX64_IMAGE)
+	./build64/rve64 -r -b $(LINUX64_IMAGE) -D $(ALPINE_IMAGE)
 
 # headless (UART on stdout / stdin)
 linuxn64:

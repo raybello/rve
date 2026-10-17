@@ -63,6 +63,7 @@ make isa ISA_TEST=rv32ui-p-add   # run a single test in the GUI
 ```sh
 rve/build64/rve64 -n -t -e rve/assets/isa-test-rv64/rv64ui-p-add   # exit 0=pass, 1=fail, 2=timeout
 rve/build64/rve64 -n -t -T -e <test>                                # -T traces every instruction
+rve/build64/rve64 -r -b assets/linux64/Image -D assets/alpine-rve.img # Linux + Alpine
 ```
 
 **Compile rv64 ISA tests from source** (optional — pre-built binaries included): `make isa-tests64`
