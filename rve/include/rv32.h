@@ -7,6 +7,7 @@
 #include "virtio_blk.h"
 #include "virtio_gpu.h"
 #include "virtio_input.h"
+#include "virtio_rng.h"
 #include <cstdint>
 #include <stdio.h>
 #include <assert.h>
@@ -285,6 +286,10 @@ public:
     VirtioInput vinput;
     bool input_dirty = true; // set on any guest access to the virtio-input MMIO window; see net_dirty
     void inputTick();
+    // virtio-rng (entropy device, fixes the CRNG-init boot stall -- see virtio_rng.h)
+    VirtioRng vrng;
+    bool rng_dirty = true; // set on any guest access to the virtio-rng MMIO window; see net_dirty
+    void rngTick();
     // RTC registers (ds1742 compatible)
     u32 rtc0, rtc1;
     // SYSCON (poweroff/reboot): set when 0x11100000 is written

@@ -8,8 +8,11 @@
 #   output.img       default: rve/assets/alpine-rve.img
 #   size              default: 768M  (truncate -s syntax, e.g. 1G)
 #   alpine-version    default: 3.20  (a tag under docker.io/library/alpine)
-#   packages...       default: labwc foot eudev seatd (space-separated apk package names appended
-#                     after these; pass an empty string "" to keep just the base rootfs, as M1 did)
+#   packages...       default: labwc foot eudev seatd font-dejavu (space-separated apk package names
+#                     appended after these; pass an empty string "" to keep just the base rootfs, as
+#                     M1 did). font-dejavu matters: without any font installed, foot's font matcher
+#                     (fcft) fails to resolve "monospace" and foot segfaults on startup instead of
+#                     handling that gracefully -- this is not optional for a working terminal.
 #
 # Requires Docker with riscv64 emulation registered (one-time, if not already done):
 #   docker run --privileged --rm tonistiigi/binfmt --install riscv64
@@ -24,7 +27,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 OUT=${1:-$ROOT/rve/assets/alpine-rve.img}
 SIZE=${2:-768M}
 ALPINE_VERSION=${3:-3.20}
-PACKAGES=${4:-labwc foot eudev seatd}
+PACKAGES=${4:-labwc foot eudev seatd font-dejavu}
 
 WORK=$ROOT/.buildscratch
 mkdir -p "$WORK"

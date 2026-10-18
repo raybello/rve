@@ -38,11 +38,14 @@ struct AppSettings
     // Window settings
     bool show_demo_window = false;      // Imgui Demo
     bool show_plot_demo_window = false; // Implot Demo
-    bool show_terminal_window = true;
     bool show_cpu_state = true;
     bool show_disasm = true;
     bool show_profiler = false;         // Profiling metrics (ImPlot)
-    bool show_display_window = false;   // Dedicated undecorated guest-display window (native only)
+    // "Guest Display": a real, decorated OS window on native (movable, closable via its own
+    // close button); wasm has no OS-level multi-window support, so there it's a regular docked
+    // ImGui panel instead. Same virtio-gpu framebuffer either way -- see createDisplayPanel()
+    // (Emscripten) / createDisplayWindow() (native). On by default on both platforms.
+    bool show_display_window = true;
 
     // Emulator settings
 };
@@ -79,11 +82,23 @@ class App
     int fb_tex_w = FB_W, fb_tex_h = FB_H; // currently-allocated texture size
     uint64_t last_gpu_frame_gen = 0;      // last VirtioGpu::frameGeneration() uploaded
 
-    // Dedicated undecorated guest-display window (M2 of the GUI-userspace plan): shows exactly
-    // the virtio-gpu scanout at native resolution, sharing the main GL context. Off by default,
-    // toggled from the "Views" menu. Native builds only -- not meaningful for Emscripten/wasm.
+    // Dedicated guest-display window (M2 of the GUI-userspace plan): shows exactly the virtio-gpu
+    // scanout at native resolution. A normal decorated OS window (title bar, draggable, closable
+    // via its own close button), not borderless. Native builds only -- SDL2 on Emscripten/wasm
+    // has no multi-window support, so createDisplayPanel() below covers the same role there via a
+    // docked ImGui panel instead.
+    //
+    // Has its own SDL_GLContext (sharing GL objects -- textures, in particular fb_texture_id --
+    // with window_context via SDL_GL_SHARE_WITH_CURRENT_CONTEXT), rather than reusing
+    // window_context across both windows via repeated SDL_GL_MakeCurrent. On macOS, repeatedly
+    // re-targeting one NSOpenGLContext at a different NSView every frame is a known-fragile
+    // pattern: the texture upload succeeds (confirmed via frameGeneration() advancing), but the
+    // display_window's own presented surface stops picking up new frames, leaving it showing
+    // stale content indefinitely. A context genuinely dedicated to each window's view, with GL
+    // objects shared via the share-group instead of re-targeting, is the robust fix.
 #ifndef __EMSCRIPTEN__
     SDL_Window *display_window = nullptr;
+    SDL_GLContext display_gl_context = nullptr;
     GLuint display_shader_program = 0;
     GLuint display_vao = 0, display_vbo = 0;
     int display_win_w = 0, display_win_h = 0;
@@ -109,7 +124,8 @@ public:
     void handleEvents();
     // Windows
     void createMenubar();
-    void createTerminal();
+    void updateFramebufferTexture();
+    void createDisplayPanel();
     void createCpuState();
     void createDisasm();
     void createProfiler();

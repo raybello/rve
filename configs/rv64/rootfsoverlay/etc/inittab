@@ -1,0 +1,43 @@
+# /etc/inittab
+#
+# Copyright (C) 2001 Erik Andersen <andersen@codepoet.org>
+#
+# Note: BusyBox init doesn't support runlevels.  The runlevels field is
+# completely ignored by BusyBox init. If you want runlevels, use
+# sysvinit.
+#
+# Format for each entry: <id>:<runlevels>:<action>:<process>
+#
+# id        == tty to run on, or empty for /dev/console
+# runlevels == ignored
+# action    == one of sysinit, respawn, askfirst, wait, and once
+# process   == program to run
+
+# Startup the system
+::sysinit:/bin/mkdir -p /run/lock/subsys /dev/shm /dev/pts
+::sysinit:/bin/mount -a
+::sysinit:/bin/hostname -F /etc/hostname
+# now run any rc scripts
+# Not using rc scripts.
+# ::sysinit:/etc/init.d/rcS
+
+# rv64-only: launch the Alpine graphical session (if a disk is attached via -D) as a
+# fire-and-forget `once` action -- init does not wait for it, so it can never delay the
+# console/tty1 login prompts below even if the guest disk isn't attached or the GUI chain fails.
+::once:/etc/rve-autostart-gui.sh
+
+# Put a getty on the serial port
+console::sysinit:echo "Welcome to RVE Linux"
+console::respawn:/bin/login -f root
+
+tty1::sysinit:echo "Welcome to RVE Linux"
+tty1::respawn:/bin/login -f root
+#console::respawn:/bin/getty -L -n -L console 0 vt100 # GENERIC_SERIAL
+
+# Stuff to do for the 3-finger salute
+#::ctrlaltdel:/sbin/reboot
+
+# Stuff to do before rebooting  -> No RC Scripts.
+# ::shutdown:/etc/init.d/rcK
+#::shutdown:/sbin/swapoff -a
+::shutdown:/bin/umount -a -r

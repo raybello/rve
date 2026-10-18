@@ -24,7 +24,7 @@ BR2_GLOBAL_PATCH_DIR="/workspace/project/patches"
 BR2_TARGET_GENERIC_HOSTNAME="rve"
 BR2_TARGET_GENERIC_ISSUE="Welcome to RVE Buildroot (rv64)"
 BR2_SYSTEM_DHCP=""
-BR2_ROOTFS_OVERLAY="/workspace/project/configs/rootfsoverlay"
+BR2_ROOTFS_OVERLAY="/workspace/project/configs/rootfsoverlay /workspace/project/configs/rv64/rootfsoverlay"
 # builds hello_linux / pi / framebuff (the rv32 image's custom apps) into /root
 BR2_ROOTFS_POST_BUILD_SCRIPT="/workspace/project/configs/rv64/post_build.sh"
 
