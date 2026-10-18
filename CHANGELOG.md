@@ -1,5 +1,18 @@
 # Changelog
 
+## [v2026.10.18] - 2026-10-18
+
+- Merge pull request #21 from raybello/gui-userspace
+- rv64: boot Alpine disk image in lnx64 target, document the -D flag
+- rv64: clear stale Xwayland locks too -- fixes "cannot create xwayland server"
+- rv64: give the guest-display window its own GL context on native builds
+- rv64: fix foot connection failures by clearing stale socket state each boot
+- rv64: fix autostart script crash, self-heal foot after labwc's connection deadlock
+- rv64: add virtio-rng to fix CRNG-init boot stall (no more mash-keys-to-boot)
+- rv64: remove redundant framebuffer panel, decorate guest window, speed up autostart
+- rv64: fix foot/fcft font crash and devpts PTY failure, auto-boot GUI
+
+
 ## [v2026.09.28] - 2026-09-28
 
 - Merge pull request #20 from raybello/rvc-decode
