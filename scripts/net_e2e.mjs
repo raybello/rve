@@ -88,7 +88,11 @@ try {
     }
     expect('closed port is refused', await sh('echo | nc 10.0.2.2 1 2>&1; echo rc=$?'), /refused|rc=[1-9]/i);
   } else {
-  expect('DNS: foo.test resolves', await sh('nslookup foo.test 10.0.2.3'), /93\.184\.216\.34/);
+  // The very first DNS exchange after DHCP occasionally loses its reply (seen twice in CI,
+  // all later queries fine). Capture stderr too so a retry that still fails shows why.
+  let dnsOut = await sh('nslookup foo.test 10.0.2.3 2>&1');
+  if (!/93\.184\.216\.34/.test(dnsOut)) dnsOut = await sh('nslookup foo.test 10.0.2.3 2>&1');
+  expect('DNS: foo.test resolves', dnsOut, /93\.184\.216\.34/);
 
   expect('DNS: unknown name fails', await sh('nslookup nx.example 10.0.2.3 2>&1'), /NXDOMAIN|can't resolve|not found|No answer/i);
   expect('ping resolved host', await sh('ping -c 2 -W 3 foo.test 2>&1'), /2 packets received|0% packet loss/);
